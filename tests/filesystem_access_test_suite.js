@@ -273,6 +273,34 @@
         }
     }, { category: 'PathMapping' });
 
+    TestRunner.addTest('WindowsPathMappingService: stripFileUriPrefix handles whitespace and slashes', function() {
+        const cases = [
+            {
+                input: '  file:///C:/Users/Example  ',
+                expected: 'C:/Users/Example'
+            },
+            {
+                input: 'FILE://d:/projects',
+                expected: 'd:/projects'
+            },
+            {
+                input: 'file:////C:/Extra/Slashes',
+                expected: 'C:/Extra/Slashes'
+            },
+            {
+                input: 'C:/NoPrefix/Path',
+                expected: 'C:/NoPrefix/Path'
+            }
+        ];
+
+        cases.forEach(({ input, expected }) => {
+            const result = stripFileUriPrefix(input);
+            if (result !== expected) {
+                throw new Error(`stripFileUriPrefix(${input}) expected ${expected}, got ${result}`);
+            }
+        });
+    }, { category: 'PathMapping' });
+
     // ===========================
     // PATH VALIDATION TESTS
     // ===========================
