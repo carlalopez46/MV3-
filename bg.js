@@ -4,7 +4,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 //
 // Config
-/* global FileSyncBridge, afio, communicator */
+/* global FileSyncBridge, afio, communicator, registerSharedBackgroundHandlers */
 "use strict";
 
 //
