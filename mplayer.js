@@ -199,6 +199,8 @@ MacroPlayer.prototype.deepCopy = function (value) {
 };
 
 MacroPlayer.prototype.compileExpressions = function () {
+    if (this.RegExpTable && this.RegExpTable.compiled) return;
+
     this.RegExpTable = Object.assign({}, MacroPlayer.prototype.RegExpTable);
     for (var x in this.RegExpTable) {
         try {
@@ -1075,17 +1077,21 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
         case "!file_profiler": if (param.toLowerCase() == "no") { this.writeProfiler = false; this.profiler.file = null; } else { if (!this.afioIsInstalled) throw new RuntimeError("!FILE_PROFILER requires File IO", 660); this.writeProfilerData = true; this.profiler.enabled = true; this.profiler.file = param; } break;
         case "!linenumber_delta": var x = imns.s2i(param); if (isNaN(x) || x > 0) throw new BadParameter("!LINENUMBER_DELTA negative int or zero"); this.linenumber_delta = x; break;
         case "!useragent": if (!this.userAgent) chrome.webRequest.onBeforeSendHeaders.addListener(this._onBeforeSendHeaders, { windowId: this.win_id, urls: ["<all_urls>"] }, ["blocking", "requestHeaders"]); this.userAgent = param; break;
-        default:
+        default: {
             const varMatch = this.limits.varsRe.exec(cmd[1]);
             if (varMatch) {
                 const idx = imns.s2i(varMatch[1]);
                 this.vars[idx] = param;
                 this.varManager.setVar(`VAR${idx}`, param);
             } else if (/^!\S+$/.test(cmd[1])) {
-                const cleaned = cmd[1].replace(/^!/, '');
-                this.setUserVar(cleaned, param);
-                if (this.varManager) {
-                    this.varManager.setVar(cleaned, param);
+                if (/^!var/i.test(cmd[1])) {
+                    const cleaned = cmd[1].replace(/^!/, '');
+                    this.setUserVar(cleaned, param);
+                    if (this.varManager) {
+                        this.varManager.setVar(cleaned, param);
+                    }
+                } else {
+                    throw new Error("Unsupported variable: " + cmd[1]);
                 }
             } else {
                 this.setUserVar(cmd[1], param);
@@ -1093,6 +1099,7 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
                     this.varManager.setVar(cmd[1], param);
                 }
             }
+        }
     }
     this.next("SET");
 };
@@ -1233,7 +1240,8 @@ MacroPlayer.prototype.ActionTable["version"] = function (cmd) { this.next("VERSI
 MacroPlayer.prototype.RegExpTable["run"] = "^macro\\s*=\\s*(" + im_strre + ")\\s*$";
 MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
     const mplayer = this;
-    const macroPath = imns.unwrap(this.expandVariables(cmd[1], "run1"));
+    const macroPathRaw = imns.unwrap(this.expandVariables(cmd[1], "run1"));
+    const macroPath = macroPathRaw && !/\.iim$/i.test(macroPathRaw) ? `${macroPathRaw}.iim` : macroPathRaw;
 
     if (typeof this.compileExpressions === 'function') {
         this.compileExpressions();
@@ -1319,7 +1327,7 @@ MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
         var source = result ? result.source : "";
 
         const savedLocalContext = (mplayer.varManager && typeof mplayer.varManager.snapshotLocalContext === 'function')
-            ? mplayer.varManager.snapshotLocalContext()
+            ? mplayer.deepCopy(mplayer.varManager.snapshotLocalContext())
             : null;
         const savedLoopStack = mplayer.deepCopy(mplayer.loopStack || []);
         const isolatedLoopStack = mplayer.deepCopy(savedLoopStack || []);
@@ -1337,7 +1345,6 @@ MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
         };
         mplayer.runFrameStack.push(runFrame);
         mplayer.runNestLevel = runFrame.savedRunNestLevel + 1;
-        mplayer._suppressAutoPlay = true;
 
         var savedState = {
             source: mplayer.source,
@@ -1373,16 +1380,22 @@ MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
 
         if (typeof source === 'string' && source.length) {
             source.split('\n').forEach(function (line) {
-                const setMatch = /^\s*set\s+(\S+)\s+(.+)$/i.exec(line);
+                // Match: SET var "value with spaces"  or  SET var value
+                const setMatch = /^\s*set\s+(\S+)\s+(?:"((?:[^"\\]|\\.)*)"|(.+))$/i.exec(line);
                 if (!setMatch) return;
                 const varNameRaw = setMatch[1];
-                const resolvedValue = imns.unwrap(mplayer.expandVariables(setMatch[2], 'run-set-inline'));
+                const rawValue = setMatch[2] !== undefined && setMatch[2] !== null
+                    ? setMatch[2].replace(/\\"/g, '"')
+                    : setMatch[3];
+                const resolvedValue = imns.unwrap(mplayer.expandVariables(rawValue, 'run-set-inline'));
                 const varIndexMatch = mplayer.limits && mplayer.limits.varsRe ? mplayer.limits.varsRe.exec(varNameRaw) : null;
                 if (varIndexMatch) {
                     const idx = imns.s2i(varIndexMatch[1]);
                     mplayer.vars[idx] = resolvedValue;
-                    mplayer.varManager.setVar(`VAR${idx}`, resolvedValue);
-                } else {
+                    if (mplayer.varManager) {
+                        mplayer.varManager.setVar(`VAR${idx}`, resolvedValue);
+                    }
+                } else if (mplayer.varManager) {
                     mplayer.varManager.setVar(varNameRaw.replace(/^!/, ''), resolvedValue);
                 }
             });
@@ -1933,15 +1946,18 @@ MacroPlayer.prototype.parseMacro = function () {
         var m = lines[i].match(linenumber_delta_re);
         if (m) { this.linenumber_delta = imns.s2i(m[1]); continue; }
         if (lines[i].match(comment)) continue;
-        if (/^\s*(\w+)(?:\s+(.*))?$/.test(lines[i])) {
-            var command = RegExp.$1.toLowerCase();
-            var cmdArgs = RegExp.$2 ? RegExp.$2 : "";
+        const parsedLine = /^\s*(\w+)(?:\s+(.*))?$/.exec(lines[i]);
+        if (parsedLine) {
+            var command = parsedLine[1].toLowerCase();
+            var cmdArgs = parsedLine[2] ? parsedLine[2] : "";
             if (!(command in this.RegExpTable)) {
                 this.compileExpressions();
             }
-            if (!(command in this.RegExpTable)) continue;
+            if (!(command in this.RegExpTable)) {
+                throw new SyntaxError("Unknown macro command '" + command + "' at line " + (i + 1 + this.linenumber_delta));
+            }
             var args = this.RegExpTable[command].exec(cmdArgs);
-            if (!args) continue;
+            if (!args) throw new SyntaxError("wrong format of " + command.toUpperCase() + " command" + " at line " + (i + 1 + this.linenumber_delta));
             this.actions.push({ name: command, args: args, line: i + 1 });
             this.checkFreewareLimits("lines", this.actions.length)
         } else { continue; }
