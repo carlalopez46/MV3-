@@ -242,9 +242,37 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 
     CSRecorder.prototype.saveAction = function (str, extra) {
+        if (!this.recording) {
+            console.warn('[CSRecorder] Ignoring saveAction while not recording', { url: window.location.href });
+            return;
+        }
+
+        if (typeof str !== 'string' || str.length === 0) {
+            console.warn('[CSRecorder] Ignoring empty action payload', { url: window.location.href });
+            return;
+        }
+
         console.log("[DEBUG] saveAction called:", str, extra);
         connector.postMessage(
-            "record-action", { action: str, extra: extra || null }
+            "record-action", { action: str, extra: extra || null },
+            function (response) {
+                if (!response || response.ok === true) {
+                    return;
+                }
+
+                if (response.error) {
+                    logWarning('[CSRecorder] record-action was not accepted by background', {
+                        url: window.location.href,
+                        error: response.error
+                    });
+                    return;
+                }
+
+                logWarning('[CSRecorder] record-action returned an unexpected response', {
+                    url: window.location.href,
+                    response: response
+                });
+            }
         );
     };
 
