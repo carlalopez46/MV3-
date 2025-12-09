@@ -977,14 +977,14 @@ Recorder.prototype.onNavigation = function (details) {
             const recordAddressBarGoto = function (reason) {
                 const lastRecorded = recorder.lastTabUrls.get(details.tabId);
 
-                if (lastRecorded === tab.url) {
-                    console.log(`[DEBUG-REC] Skipping duplicate URL GOTO for ${reason}:`, tab.url);
+                if (lastRecorded === details.url) {
+                    console.log(`[DEBUG-REC] Skipping duplicate URL GOTO for ${reason}:`, details.url);
                     return;
                 }
 
-                recorder.lastTabUrls.set(details.tabId, tab.url);
-                console.log(`[DEBUG-REC] Recording URL GOTO=${tab.url} (${reason})`);
-                recorder.recordAction("URL GOTO=" + tab.url);
+                recorder.lastTabUrls.set(details.tabId, details.url);
+                console.log(`[DEBUG-REC] Recording URL GOTO=${details.url} (${reason})`);
+                recorder.recordAction("URL GOTO=" + details.url);
             };
 
             switch (details.transitionType) {

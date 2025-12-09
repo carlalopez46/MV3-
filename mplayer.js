@@ -316,10 +316,10 @@ MacroPlayer.prototype.ActionTable['run'] = async function (cmd) {
     }
 
     const extensionMatch = macroNameRaw.match(/\.([^\\/]+)$/);
-    const macroHasExtension = Boolean(extensionMatch && extensionMatch.index > 0);
+    const macroHasExtension = Boolean(extensionMatch);
     const macroCandidates = macroHasExtension
         ? [macroNameRaw]
-        : [`${macroNameRaw}.iim`, macroNameRaw].filter(Boolean);
+        : [`${macroNameRaw}.iim`, macroNameRaw];
 
     const basePath = (this.macrosFolder && this.macrosFolder.path)
         ? this.macrosFolder.path.replace(/\/$/, '')
