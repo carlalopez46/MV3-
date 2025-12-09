@@ -974,16 +974,27 @@ Recorder.prototype.onNavigation = function (details) {
             console.log("[DEBUG-REC] Recording BACK command");
             recorder.recordAction("BACK");
         } else {
+            const recordAddressBarGoto = function (reason) {
+                const lastRecorded = recorder.lastTabUrls.get(details.tabId);
+
+                if (lastRecorded === details.url) {
+                    console.log(`[DEBUG-REC] Skipping duplicate URL GOTO for ${reason}:`, details.url);
+                    return;
+                }
+
+                recorder.lastTabUrls.set(details.tabId, details.url);
+                console.log(`[DEBUG-REC] Recording URL GOTO=${details.url} (${reason})`);
+                recorder.recordAction("URL GOTO=" + details.url);
+            };
+
             switch (details.transitionType) {
                 case "typed": case "auto_bookmark":
-                    console.log("[DEBUG-REC] Recording URL GOTO=" + tab.url + " (typed/bookmark)");
-                    recorder.recordAction("URL GOTO=" + tab.url);
+                    recordAddressBarGoto("typed/bookmark");
                     break;
                 case "link": case "generated":
                     if (details.transitionQualifiers.length &&
                         details.transitionQualifiers[0] == "from_address_bar") {
-                        console.log("[DEBUG-REC] Recording URL GOTO=" + tab.url + " (from address bar)");
-                        recorder.recordAction("URL GOTO=" + tab.url);
+                        recordAddressBarGoto("from address bar");
                     } else {
                         console.log("[DEBUG-REC] Ignoring link/generated transition without from_address_bar");
                     }

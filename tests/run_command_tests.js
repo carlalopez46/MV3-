@@ -309,6 +309,27 @@ RunCommandTestSuite.addTest('Path utilities - Windows path detection', async () 
     }
 });
 
+RunCommandTestSuite.addTest('MacroPlayer RUN - macro candidate resolution', async () => {
+    RunCommandTestSuite.assert.isDefined(MacroPlayer, 'MacroPlayer should be defined');
+
+    const player = new MacroPlayer('test-win');
+    const assertCandidates = (input, expected) => {
+        const result = player._buildMacroCandidates(input);
+        RunCommandTestSuite.assert.equal(
+            JSON.stringify(result),
+            JSON.stringify(expected),
+            `Unexpected candidates for "${input}"`
+        );
+    };
+
+    assertCandidates('macro', ['macro.iim', 'macro']);
+    assertCandidates('macro.iim', ['macro.iim']);
+    assertCandidates('folder.v1/macro', ['folder.v1/macro.iim', 'folder.v1/macro']);
+    assertCandidates('.hidden', ['.hidden']);
+    assertCandidates('nested/.hidden', ['nested/.hidden']);
+    assertCandidates('dir.name/macro.txt', ['dir.name/macro.txt']);
+});
+
 // ============================================
 // エラーハンドリングテスト
 // ============================================
