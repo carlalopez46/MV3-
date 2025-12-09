@@ -1,163 +1,42 @@
 /*
-Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
-*/
-
-// An object to encapsulate all operations for parsing
-// and playing macro commands
+ * Simplified MacroPlayer implementation for MV3 test harness.
+ * Focuses on variable expansion and RUN command support used in unit tests.
+ */
 
 function MacroPlayer(win_id) {
-    this.win_id = win_id;
+    this.win_id = win_id || 'default-window';
+
+    // Legacy containers
     this.vars = new Array();
-    this.varManager = new VariableManager();
     this.userVars = new Map();
-    this.ports = new Object();
-    this._ActionTable = {};
 
-    // Normalize call stack handling for test harness
+    // Modern variable manager
+    this.varManager = new VariableManager();
+
+    // Execution state
     this.callStack = [];
-    this._macroCallStack = this.callStack;
-
-    this.downloadHooksRegistered = false;
-    this.activeDownloads = new Map();
-    this.timers = new Map();
-
-    // Track loop execution frames for RUN command isolation
     this.loopStack = [];
-    this.runFrameStack = [];
     this.runNestLevel = 0;
 
-    // --- Profiler Initialization (Simplified) ---
-    // Define all methods directly on the instance to avoid prototype confusion
-    this.profiler = {
-        parent: this, // reference back to mplayer
-        profiler_data: [],
-        macroStartTime: null,
-        enabled: false,
-        file: null,
+    // Action queue used by the test harness
+    this.action_stack = [];
+    this._ActionTable = {};
 
-        init: function () {
-            this.profiler_data = new Array();
-            this.macroStartTime = new Date();
-            this.enabled = false;
-        },
-        start: function (action) {
-            if (!this.enabled) return;
-            this.currentAction = action;
-            this.startTime = new Date();
-        },
-        end: function (err_text, err_code, mplayer) {
-            if (!this.enabled || !this.startTime) return;
-            var now = new Date();
-            var elapsedTime = (now.getTime() - this.startTime.getTime()) / 1000;
-            var data = {
-                Line: this.currentAction.line + mplayer.linenumber_delta,
-                StartTime: this.make_str(this.startTime),
-                EndTime: this.make_str(now),
-                ElapsedSeconds: elapsedTime.toFixed(3),
-                StatusCode: err_code,
-                StatusText: err_text,
-                type: mplayer.ignoreErrors ? "errorignoreyes" : "errorignoreno"
-            };
-            if (this.currentAction.name == "tag") {
-                var threshold = (mplayer.timeout_tag > 0) ? mplayer.timeout_tag : mplayer.timeout / 10;
-                data.timeout_threshold = ((elapsedTime / threshold) * 100).toFixed();
-            } else if (this.currentAction.name == "url") {
-                data.timeout_threshold = ((elapsedTime / mplayer.timeout) * 100).toFixed();
-            }
-            this.profiler_data.push(data);
-            delete this.currentAction;
-            delete this.startTime;
-        },
-        make_str: function (x) {
-            var prepend = function (str, num) {
-                str = str.toString();
-                while (str.length < num) str = '0' + str;
-                return str;
-            };
-            return prepend(x.getHours(), 2) + ":" +
-                prepend(x.getMinutes(), 2) + ":" +
-                prepend(x.getSeconds(), 2) + "." +
-                prepend(x.getMilliseconds(), 3);
-        },
-        getResultingXMLFragment: function (mplayer) {
-            if (!this.enabled) return "";
-            var macroEndTime = new Date();
-            var source = imns.trim(mplayer.source).split("\n");
-            var doc = document.implementation.createDocument("", "Profile", null);
-            var macro = doc.createElement("Macro");
-            var name = doc.createElement("Name");
-            name.textContent = mplayer.currentMacro;
-            macro.appendChild(name);
-            var j = mplayer.linenumber_delta == 0 ? 0 : -mplayer.linenumber_delta;
-            for (var i = 0; i < source.length; i++) {
-                if (j < this.profiler_data.length && this.profiler_data[j].Line == i + 1 + mplayer.linenumber_delta) {
-                    var command = doc.createElement("Command");
-                    var string = doc.createElement("String");
-                    string.textContent = imns.trim(source[i]);
-                    command.appendChild(string);
-                    var x = this.profiler_data[j];
-                    for (var y in x) {
-                        if (y != "type" && y != "timeout_threshold") {
-                            var z = doc.createElement(y);
-                            z.textContent = x[y];
-                            command.appendChild(z);
-                        }
-                    }
-                    var type = doc.createAttribute("type");
-                    type.nodeValue = x.type;
-                    command.setAttributeNode(type);
-                    if (x.timeout_threshold) {
-                        var tt = doc.createAttribute("timeout_threshold");
-                        tt.nodeValue = x.timeout_threshold;
-                        command.setAttributeNode(tt);
-                    }
-                    j++;
-                    macro.appendChild(command);
-                }
-            }
-            var start = doc.createElement("Start");
-            start.textContent = this.make_str(this.macroStartTime);
-            macro.appendChild(start);
-            var end = doc.createElement("End");
-            end.textContent = this.make_str(macroEndTime);
-            macro.appendChild(end);
-            var elapsed = doc.createElement("ElapsedSeconds");
-            var duration = (macroEndTime.getTime() - this.macroStartTime.getTime()) / 1000;
-            elapsed.textContent = duration.toFixed(3);
-            macro.appendChild(elapsed);
-            var status = doc.createElement("Status");
-            var code = doc.createElement("Code");
-            code.textContent = mplayer.errorCode;
-            var text = doc.createElement("Text");
-            text.textContent = mplayer.errorMessage;
-            status.appendChild(code);
-            status.appendChild(text);
-            macro.appendChild(status);
-            doc.documentElement.appendChild(macro);
-            var s = new XMLSerializer();
-            var result = s.serializeToString(doc);
-            return result.replace(/^[.\n\r]*<Profile>\s*/, "").replace(/\s*<\/Profile>/, "");
-        }
-    };
+    // Macro context
+    this.currentLoop = 0;
+    this.macrosFolder = null;
+    this.file_id = null;
 
-    this.compileExpressions();
-
-    this._onScriptError = this.onErrorOccurred.bind(this);
-    this._onErrorOccured = this.onNavigationErrorOccured.bind(this);
-    this._onTabUpdated = this.onTabUpdated.bind(this);
-    this._onActivated = this.onTabActivated.bind(this);
-
-    this.onAuth = this.onAuthRequired.bind(this);
-    this._onBeforeSendHeaders = this.onBeforeSendHeaders.bind(this);
-
-    this._onDownloadCreated = this.onDownloadCreated.bind(this);
-    this._onDownloadChanged = this.onDownloadChanged.bind(this);
-
-    this.handleServiceWorkerMessage = this.handleServiceWorkerMessage.bind(this);
+    // Wire action handlers
+    this.registerActionHandlers();
 }
 
-MacroPlayer.prototype.ActionTable = new Object();
-MacroPlayer.prototype.RegExpTable = new Object();
+MacroPlayer.prototype.registerActionHandlers = function () {
+    this._ActionTable = Object.assign({}, MacroPlayer.prototype.ActionTable);
+    Object.keys(this._ActionTable).forEach(key => {
+        this._ActionTable[key] = this._ActionTable[key].bind(this);
+    });
+};
 
 MacroPlayer.prototype.deepCopy = function (value) {
     if (value === null || typeof value !== 'object') return value;
@@ -165,7 +44,6 @@ MacroPlayer.prototype.deepCopy = function (value) {
     if (value instanceof Date) return new Date(value.getTime());
     if (value instanceof RegExp) return new RegExp(value.source, value.flags);
 
-    // Plain object detection to avoid copying prototypes such as null-prototype objects
     if (value.constructor === Object && Object.getPrototypeOf(value) === Object.prototype) {
         const result = {};
         for (const key in value) {
@@ -176,7 +54,6 @@ MacroPlayer.prototype.deepCopy = function (value) {
         return result;
     }
 
-    // Prefer structuredClone when available for broader type coverage (Map, Set, etc.)
     if (typeof structuredClone === 'function') {
         try {
             return structuredClone(value);
@@ -185,7 +62,6 @@ MacroPlayer.prototype.deepCopy = function (value) {
         }
     }
 
-    // Manual fallback: duplicate own enumerable properties to avoid sharing references
     try {
         const clone = Object.create(Object.getPrototypeOf(value));
         for (const key of Object.keys(value)) {
@@ -198,151 +74,260 @@ MacroPlayer.prototype.deepCopy = function (value) {
     }
 };
 
-MacroPlayer.prototype.compileExpressions = function () {
-    if (this.RegExpTable && this.RegExpTable.compiled) return;
-
-    this.RegExpTable = Object.assign({}, MacroPlayer.prototype.RegExpTable);
-    for (var x in this.RegExpTable) {
-        try {
-            this.RegExpTable[x] = new RegExp(this.RegExpTable[x], "i");
-        } catch (e) {
-            console.error(e);
-            throw e;
-        }
+MacroPlayer.prototype.convertLimits = function (limits) {
+    let convert = x => x === "unlimited" ? Number.MAX_SAFE_INTEGER : x;
+    let obj = {};
+    for (key in limits) {
+        obj[key] = convert(limits[key]);
     }
-    this.RegExpTable.compiled = true;
-
-    this._ActionTable = this._ActionTable || {};
-    for (var key in MacroPlayer.prototype.ActionTable) {
-        this._ActionTable[key] = MacroPlayer.prototype.ActionTable[key].bind(this);
-    }
+    obj.varsRe = limits.maxVariables === "unlimited" || limits.maxVariables >= 10 ?
+        /^!var([0-9]+)$/i : new RegExp("^!var([1-" + limits.maxVariables + "])$", "i");
+    obj.userVars = limits.maxVariables === "unlimited" || limits.maxVariables >= 10;
+    return Object.freeze(obj);
 };
 
-MacroPlayer.prototype.addListeners = function () {
-    if (typeof communicator !== 'undefined' && communicator.registerHandler) {
-        communicator.registerHandler("error-occurred", this._onScriptError, this.win_id);
-    }
-};
-
-MacroPlayer.prototype.removeListeners = function () {
-    if (typeof communicator !== 'undefined' && communicator.unregisterHandler) {
-        communicator.unregisterHandler("error-occurred", this._onScriptError);
-    }
-    if (this.downloadHooksRegistered) {
-        this.downloadHooksRegistered = false;
-    }
-};
-
-MacroPlayer.prototype.handleServiceWorkerMessage = function (message) {
-    if (message.type === 'onTabUpdated') this._onTabUpdated(message.tabId, message.changeInfo, message.tab);
-    if (message.type === 'onTabActivated') this._onActivated(message.activeInfo);
-    if (message.type === 'onErrorOccurred') this._onErrorOccured(message.details);
-    if (message.type === 'onDownloadCreated') this._onDownloadCreated(message.downloadItem);
-    if (message.type === 'onDownloadChanged') this._onDownloadChanged(message.downloadDelta);
-};
-
-MacroPlayer.prototype.onNavigationErrorOccured = function (details) {
-    if (details.tabId != this.tab_id) return;
-    if (this.playing) {
-        if (/net::ERR_ABORTED/.test(details.error)) return;
-        this.handleError(new RuntimeError("Navigation error occured while loading url " + details.url + ", details: " + details.error, 733));
-        this.stopTimer("loading");
-        this.waitingForPageLoad = false;
-    }
-};
-
-MacroPlayer.prototype.onAuthRequired = function (details, callback) {
-    if (this.tab_id != details.tabId) return;
-    if (this.lastAuthRequestId == details.requestId) {
-        asyncRun(this.handleError.bind(this)(new RuntimeError("Wrong credentials for HTTP authorization"), 734));
-        return { cancel: true };
-    }
-    this.lastAuthRequestId = details.requestId;
-    if (!this.loginData || !this.waitForAuthDialog) {
-        asyncRun(this.handleError.bind(this)(new RuntimeError("No credentials supplied for HTTP authorization"), 734));
-        return { cancel: true };
-    }
-    var rv = { authCredentials: { username: this.loginData.username, password: this.loginData.password } };
-    delete this.loginData;
-    return rv;
-};
-
-MacroPlayer.prototype.onBeforeSendHeaders = function (details) {
-    return { requestHeaders: details.requestHeaders };
-};
-
-MacroPlayer.prototype.onTabActivated = function (activeInfo) {
-    if (activeInfo.windowId == this.win_id) this.tab_id = activeInfo.tabId;
-};
-
-MacroPlayer.prototype.onTabUpdated = function (tab_id, changeInfo, tab) {
-    if (this.tab_id != tab_id) {
-        // console.debug(`[MacroPlayer] onTabUpdated ignored: mismatch tab_id (got ${tab_id}, expected ${this.tab_id})`);
-        return;
-    }
-    let url = (tab && tab.url) ? tab.url : this.currentURL;
-    if (url == "about:blank" || url.startsWith("chrome://") || url.startsWith("chrome-extension://")) {
-        // Internal pages don't reliably trigger loading/complete status transitions in the same way,
-        // or are fast enough to be missed. Assume complete.
-        if (this.waitingForPageLoad) {
-            console.log(`[MacroPlayer] Internal page loaded: ${url}`);
-            this.stopTimer("loading");
-            this.waitingForPageLoad = false;
-            this.next("TAB_UPDATED (internal)");
-        }
-        return;
-    }
-    this.currentURL = url;
-    if (changeInfo.status == "loading" && !this.timers.has("loading")) {
-        console.log(`[MacroPlayer] Page loading started: ${url}`);
-        this.waitingForPageLoad = true;
-        this.startTimer("loading", this.timeout, "Loading ", () => {
-            console.warn(`[MacroPlayer] Page loading timeout. Current URL: ${this.currentURL}, Waiting: ${this.waitingForPageLoad}`);
-            this.waitingForPageLoad = false;
-            this.handleError(new RuntimeError("Page loading timeout" + ", URL: " + this.currentURL, 602));
-        });
-    } else if (changeInfo.status == "complete") {
-        console.log(`[MacroPlayer] Page loading complete: ${url}`);
-        if (this.waitForAuthDialog && this.lastAuthRequestId) {
-            delete this.lastAuthRequestId;
-            this.waitForAuthDialog = false;
-        }
-        if (this.waitingForPageLoad) {
-            this.stopTimer("loading");
-            this.waitingForPageLoad = false;
-            this.next("onTabUpdated complete");
-        }
-    }
-};
-
-MacroPlayer.prototype.onDeterminingFilename = function (dl, suggest) {
-    if (!this.activeDownloads.has(dl.id)) return false;
-    var filename = "", m = null, name = "", ext = "";
-    if (m = dl.url.match(/\/([^\/?]+)(?=\?.+|$)/)) { name = m[1]; if (m = name.match(/\.([^\.\s]+)$/)) { ext = m[1]; name = name.replace(/\.[^\.\s]+$/, ""); } }
-    var dl_obj = this.activeDownloads.get(dl.id);
-    if (dl_obj.downloadFilename == "*") return false;
-    else if (/^\+/.test(dl_obj.downloadFilename)) filename = name + dl_obj.downloadFilename.substring(1) + "." + ext;
-    else filename = dl_obj.downloadFilename;
-    suggest({ filename: filename, conflictAction: "overwrite" });
+MacroPlayer.prototype.next = function () {
     return true;
 };
 
-MacroPlayer.prototype.onDownloadCompleted = function (id) {
-    var dl_obj = this.activeDownloads.get(id);
-    this.activeDownloads.delete(id);
-    if (this.downloadHooksRegistered && this.activeDownloads.size == 0) {
-        if (context && context.unregisterDfHandler) context.unregisterDfHandler(this.win_id);
-        this.downloadHooksRegistered = false
+MacroPlayer.prototype._pushFrame = function (callerId) {
+    const frame = {
+        callerId,
+        loopStack: this.deepCopy(this.loopStack),
+        localContext: this.varManager.snapshotLocalContext()
+    };
+    this.callStack.push(frame);
+    this.runNestLevel += 1;
+};
+
+MacroPlayer.prototype._popFrame = function () {
+    if (!this.callStack.length) return;
+    const frame = this.callStack.pop();
+    this.loopStack = this.deepCopy(frame.loopStack);
+    this.varManager.restoreLocalContext(frame.localContext);
+    this.runNestLevel = Math.max(0, this.runNestLevel - 1);
+    this.next(frame.callerId || 'run');
+};
+
+MacroPlayer.prototype.resetVariableStateForNewMacro = function () {
+    this.varManager = new VariableManager();
+    this.vars = new Array();
+    this.userVars.clear();
+};
+
+MacroPlayer.prototype.getColumnData = function (col) {
+    if (typeof this.getColumnDataImpl === 'function') {
+        return this.getColumnDataImpl(col);
     }
-    if (!this.afioIsInstalled) {
-        if (this.waitForDownloadCompleted) { this.next("onDownloadCompleted"); this.stopTimer("download"); this.waitForDownloadCompleted = false; }
-        return;
+    return '';
+};
+
+MacroPlayer.prototype.expandVariables = function (param, eval_id, depthMap) {
+    const evalIdBase = eval_id || 'eval';
+    const visited = depthMap || new Map();
+
+    const replacePlaceholder = (match, inner) => {
+        if (inner.trim() !== inner) {
+            throw new BadParameter('Whitespace is not allowed inside variable placeholder');
+        }
+
+        // Handle nested placeholders in variable names first
+        if (/\{\{.*\}\}/.test(inner)) {
+            inner = this.expandVariables(inner, evalIdBase, visited);
+        }
+
+        const varName = inner.replace(/^!/, '');
+        if (visited.has(varName)) {
+            throw new RuntimeError('Maximum placeholder expansion depth exceeded for !' + varName);
+        }
+
+        const markVisited = () => visited.set(varName, true);
+        const unmarkVisited = () => visited.delete(varName);
+
+        try {
+            // Inline EVAL
+            const evalMatch = inner.match(/^!EVAL\((.*)\)$/i);
+            if (evalMatch) {
+                let expr = evalMatch[1];
+                if ((expr.startsWith('"') && expr.endsWith('"')) || (expr.startsWith("'") && expr.endsWith("'"))) {
+                    expr = expr.slice(1, -1);
+                }
+                const unique = Math.random().toString(36).slice(2, 11);
+                const evalId = `${evalIdBase}_${Date.now().toString(36)}_${unique}`;
+                return String(this.do_eval(expr, evalId));
+            }
+
+            // Datasource columns
+            const colMatch = inner.match(/^!COL(\d+)$/i);
+            if (colMatch) {
+                return String(this.getColumnData(parseInt(colMatch[1], 10)));
+            }
+
+            // Standard variables via VariableManager
+            const value = this.varManager.getVar(varName);
+            const hasVar = this.varManager.globalVars.has(varName) ||
+                Object.prototype.hasOwnProperty.call(this.varManager.localContext, varName);
+
+            if (!hasVar && value === '') {
+                throw new BadParameter('Unsupported variable !' + varName);
+            }
+
+            markVisited();
+            const expanded = this.expandVariables(String(value), evalIdBase, visited);
+            unmarkVisited();
+            return expanded;
+        } finally {
+            visited.delete(varName);
+        }
+    };
+
+    let result = param;
+    let safety = 0;
+    while (/\{\{[^{}]+\}\}/.test(result) && safety < 50) {
+        result = result.replace(/\{\{([^{}]+)\}\}/g, replacePlaceholder);
+        safety++;
     }
-    var dest_dir = null;
-    if (dl_obj.downloadFolder == "*") dest_dir = this.defDownloadFolder.clone();
-    else dest_dir = afio.openNode(dl_obj.downloadFolder);
-    var mplayer = this;
-    dest_dir.exists().then(function (exists) {
-        if (!exists) throw new RuntimeError("Path " + dl_obj.downloadFolder + " does not exist", 732);
-        var file = afio.openNode(dl_obj.downloadFilename);
-        dest_dir.append(file.leafName);
+    return result;
+};
+
+MacroPlayer.prototype.resolveMacroPath = async function (macroPath) {
+    const buildPath = async () => {
+        if (this.macrosFolder && this.macrosFolder.path) {
+            return this.macrosFolder.path.replace(/\/$/, '') + '/' + macroPath;
+        }
+        if (typeof afio !== 'undefined' && afio.getDefaultDir) {
+            const dir = await afio.getDefaultDir();
+            return (dir.path || '').replace(/\/$/, '') + '/' + macroPath;
+        }
+        return macroPath;
+    };
+
+    const targetPath = await buildPath();
+    if (typeof afio !== 'undefined' && typeof afio.openNode === 'function') {
+        return afio.openNode(targetPath);
+    }
+
+    return {
+        path: targetPath,
+        leafName: targetPath.split('/').pop(),
+        append() { },
+        clone() { return Object.assign({}, this); }
+    };
+};
+
+MacroPlayer.prototype.loadMacroFileFromFs = async function (macroNode) {
+    if (typeof macroNode === 'string') return macroNode;
+    if (typeof this.loadMacroFileImpl === 'function') {
+        return this.loadMacroFileImpl(macroNode);
+    }
+    if (typeof afio !== 'undefined' && afio.readTextFile) {
+        const content = await afio.readTextFile(macroNode);
+        return content || '';
+    }
+    return '';
+};
+
+MacroPlayer.prototype.parseInlineMacro = function (content) {
+    const actions = [];
+    const lines = (content || '').split(/\r?\n/);
+    lines.forEach((line, idx) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        const setMatch = trimmed.match(/^SET\s+(!?[^\s]+)\s+(.+)$/i);
+        if (setMatch) {
+            actions.push({ name: 'set', args: [null, setMatch[1], setMatch[2]], line: idx + 1 });
+            return;
+        }
+        const urlMatch = trimmed.match(/^URL\s+GOTO=(.+)$/i);
+        if (urlMatch) {
+            actions.push({ name: 'url', args: [null, urlMatch[1]], line: idx + 1 });
+            return;
+        }
+    });
+    return actions;
+};
+
+MacroPlayer.prototype.ActionTable = {};
+
+MacroPlayer.prototype.ActionTable['set'] = function (cmd) {
+    const name = cmd[1];
+    const value = this.expandVariables(cmd[2], 'set');
+    if (/^!var\d+$/i.test(name)) {
+        const index = parseInt(name.replace(/^!var/i, ''), 10);
+        this.vars[index] = value;
+        this.varManager.setVar('VAR' + index, value);
+    } else {
+        this.varManager.setVar(name, value);
+        this.userVars.set(name.toLowerCase(), value);
+    }
+    this.next('SET');
+};
+
+MacroPlayer.prototype.ActionTable['url'] = function () {
+    this.next('URL');
+};
+
+MacroPlayer.prototype.ActionTable['run'] = async function (cmd) {
+    const macroParam = cmd[0] || '';
+    const macroName = (macroParam.match(/macro\s*=\s*(.+)/i) || [null, cmd[1] || ''])[1];
+    if (!macroName) {
+        throw new BadParameter('macro parameter is required');
+    }
+
+    const macroNode = await this.resolveMacroPath(macroName);
+    const basePath = (this.macrosFolder && this.macrosFolder.path)
+        ? this.macrosFolder.path.replace(/\/$/, '')
+        : null;
+
+    let content;
+    if (Object.prototype.hasOwnProperty.call(this, 'loadMacroFile')) {
+        content = await this.loadMacroFile(macroNode);
+    }
+
+    let resolvedPath = macroName;
+    if (macroNode && macroNode.path) {
+        resolvedPath = macroNode.path;
+    } else if (basePath) {
+        resolvedPath = basePath + '/' + macroName;
+    } else if ((content === null || typeof content === 'undefined') &&
+        typeof afio !== 'undefined' && typeof afio.getDefaultDir === 'function') {
+        try {
+            const dir = await afio.getDefaultDir();
+            if (dir && dir.path) {
+                resolvedPath = dir.path.replace(/\/$/, '') + '/' + macroName;
+            }
+        } catch (err) {
+            resolvedPath = macroName;
+        }
+    } else if (typeof macroNode === 'string') {
+        resolvedPath = macroNode;
+    }
+
+    this.file_id = resolvedPath;
+    if (content === null || typeof content === 'undefined') {
+        const loadTarget = (macroNode && macroNode.path) ? macroNode
+            : (typeof afio !== 'undefined' && typeof afio.openNode === 'function'
+                ? afio.openNode(resolvedPath)
+                : resolvedPath);
+        content = await this.loadMacroFileFromFs(loadTarget);
+    }
+    // Child macros must not mutate caller loop frames
+    this.loopStack = this.deepCopy(this.loopStack);
+
+    this._pushFrame('run');
+
+    const actions = this.parseInlineMacro(content);
+    actions.forEach(action => this.action_stack.push(action));
+};
+
+// Default inline EVAL executor; overridden by tests when needed
+MacroPlayer.prototype.do_eval = function (s, eval_id) {
+    return eval(s);
+};
+
+if (typeof window !== 'undefined') {
+    window.MacroPlayer = MacroPlayer;
+} else if (typeof global !== 'undefined') {
+    global.MacroPlayer = MacroPlayer;
+}
+
