@@ -1051,12 +1051,18 @@ MacroPlayer.prototype.ActionTable["search"] = function (cmd) {
 MacroPlayer.prototype.RegExpTable["set"] = "^(\\S+)\\s+(" + im_strre + ")\\s*$";
 MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
     var param = imns.unwrap(this.expandVariables(cmd[2], "set2"));
+
+    const ensureVarManager = () => {
+        if (!this.varManager) {
+            this.varManager = new VariableManager();
+        }
+    };
     switch (cmd[1].toLowerCase()) {
         case "!encryption": this.encryptionType = param.toLowerCase() == "no" ? "no" : (param.toLowerCase() == "tmpkey" ? "tmpkey" : "stored"); break;
         case "!downloadpdf": this.shouldDownloadPDF = /^yes$/i.test(param); break;
-        case "!loop": if (this.firstLoop) { var loop = imns.s2i(param); if (isNaN(loop)) throw new BadParameter("!LOOP must be integer"); this.currentLoop = this.checkFreewareLimits("loops", loop); this.varManager.setVar('LOOP', this.currentLoop); if (context && context[this.win_id]) { var panel = context[this.win_id].panelWindow; if (panel && !panel.closed) panel.setLoopValue(this.currentLoop); } } break;
-        case "!extract": this.clearExtractData(); if (!/^null$/i.test(param)) { this.addExtractData(param); this.varManager.setVar('EXTRACT', this.getExtractData()); } else { this.varManager.setVar('EXTRACT', ''); } break;
-        case "!extractadd": this.addExtractData(param); this.varManager.setVar('EXTRACT', this.getExtractData()); break;
+        case "!loop": if (this.firstLoop) { var loop = imns.s2i(param); if (isNaN(loop)) throw new BadParameter("!LOOP must be integer"); this.currentLoop = this.checkFreewareLimits("loops", loop); ensureVarManager(); this.varManager.setVar('LOOP', this.currentLoop); if (context && context[this.win_id]) { var panel = context[this.win_id].panelWindow; if (panel && !panel.closed) panel.setLoopValue(this.currentLoop); } } break;
+        case "!extract": this.clearExtractData(); if (!/^null$/i.test(param)) { this.addExtractData(param); ensureVarManager(); this.varManager.setVar('EXTRACT', this.getExtractData()); } else { ensureVarManager(); this.varManager.setVar('EXTRACT', ''); } break;
+        case "!extractadd": this.addExtractData(param); ensureVarManager(); this.varManager.setVar('EXTRACT', this.getExtractData()); break;
         case "!extract_test_popup": this.shouldPopupExtract = /^yes$/i.test(param); break;
         case "!errorignore": this.ignoreErrors = /^yes$/i.test(param); break;
         case "!datasource": if (!this.afioIsInstalled) throw new RuntimeError("!DATASOURCE requires File IO interface", 660); this.loadDataSource(param).then(() => this.next("SET")).catch(e => this.handleError(e)); return;
@@ -1082,22 +1088,21 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
             if (varMatch) {
                 const idx = imns.s2i(varMatch[1]);
                 this.vars[idx] = param;
+                ensureVarManager();
                 this.varManager.setVar(`VAR${idx}`, param);
             } else if (/^!\S+$/.test(cmd[1])) {
                 if (/^!var/i.test(cmd[1])) {
                     const cleaned = cmd[1].replace(/^!/, '');
                     this.setUserVar(cleaned, param);
-                    if (this.varManager) {
-                        this.varManager.setVar(cleaned, param);
-                    }
+                    ensureVarManager();
+                    this.varManager.setVar(cleaned, param);
                 } else {
                     throw new BadParameter("Unsupported variable: " + cmd[1]);
                 }
             } else {
                 this.setUserVar(cmd[1], param);
-                if (this.varManager) {
-                    this.varManager.setVar(cmd[1], param);
-                }
+                ensureVarManager();
+                this.varManager.setVar(cmd[1], param);
             }
         }
     }
