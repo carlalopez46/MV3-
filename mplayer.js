@@ -21,14 +21,15 @@ function MacroPlayer(win_id) {
     this.loopStack = [];
     this.runNestLevel = 0;
 
-    // Action queue used by the test harness
-    this.action_stack = [];
-    this._ActionTable = {};
-
     // Macro context
+    this.currentMacro = null;
     this.currentLoop = 0;
     this.macrosFolder = null;
     this.file_id = null;
+
+    // Action queue used by the test harness
+    this.action_stack = [];
+    this._ActionTable = {};
 
     // Wire action handlers
     this.registerActionHandlers();
@@ -120,6 +121,21 @@ MacroPlayer.prototype.resetVariableStateForNewMacro = function () {
     this.varManager = new VariableManager();
     this.vars = [];
     this.userVars.clear();
+};
+
+MacroPlayer.prototype._buildMacroCandidates = function (macroNameRaw) {
+    if (!macroNameRaw || typeof macroNameRaw !== 'string') return [];
+    const trimmed = macroNameRaw.trim();
+    if (!trimmed) return [];
+
+    const lastSegment = trimmed.split(/[\\/]/).pop();
+    const macroHasExtension = /\.[^\\/.]+$/.test(lastSegment);
+
+    if (macroHasExtension) {
+        return [trimmed];
+    }
+
+    return [`${trimmed}.iim`, trimmed];
 };
 
 MacroPlayer.prototype.getColumnData = function (col) {
@@ -315,11 +331,10 @@ MacroPlayer.prototype.ActionTable['run'] = async function (cmd) {
         throw new BadParameter('macro parameter is required');
     }
 
-    const extensionMatch = macroNameRaw.match(/\.([^\\/]+)$/);
-    const macroHasExtension = Boolean(extensionMatch);
-    const macroCandidates = macroHasExtension
-        ? [macroNameRaw]
-        : [`${macroNameRaw}.iim`, macroNameRaw];
+    const macroCandidates = this._buildMacroCandidates(macroNameRaw);
+    if (!macroCandidates.length) {
+        throw new BadParameter('macro parameter is required');
+    }
 
     const basePath = (this.macrosFolder && this.macrosFolder.path)
         ? this.macrosFolder.path.replace(/\/$/, '')
@@ -362,7 +377,7 @@ MacroPlayer.prototype.ActionTable['run'] = async function (cmd) {
     const inlineResult = await tryInlineLoad();
     const loadResult = inlineResult || await tryFilesystemLoad();
     if (!loadResult) {
-        throw new RuntimeError('Macro file not found: ' + macroCandidates.join(', '), 781);
+        throw new RuntimeError('Macro file not found: ' + macroCandidates.map(p => `'${p}'`).join(', '), 781);
     }
 
     const { source, fullPath } = loadResult;
@@ -389,4 +404,3 @@ if (typeof window !== 'undefined') {
 } else if (typeof global !== 'undefined') {
     global.MacroPlayer = MacroPlayer;
 }
-
