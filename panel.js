@@ -5,7 +5,6 @@ var selectedMacro = null;
 
 // パネルのウィンドウIDを保持
 var currentWindowId = null;
-var currentTreeType = null;
 
 // ウィンドウIDを取得
 function initWindowId() {
@@ -139,7 +138,7 @@ function edit() {
     });
 }
 
-// --- ツリー切り替え ---
+// --- Tree View Switching ---
 
 function refreshTreeView() {
     const iframe = document.getElementById("tree-iframe");
@@ -155,16 +154,18 @@ function refreshTreeView() {
         console.warn("[Panel] TreeView.refresh failed, falling back to iframe reload", e);
     }
 
-    // フォールバック: iframe をリロード
+    // Fallback: reload iframe
     const src = iframe.getAttribute("src");
+    iframe.setAttribute("src", "");
     iframe.setAttribute("src", src);
 }
 
 function applyTreeSelection(type, options = {}) {
     const { persist = true, forceReload = false } = options;
-    if (type !== "files" && type !== "bookmarks") {
+    let actualType = type;
+    if (actualType !== "files" && actualType !== "bookmarks") {
         console.warn("[Panel] Unknown tree type, falling back to bookmarks:", type);
-        type = "bookmarks";
+        actualType = "bookmarks";
     }
 
     const iframe = document.getElementById("tree-iframe");
@@ -173,33 +174,31 @@ function applyTreeSelection(type, options = {}) {
         return;
     }
 
-    const targetSrc = type === "files" ? "fileView.html" : "treeView.html";
+    const targetSrc = actualType === "files" ? "fileView.html" : "treeView.html";
     if (forceReload || iframe.getAttribute("src") !== targetSrc) {
         iframe.setAttribute("src", targetSrc);
     }
 
     const filesRadio = document.getElementById("radio-files-tree");
     const bookmarksRadio = document.getElementById("radio-bookmarks-tree");
-    if (filesRadio) filesRadio.checked = type === "files";
-    if (bookmarksRadio) bookmarksRadio.checked = type === "bookmarks";
+    if (filesRadio) filesRadio.checked = actualType === "files";
+    if (bookmarksRadio) bookmarksRadio.checked = actualType === "bookmarks";
 
     if (persist) {
-        Storage.setChar("tree-type", type);
+        Storage.setChar("tree-type", actualType);
     }
-    currentTreeType = type;
 }
 
 async function selectInitialTree() {
     let storedType = Storage.isSet("tree-type") ? Storage.getChar("tree-type") : "files";
-    if (storedType !== "files" && storedType !== "bookmarks") {
-        storedType = "files";
-    }
 
     try {
         const installed = await afio.isInstalled();
 
-        // Fileアクセスが無効なら自動的にブックマークタブへフォールバック
-        if (storedType === "files" && !installed) {
+        // Automatically fall back to bookmarks tab if file access is unavailable
+        if (storedType !== "files" && storedType !== "bookmarks") {
+            storedType = installed ? "files" : "bookmarks";
+        } else if (storedType === "files" && !installed) {
             console.warn("[Panel] File access unavailable, switching tree view to bookmarks");
             storedType = "bookmarks";
         }
@@ -285,7 +284,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.type === "UPDATE_PANEL_VIEWS") {
         refreshTreeView();
-        if (sendResponse) sendResponse({ success: true });
+        sendResponse({ success: true });
+        return true;
     }
 });
 
@@ -315,6 +315,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (filesRadio) {
         filesRadio.addEventListener("change", async () => {
+            if (!filesRadio.checked) return;
             try {
                 const installed = await afio.isInstalled();
                 if (!installed) {
@@ -332,6 +333,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (bookmarksRadio) {
         bookmarksRadio.addEventListener("change", () => {
+            if (!bookmarksRadio.checked) return;
             applyTreeSelection("bookmarks", { persist: true });
         });
     }
@@ -339,7 +341,17 @@ document.addEventListener("DOMContentLoaded", () => {
     // 右クリック無効化
     document.body.oncontextmenu = (e) => { e.preventDefault(); return false; };
 
-    selectInitialTree();
+    if (filesRadio) filesRadio.disabled = true;
+    if (bookmarksRadio) bookmarksRadio.disabled = true;
+
+    selectInitialTree()
+        .catch((error) => {
+            console.error("[Panel] Initialization failed", error);
+        })
+        .finally(() => {
+            if (filesRadio) filesRadio.disabled = false;
+            if (bookmarksRadio) bookmarksRadio.disabled = false;
+        });
 
     // 広告などの読み込み
     if (typeof setAdDetails === "function") setAdDetails();
