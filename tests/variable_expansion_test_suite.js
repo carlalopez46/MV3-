@@ -157,6 +157,25 @@
             }
         },
         {
+            name: 'Runaway placeholder expansion is capped',
+            run() {
+                const player = createPlayer({
+                    do_eval() {
+                        return '{{!EVAL("LOOP")}}';
+                    }
+                });
+                try {
+                    player.expandVariables('{{!EVAL("LOOP")}}', 'runaway');
+                    throw new Error('Runaway placeholder expansion should have been detected');
+                } catch (err) {
+                    const errName = err && (err.name || (err.constructor && err.constructor.name));
+                    if (errName !== 'RuntimeError' || !/Maximum placeholder expansion iterations exceeded/.test(err.message)) {
+                        throw err;
+                    }
+                }
+            }
+        },
+        {
             name: 'Nested placeholder inside variable name',
             run() {
                 const player = createPlayer({
