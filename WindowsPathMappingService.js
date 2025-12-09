@@ -30,7 +30,7 @@ function stripFileUriPrefix(path) {
     const filePrefixMatch = normalized.match(/^file:\/\//i);
     if (filePrefixMatch) {
         normalized = normalized.substring(filePrefixMatch[0].length);
-        // file:///C:/... のようにスラッシュが残る場合を考慮して先頭のスラッシュを1つだけ許容
+        // file:///C:/... のようにスラッシュが残る場合を考慮して先頭のスラッシュをすべて削除
         if (normalized.startsWith('/')) {
             normalized = normalized.replace(/^\/+/, '');
         }
