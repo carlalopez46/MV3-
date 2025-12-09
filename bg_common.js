@@ -668,7 +668,7 @@ var saveToBookmark = globalScope.saveToBookmark = async function (save_data, ove
             save_data.name,
             url,
             save_data.bookmark_id,
-            overwrite
+            !!save_data.bookmark_id
         );
 
         typeof callback === "function" && callback(save_data);
