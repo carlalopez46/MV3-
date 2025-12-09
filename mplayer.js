@@ -347,7 +347,7 @@ MacroPlayer.prototype.ActionTable['run'] = async function (cmd) {
             try {
                 source = await this.loadMacroFileFromFs(macroNode);
             } catch (err) {
-                if (typeof Storage !== 'undefined' && Storage && typeof Storage.getBool === 'function' && Storage.getBool('debug')) {
+                if (Storage && Storage.getBool && Storage.getBool('debug')) {
                     console.debug('[iMacros] Failed to load macro from filesystem', resolvedPath, err);
                 }
             }
