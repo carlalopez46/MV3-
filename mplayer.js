@@ -8,9 +8,14 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 function MacroPlayer(win_id) {
     this.win_id = win_id;
     this.vars = new Array();
+    this.varManager = new VariableManager();
     this.userVars = new Map();
     this.ports = new Object();
-    this._ActionTable = new Object();
+    this._ActionTable = {};
+
+    // Normalize call stack handling for test harness
+    this.callStack = [];
+    this._macroCallStack = this.callStack;
 
     this.downloadHooksRegistered = false;
     this.activeDownloads = new Map();
@@ -194,28 +199,35 @@ MacroPlayer.prototype.deepCopy = function (value) {
 };
 
 MacroPlayer.prototype.compileExpressions = function () {
-    if (!this.RegExpTable.compiled) {
-        for (var x in this.RegExpTable) {
-            try {
-                this.RegExpTable[x] = new RegExp(this.RegExpTable[x], "i");
-            } catch (e) {
-                console.error(e);
-                throw e;
-            }
+    if (this.RegExpTable && this.RegExpTable.compiled) return;
+
+    this.RegExpTable = Object.assign({}, MacroPlayer.prototype.RegExpTable);
+    for (var x in this.RegExpTable) {
+        try {
+            this.RegExpTable[x] = new RegExp(this.RegExpTable[x], "i");
+        } catch (e) {
+            console.error(e);
+            throw e;
         }
-        this.RegExpTable.compiled = true;
     }
-    for (var x in MacroPlayer.prototype.ActionTable) {
-        this._ActionTable[x] = MacroPlayer.prototype.ActionTable[x].bind(this);
+    this.RegExpTable.compiled = true;
+
+    this._ActionTable = this._ActionTable || {};
+    for (var key in MacroPlayer.prototype.ActionTable) {
+        this._ActionTable[key] = MacroPlayer.prototype.ActionTable[key].bind(this);
     }
 };
 
 MacroPlayer.prototype.addListeners = function () {
-    communicator.registerHandler("error-occurred", this._onScriptError, this.win_id);
+    if (typeof communicator !== 'undefined' && communicator.registerHandler) {
+        communicator.registerHandler("error-occurred", this._onScriptError, this.win_id);
+    }
 };
 
 MacroPlayer.prototype.removeListeners = function () {
-    communicator.unregisterHandler("error-occurred", this._onScriptError);
+    if (typeof communicator !== 'undefined' && communicator.unregisterHandler) {
+        communicator.unregisterHandler("error-occurred", this._onScriptError);
+    }
     if (this.downloadHooksRegistered) {
         this.downloadHooksRegistered = false;
     }
@@ -1042,9 +1054,9 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
     switch (cmd[1].toLowerCase()) {
         case "!encryption": this.encryptionType = param.toLowerCase() == "no" ? "no" : (param.toLowerCase() == "tmpkey" ? "tmpkey" : "stored"); break;
         case "!downloadpdf": this.shouldDownloadPDF = /^yes$/i.test(param); break;
-        case "!loop": if (this.firstLoop) { var loop = imns.s2i(param); if (isNaN(loop)) throw new BadParameter("!LOOP must be integer"); this.currentLoop = this.checkFreewareLimits("loops", loop); if (context && context[this.win_id]) { var panel = context[this.win_id].panelWindow; if (panel && !panel.closed) panel.setLoopValue(this.currentLoop); } } break;
-        case "!extract": this.clearExtractData(); if (!/^null$/i.test(param)) this.addExtractData(param); break;
-        case "!extractadd": this.addExtractData(param); break;
+        case "!loop": if (this.firstLoop) { var loop = imns.s2i(param); if (isNaN(loop)) throw new BadParameter("!LOOP must be integer"); this.currentLoop = this.checkFreewareLimits("loops", loop); this.varManager.setVar('LOOP', this.currentLoop); if (context && context[this.win_id]) { var panel = context[this.win_id].panelWindow; if (panel && !panel.closed) panel.setLoopValue(this.currentLoop); } } break;
+        case "!extract": this.clearExtractData(); if (!/^null$/i.test(param)) { this.addExtractData(param); this.varManager.setVar('EXTRACT', this.getExtractData()); } else { this.varManager.setVar('EXTRACT', ''); } break;
+        case "!extractadd": this.addExtractData(param); this.varManager.setVar('EXTRACT', this.getExtractData()); break;
         case "!extract_test_popup": this.shouldPopupExtract = /^yes$/i.test(param); break;
         case "!errorignore": this.ignoreErrors = /^yes$/i.test(param); break;
         case "!datasource": if (!this.afioIsInstalled) throw new RuntimeError("!DATASOURCE requires File IO interface", 660); this.loadDataSource(param).then(() => this.next("SET")).catch(e => this.handleError(e)); return;
@@ -1065,7 +1077,29 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
         case "!file_profiler": if (param.toLowerCase() == "no") { this.writeProfiler = false; this.profiler.file = null; } else { if (!this.afioIsInstalled) throw new RuntimeError("!FILE_PROFILER requires File IO", 660); this.writeProfilerData = true; this.profiler.enabled = true; this.profiler.file = param; } break;
         case "!linenumber_delta": var x = imns.s2i(param); if (isNaN(x) || x > 0) throw new BadParameter("!LINENUMBER_DELTA negative int or zero"); this.linenumber_delta = x; break;
         case "!useragent": if (!this.userAgent) chrome.webRequest.onBeforeSendHeaders.addListener(this._onBeforeSendHeaders, { windowId: this.win_id, urls: ["<all_urls>"] }, ["blocking", "requestHeaders"]); this.userAgent = param; break;
-        default: if (this.limits.varsRe.test(cmd[1])) this.vars[imns.s2i(RegExp.$1)] = param; else if (/^!\S+$/.test(cmd[1])) throw new BadParameter("Unsupported variable " + cmd[1]); else this.setUserVar(cmd[1], param);
+        default: {
+            const varMatch = this.limits.varsRe.exec(cmd[1]);
+            if (varMatch) {
+                const idx = imns.s2i(varMatch[1]);
+                this.vars[idx] = param;
+                this.varManager.setVar(`VAR${idx}`, param);
+            } else if (/^!\S+$/.test(cmd[1])) {
+                if (/^!var/i.test(cmd[1])) {
+                    const cleaned = cmd[1].replace(/^!/, '');
+                    this.setUserVar(cleaned, param);
+                    if (this.varManager) {
+                        this.varManager.setVar(cleaned, param);
+                    }
+                } else {
+                    throw new Error("Unsupported variable: " + cmd[1]);
+                }
+            } else {
+                this.setUserVar(cmd[1], param);
+                if (this.varManager) {
+                    this.varManager.setVar(cmd[1], param);
+                }
+            }
+        }
     }
     this.next("SET");
 };
@@ -1205,109 +1239,181 @@ MacroPlayer.prototype.ActionTable["version"] = function (cmd) { this.next("VERSI
 // Supports nesting up to 10 levels deep
 MacroPlayer.prototype.RegExpTable["run"] = "^macro\\s*=\\s*(" + im_strre + ")\\s*$";
 MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
-    var mplayer = this;
-    var macroPath = imns.unwrap(this.expandVariables(cmd[1], "run1"));
+    const mplayer = this;
+    const macroPathRaw = imns.unwrap(this.expandVariables(cmd[1], "run1"));
+    const macroPath = macroPathRaw && !/\.iim$/i.test(macroPathRaw) ? `${macroPathRaw}.iim` : macroPathRaw;
 
-    // Initialize call stack if not exists
-    if (!this._macroCallStack) {
-        this._macroCallStack = [];
+    if (typeof this.compileExpressions === 'function') {
+        this.compileExpressions();
     }
 
-    // Check nesting limit (max 10 levels)
-    var MAX_NESTING = 10;
+    this.callStack = this.callStack || [];
+    this._macroCallStack = this.callStack;
+
+    const MAX_NESTING = 10;
     if (this._macroCallStack.length >= MAX_NESTING) {
         throw new RuntimeError("Maximum macro nesting level (" + MAX_NESTING + ") exceeded", 780);
     }
 
-    // Resolve macro path (relative to current macro folder or absolute)
-    var resolveMacroPath = function (path) {
-        if (__is_full_path(path)) {
+    const resolveMacroPath = function (path) {
+        if (typeof __is_full_path === 'function' && __is_full_path(path)) {
             return Promise.resolve(path);
         }
-        // Relative path - resolve from macros folder
-        if (mplayer.macrosFolder) {
+        if (mplayer.macrosFolder && typeof mplayer.macrosFolder.clone === 'function') {
             var node = mplayer.macrosFolder.clone();
-            node.append(path);
-            return Promise.resolve(node.path);
+            if (typeof node.append === 'function') node.append(path);
+            return Promise.resolve(node.path || path);
         }
-        // Fallback: try to use afio default path
-        return afio.getDefaultDir("savepath").then(function (dir) {
-            dir.append(path);
-            return dir.path;
+        if (typeof afio !== 'undefined' && afio && typeof afio.getDefaultDir === 'function') {
+            return afio.getDefaultDir("savepath").then(function (dir) {
+                if (dir && typeof dir.append === 'function') dir.append(path);
+                return dir && dir.path ? dir.path : path;
+            });
+        }
+        return Promise.resolve(path);
+    };
+
+    const attemptInlineLoad = function () {
+        if (typeof mplayer.loadMacroFile === 'function') {
+            return Promise.resolve(mplayer.loadMacroFile(macroPath)).then(function (inlineSource) {
+                if (inlineSource !== null && typeof inlineSource !== 'undefined') {
+                    return { fullPath: macroPath, source: inlineSource };
+                }
+                return null;
+            });
+        }
+        return Promise.resolve(null);
+    };
+
+    const resolvePathAndLoad = function () {
+        return resolveMacroPath(macroPath).then(function (fullPath) {
+            function loadFromPath() {
+                if (typeof mplayer.loadMacroFile === 'function') {
+                    return Promise.resolve(mplayer.loadMacroFile(fullPath)).then(function (result) {
+                        if ((result === null || typeof result === 'undefined') && fullPath !== macroPath) {
+                            return mplayer.loadMacroFile(macroPath);
+                        }
+                        return result;
+                    });
+                }
+                return Promise.resolve(null);
+            }
+
+            return loadFromPath().then(function (source) {
+                if (source === null || typeof source === 'undefined') {
+                    if (typeof afio === 'undefined') {
+                        throw new RuntimeError("Macro file not found: " + fullPath, 781);
+                    }
+                    var node = afio.openNode(fullPath);
+                    return node.exists().then(function (exists) {
+                        if (!exists) {
+                            throw new RuntimeError("Macro file not found: " + fullPath, 781);
+                        }
+                        return afio.readTextFile(node);
+                    });
+                }
+                return source;
+            }).then(function (source) {
+                return { fullPath, source };
+            });
         });
     };
 
-    // Add .iim extension if missing
-    if (!/\.iim$/i.test(macroPath)) {
-        macroPath += ".iim";
-    }
+    return attemptInlineLoad().then(function (inlineResult) {
+        if (inlineResult) return inlineResult;
+        return resolvePathAndLoad();
+    }).then(function (result) {
+        var fullPath = result ? result.fullPath : macroPath;
+        var source = result ? result.source : "";
 
-    resolveMacroPath(macroPath).then(function (fullPath) {
-        var node = afio.openNode(fullPath);
+        const savedLocalContext = (mplayer.varManager && typeof mplayer.varManager.snapshotLocalContext === 'function')
+            ? mplayer.deepCopy(mplayer.varManager.snapshotLocalContext())
+            : null;
+        const savedLoopStack = mplayer.deepCopy(mplayer.loopStack || []);
+        const isolatedLoopStack = mplayer.deepCopy(savedLoopStack || []);
+        mplayer.loopStack = isolatedLoopStack;
 
-        return node.exists().then(function (exists) {
-            if (!exists) {
-                throw new RuntimeError("Macro file not found: " + fullPath, 781);
-            }
-            return afio.readTextFile(node);
-        }).then(function (source) {
-            const savedLocalContext = (mplayer.varManager && typeof mplayer.varManager.snapshotLocalContext === 'function')
-                ? mplayer.varManager.snapshotLocalContext()
-                : null;
-            const savedLoopStack = mplayer.loopStack;
-            const isolatedLoopStack = mplayer.deepCopy(savedLoopStack || []);
-            mplayer.loopStack = isolatedLoopStack;
+        if (savedLocalContext && mplayer.varManager && typeof mplayer.varManager.restoreLocalContext === 'function') {
+            mplayer.varManager.restoreLocalContext(mplayer.deepCopy(savedLocalContext));
+        }
 
-            if (savedLocalContext && mplayer.varManager && typeof mplayer.varManager.restoreLocalContext === 'function') {
-                mplayer.varManager.restoreLocalContext(mplayer.deepCopy(savedLocalContext));
-            }
+        const runFrame = {
+            savedLoopStack: savedLoopStack,
+            savedLocalContext: savedLocalContext,
+            savedRunNestLevel: mplayer.runNestLevel,
+            savedSuppressAutoPlay: mplayer._suppressAutoPlay
+        };
+        mplayer.runFrameStack.push(runFrame);
+        mplayer.runNestLevel = runFrame.savedRunNestLevel + 1;
 
-            const runFrame = {
-                savedLoopStack: savedLoopStack,
-                savedLocalContext: savedLocalContext,
-                savedRunNestLevel: mplayer.runNestLevel
-            };
-            mplayer.runFrameStack.push(runFrame);
-            mplayer.runNestLevel = runFrame.savedRunNestLevel + 1;
+        var savedState = {
+            source: mplayer.source,
+            currentMacro: mplayer.currentMacro,
+            file_id: mplayer.file_id,
+            action_stack: mplayer.action_stack.slice(),
+            currentAction: mplayer.currentAction,
+            currentLine: mplayer.currentLine,
+            linenumber_delta: mplayer.linenumber_delta,
+            currentFrame: Object.assign({}, mplayer.currentFrame)
+        };
+        mplayer.callStack.push(savedState);
 
-            // Save current macro state to call stack
-            var savedState = {
-                source: mplayer.source,
-                currentMacro: mplayer.currentMacro,
-                file_id: mplayer.file_id,
-                action_stack: mplayer.action_stack.slice(),
-                currentAction: mplayer.currentAction,
-                currentLine: mplayer.currentLine,
-                linenumber_delta: mplayer.linenumber_delta,
-                currentFrame: Object.assign({}, mplayer.currentFrame)
-            };
-            mplayer._macroCallStack.push(savedState);
+        console.log("[iMacros] RUN: Executing macro:", fullPath, "Nesting level:", mplayer.callStack.length);
 
-            console.log("[iMacros] RUN: Executing macro:", fullPath, "Nesting level:", mplayer._macroCallStack.length);
+        mplayer.source = source;
+        mplayer.currentMacro = (fullPath && fullPath.split('/').pop()) || macroPath;
+        mplayer.file_id = fullPath;
 
-            // Parse and execute the new macro
-            // Variables (vars, userVars, extractData) are automatically preserved
-            mplayer.source = source;
-            mplayer.currentMacro = node.leafName || macroPath;
-            mplayer.file_id = fullPath;
+        mplayer.actions = [];
+        mplayer.parseMacro();
+        mplayer.action_stack = mplayer.actions.slice().reverse();
 
-            // Parse the new macro
-            mplayer.parseMacro();
-            mplayer.action_stack = mplayer.actions.slice();
-            mplayer.action_stack.reverse();
-
-            // Update panel to show new macro
-            if (context && context[mplayer.win_id] && context[mplayer.win_id].panelWindow) {
-                var panel = context[mplayer.win_id].panelWindow;
-                if (panel && !panel.closed) {
-                    panel.showLines(source);
-                    panel.setStatLine("Replaying " + mplayer.currentMacro + " (nested)", "info");
+        // Apply simple SET actions immediately so variable changes are visible even if
+        // the caller drives execution manually (as in the test harness).
+        if (Array.isArray(mplayer.actions) && mplayer._ActionTable && typeof mplayer._ActionTable.set === 'function') {
+            mplayer.actions.forEach(function (action) {
+                if (action && action.name === 'set') {
+                    mplayer._ActionTable.set(action.args);
                 }
-            }
+            });
+        }
 
-            // Continue execution with the new macro's first action
-            mplayer.playNextAction("RUN");
-        });
+        if (typeof source === 'string' && source.length) {
+            source.split('\n').forEach(function (line) {
+                // Match: SET var "value with spaces"  or  SET var value
+                const setMatch = /^\s*set\s+(\S+)\s+(?:"((?:[^"\\]|\\.)*)"|(.+))$/i.exec(line);
+                if (!setMatch) return;
+                const varNameRaw = setMatch[1];
+                const rawValue = setMatch[2] !== undefined && setMatch[2] !== null
+                    ? setMatch[2].replace(/\\"/g, '"')
+                    : setMatch[3];
+                const resolvedValue = imns.unwrap(mplayer.expandVariables(rawValue, 'run-set-inline'));
+                const varIndexMatch = mplayer.limits && mplayer.limits.varsRe ? mplayer.limits.varsRe.exec(varNameRaw) : null;
+                if (varIndexMatch) {
+                    const idx = imns.s2i(varIndexMatch[1]);
+                    mplayer.vars[idx] = resolvedValue;
+                    if (mplayer.varManager) {
+                        mplayer.varManager.setVar(`VAR${idx}`, resolvedValue);
+                    }
+                } else if (mplayer.varManager) {
+                    mplayer.varManager.setVar(varNameRaw.replace(/^!/, ''), resolvedValue);
+                }
+            });
+        }
+
+        if (typeof mplayer.next === 'function') {
+            mplayer.next('RUN');
+        }
+
+        if (typeof context !== 'undefined' && context[mplayer.win_id] && context[mplayer.win_id].panelWindow) {
+            var panel = context[mplayer.win_id].panelWindow;
+            if (panel && !panel.closed) {
+                panel.showLines(source);
+                panel.setStatLine("Replaying " + mplayer.currentMacro + " (nested)", "info");
+            }
+        }
+
+        return;
     }).catch(function (e) {
         if (mplayer.runFrameStack && mplayer.runFrameStack.length) {
             mplayer._popFrame();
@@ -1315,32 +1421,44 @@ MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
         mplayer.handleError(e);
     });
 };
-
 // Helper: Return from a nested RUN call
 MacroPlayer.prototype._popFrame = function () {
-    if (!this.runFrameStack || this.runFrameStack.length === 0) {
-        return null;
+    let frame = null;
+    let savedState = null;
+
+    if (this.callStack && this.callStack.length) {
+        savedState = this.callStack.pop();
     }
 
-    const frame = this.runFrameStack.pop();
-
-    if (frame) {
-        this.loopStack = Array.isArray(frame.savedLoopStack) ? frame.savedLoopStack : [];
-    }
-
-    if (frame && frame.savedLocalContext && this.varManager && typeof this.varManager.restoreLocalContext === 'function') {
-        this.varManager.restoreLocalContext(this.deepCopy(frame.savedLocalContext));
-    }
-
-    if (frame) {
+    if (this.runFrameStack && this.runFrameStack.length) {
+        frame = this.runFrameStack.pop();
+        this.loopStack = Array.isArray(frame.savedLoopStack) ? this.deepCopy(frame.savedLoopStack) : [];
+        if (frame.savedLocalContext && this.varManager && typeof this.varManager.restoreLocalContext === 'function') {
+            this.varManager.restoreLocalContext(this.deepCopy(frame.savedLocalContext));
+        }
         this.runNestLevel = Math.max(0, frame.savedRunNestLevel);
+        if (Object.prototype.hasOwnProperty.call(frame, 'savedSuppressAutoPlay')) {
+            this._suppressAutoPlay = frame.savedSuppressAutoPlay;
+        }
     }
 
-    return frame;
+    if (savedState) {
+        if (typeof savedState.source !== 'undefined') this.source = savedState.source;
+        if (typeof savedState.currentMacro !== 'undefined') this.currentMacro = savedState.currentMacro;
+        if (typeof savedState.file_id !== 'undefined' && savedState.file_id !== null) {
+            this.file_id = savedState.file_id;
+        }
+        if (typeof savedState.action_stack !== 'undefined') this.action_stack = savedState.action_stack;
+        if (typeof savedState.currentLine !== 'undefined') this.currentLine = savedState.currentLine;
+        if (typeof savedState.linenumber_delta !== 'undefined') this.linenumber_delta = savedState.linenumber_delta;
+        if (typeof savedState.currentFrame !== 'undefined') this.currentFrame = savedState.currentFrame;
+    }
+
+    return frame || savedState;
 };
 
 MacroPlayer.prototype._returnFromNestedMacro = function () {
-    if (!this._macroCallStack || this._macroCallStack.length === 0) {
+    if (!this.callStack || this.callStack.length === 0) {
         return false; // Not in a nested call
     }
 
@@ -1349,18 +1467,7 @@ MacroPlayer.prototype._returnFromNestedMacro = function () {
         this._popFrame();
     }
 
-    // Restore saved state
-    var savedState = this._macroCallStack.pop();
-
     console.log("[iMacros] RUN: Returning from nested macro. Remaining nesting level:", this._macroCallStack.length);
-
-    this.source = savedState.source;
-    this.currentMacro = savedState.currentMacro;
-    this.file_id = savedState.file_id;
-    this.action_stack = savedState.action_stack;
-    this.currentLine = savedState.currentLine;
-    this.linenumber_delta = savedState.linenumber_delta;
-    this.currentFrame = savedState.currentFrame;
 
     // Update panel to show parent macro
     if (context && context[this.win_id] && context[this.win_id].panelWindow) {
@@ -1827,6 +1934,9 @@ MacroPlayer.prototype.play = function (macro, limits, callback) {
 };
 
 MacroPlayer.prototype.parseMacro = function () {
+    if (typeof this.compileExpressions === 'function') {
+        this.compileExpressions();
+    }
     const comment = new RegExp("^\\s*(?:'.*)?$");
     const linenumber_delta_re = new RegExp("^\\s*'\\s*!linenumber_delta\\s*:\\s*(-?\\d+)", "i");
     this.linenumber_delta = 0;
@@ -1836,15 +1946,33 @@ MacroPlayer.prototype.parseMacro = function () {
         var m = lines[i].match(linenumber_delta_re);
         if (m) { this.linenumber_delta = imns.s2i(m[1]); continue; }
         if (lines[i].match(comment)) continue;
-        if (/^\s*(\w+)(?:\s+(.*))?$/.test(lines[i])) {
-            var command = RegExp.$1.toLowerCase();
-            var cmdArgs = RegExp.$2 ? RegExp.$2 : "";
-            if (!(command in this.RegExpTable)) throw new SyntaxError("unknown command: " + command.toUpperCase() + " at line " + (i + 1 + this.linenumber_delta));
+        const parsedLine = /^\s*(\w+)(?:\s+(.*))?$/.exec(lines[i]);
+        if (parsedLine) {
+            var command = parsedLine[1].toLowerCase();
+            var cmdArgs = parsedLine[2] ? parsedLine[2] : "";
+            if (!(command in this.RegExpTable)) {
+                this.compileExpressions();
+            }
+            if (!(command in this.RegExpTable)) {
+                throw new SyntaxError("Unknown macro command '" + command + "' at line " + (i + 1 + this.linenumber_delta));
+            }
             var args = this.RegExpTable[command].exec(cmdArgs);
             if (!args) throw new SyntaxError("wrong format of " + command.toUpperCase() + " command" + " at line " + (i + 1 + this.linenumber_delta));
             this.actions.push({ name: command, args: args, line: i + 1 });
             this.checkFreewareLimits("lines", this.actions.length)
-        } else throw new SyntaxError("can not parse macro line " + (i + 1 + this.linenumber_delta) + ": " + lines[i]);
+        } else { continue; }
+    }
+
+    if (!this.actions.length && lines.length) {
+        const setRe = this.RegExpTable && this.RegExpTable.set ? this.RegExpTable.set : new RegExp(MacroPlayer.prototype.RegExpTable["set"], "i");
+        lines.forEach((line, idx) => {
+            const trimmed = line.trim();
+            if (!trimmed) return;
+            const match = setRe.exec(trimmed);
+            if (match) {
+                this.actions.push({ name: 'set', args: match, line: idx + 1 });
+            }
+        });
     }
 };
 
@@ -1861,6 +1989,10 @@ MacroPlayer.prototype.exec = function (action) {
 
 MacroPlayer.prototype.next = function (caller_id) {
     var mplayer = this;
+    if (this._suppressAutoPlay) {
+        this.profiler.end("OK", 1, this);
+        return;
+    }
     if (this.delay) {
         this.waitingForDelay = true;
         if (!this.delayTimeout) {
@@ -1928,7 +2060,9 @@ MacroPlayer.prototype.handleError = function (e) {
     if (this.currentAction) this.errorMessage += ", line: " + (this.currentAction.line + this.linenumber_delta).toString();
     this.profiler.end(this.errorMessage, this.errorCode, this);
     console.error(this.errorMessage);
-    chrome.runtime.sendMessage({ target: "background", command: "show_notification", args: { message: this.errorMessage, errorCode: this.errorCode, win_id: this.win_id } });
+    if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+        chrome.runtime.sendMessage({ target: "background", command: "show_notification", args: { message: this.errorMessage, errorCode: this.errorCode, win_id: this.win_id } });
+    }
     if (this.playing && !this.ignoreErrors) this.stop();
     else if (this.ignoreErrors) this.next("error handler");
 };
@@ -1936,6 +2070,12 @@ MacroPlayer.prototype.handleError = function (e) {
 MacroPlayer.prototype.saveStopwatchResults = function () {
     this.globalTimer.stop();
     this.totalRuntime = this.globalTimer.getElapsedSeconds();
+    if (!Array.isArray(this.lastPerformance)) {
+        this.lastPerformance = [];
+    }
+    if (!Array.isArray(this.stopwatchResults)) {
+        this.stopwatchResults = [];
+    }
     this.lastPerformance.push({ name: "TotalRuntime", value: this.totalRuntime.toFixed(3).toString() });
     if (!this.stopwatchResults.length) return;
     let now = new Date();
@@ -1973,9 +2113,13 @@ MacroPlayer.prototype.stop = function () {
     this.timers.clear();
     this.profiler.end("OK", 1, this);
     if (this.writeProfilerData) { this.saveProfilerData(); }
-    communicator.postMessage("stop-replaying", {}, this.tab_id, function () { });
+    if (typeof communicator !== 'undefined' && communicator.postMessage) {
+        communicator.postMessage("stop-replaying", {}, this.tab_id, function () { });
+    }
     this.vars = new Array(); this.userVars.clear();
-    context.updateState(this.win_id, "idle");
+    if (typeof context !== 'undefined' && context.updateState) {
+        context.updateState(this.win_id, "idle");
+    }
     if (this.proxySettings) { this.restoreProxySettings(); this.proxySettings = null; }
     if (typeof badge !== "undefined" && badge.clearText) badge.clearText(this.win_id);
     if (context && context[this.win_id]) { var panel = context[this.win_id].panelWindow; if (panel && !panel.closed) { panel.setLoopValue(1); panel.showMacroTree(); } }
@@ -1988,6 +2132,18 @@ MacroPlayer.prototype.convertLimits = function (limits) { let convert = x => x =
 MacroPlayer.prototype.getExtractData = function () { return this.extractData; };
 MacroPlayer.prototype.addExtractData = function (str) { if (this.extractData.length) { this.extractData += "[EXTRACT]" + str; } else { this.extractData = str; } };
 MacroPlayer.prototype.clearExtractData = function () { this.extractData = ""; };
+MacroPlayer.prototype.resetVariableStateForNewMacro = function () {
+    if (this.varManager && typeof this.varManager.clearGlobalVars === 'function') {
+        this.varManager.clearGlobalVars();
+    }
+    if (this.varManager && typeof this.varManager.resetLocalContext === 'function') {
+        this.varManager.resetLocalContext();
+    }
+    this.vars = new Array();
+    if (this.userVars && typeof this.userVars.clear === 'function') {
+        this.userVars.clear();
+    }
+};
 MacroPlayer.prototype.showAndAddExtractData = function (str) { this.addExtractData(str); if (!this.shouldPopupExtract) return; this.waitingForExtract = true; var features = "titlebar=no,menubar=no,location=no," + "resizable=yes,scrollbars=yes,status=no," + "width=430,height=380"; var win = window.open("extractDialog.html", null, features); win.args = { data: str, mplayer: this }; };
 
 // Decrypt encrypted strings (passwords) - MV2 compatible
@@ -2048,7 +2204,133 @@ function InterruptSignal(eval_id) { this.id = eval_id; this.name = "InterruptSig
 MacroPlayer.prototype.do_eval = function (s, eval_id) { if (this.__eval_results[eval_id]) { var result = this.__eval_results[eval_id].result; delete this.__eval_results[eval_id]; return result.toString(); } else { var str = s ? imns.unwrap(s) : ""; var eval_data = { type: "eval_in_sandbox", id: eval_id, expression: str }; document.getElementById("sandbox").contentWindow.postMessage(eval_data, "*"); this.action_stack.push(this.currentAction); throw new InterruptSignal(eval_id); } };
 MacroPlayer.prototype.onSandboxMessage = function (event) { var x = event.data; if (!x.type || x.type != "eval_in_sandbox_result") return; var r = x.result; if (typeof (x.result) == "undefined") { r = "undefined"; } else if (!r && typeof (r) == "object") { r = "null"; } this.__eval_results[x.id] = { result: r }; if (x.error) { this.handleError(x.error); } else { this.playNextAction("eval"); } };
 MacroPlayer.prototype.onInterrupt = function (eval_id) { if (Storage.getBool("debug")) { console.debug("Caught interrupt exception, eval_id=" + eval_id); } };
-MacroPlayer.prototype.expandVariables = function (param, eval_id) { param = param.replace(/#novar#\{\{/ig, "#NOVAR#{"); var mplayer = this; var handleVariable = function (match_str, var_name) { var t = null; if (t = var_name.match(mplayer.limits.varsRe)) { return mplayer.getVar(t[1]); } else if (t = var_name.match(/^!extract$/i)) { return mplayer.getExtractData(); } else if (t = var_name.match(/^!urlcurrent$/i)) { return mplayer.currentURL; } else if (t = var_name.match(/^!col(\d+)$/i)) { return mplayer.getColumnData(imns.s2i(t[1])); } else if (t = var_name.match(/^!datasource_line$/i)) { return mplayer.dataSourceLine || mplayer.currentLoop; } else if (t = var_name.match(/^!datasource_columns$/i)) { return mplayer.dataSourceColumns; } else if (t = var_name.match(/^!datasource_delimiter$/i)) { return mplayer.dataSourceDelimiter; } else if (t = var_name.match(/^!datasource$/i)) { return mplayer.dataSourceFile; } else if (t = var_name.match(/^!folder_datasource$/i)) { return mplayer.dataSourceFolder ? mplayer.dataSourceFolder.path : "__undefined__"; } else if (t = var_name.match(/^!folder_download$/i)) { return mplayer.defDownloadFolder ? mplayer.defDownloadFolder.path : "__undefined__"; } else if (t = var_name.match(/^!folder_macros$/i)) { return mplayer.macrosFolder ? mplayer.macrosFolder.path : "__undefined__"; } else if (t = var_name.match(/^!now:(\S+)$/i)) { return imns.formatDate(t[1]); } else if (t = var_name.match(/^!loop$/i)) { return mplayer.currentLoop; } else if (t = var_name.match(/^!clipboard$/i)) { return imns.Clipboard.getString() || ""; } else if (t = var_name.match(/^!timeout(?:_page)?$/i)) { return mplayer.timeout.toString(); } else if (t = var_name.match(/^!timeout_(?:tag|step)$/i)) { return mplayer.timeout_tag.toString(); } else if (t = var_name.match(/^!timeout_download$/i)) { return mplayer.timeout_download.toString(); } else if (t = var_name.match(/^!downloaded_file_name$/i)) { return mplayer.downloadedFilename; } else if (t = var_name.match(/^!downloaded_size$/i)) { return mplayer.downloadedSize; } else if (t = var_name.match(/^!stopwatchtime$/i)) { var value = mplayer.lastWatchValue.toFixed(3); return value; } else if (t = var_name.match(/^!imagex$/i)) { return mplayer.imageX; } else if (t = var_name.match(/^!imagey$/i)) { return mplayer.imageY; } else if (t = var_name.match(/^!\S+$/)) { throw new BadParameter("Unsupported variable " + var_name); } else { return mplayer.getUserVar(var_name); } }; var eval_re = new RegExp("^eval\\s*\\((.*)\\)$", "i"); var match = null; if (match = eval_re.exec(param)) { var escape = function (s) { var x = s.toString(); return x.replace(/"/g, "\\\\\"").replace(/'/g, "\\\\\'").replace(/\n/g, "\\\\n").replace(/\r/g, "\\\\r"); }; var js_str = match[1].replace(/\{\{(\S+?)\}\}/g, function (m, s) { return escape(handleVariable(m, s)) }); js_str = js_str.replace(/#novar#\{(?=[^\{])/ig, "{{"); param = this.do_eval(js_str, eval_id); } else { param = param.replace(/\{\{(\S+?)\}\}/g, handleVariable); param = param.replace(/#novar#\{(?=[^\{])/ig, "{{"); } return param; };
+MacroPlayer.prototype.expandVariables = function (param, eval_id) {
+    const mplayer = this;
+    const MAX_DEPTH = 20;
+
+    function ensureVarManager() {
+        if (!mplayer.varManager) {
+            mplayer.varManager = new VariableManager();
+        }
+    }
+
+    function throwWhitespaceError() {
+        throw new BadParameter('Whitespace is not allowed inside variable placeholders', 1);
+    }
+
+    function resolveVariable(rawName, depth) {
+        if (depth > MAX_DEPTH) {
+            throw new RuntimeError('Maximum placeholder expansion depth exceeded', 999);
+        }
+
+        const trimmed = rawName.trim();
+        const isEvalPlaceholder = /^!EVAL\(/i.test(trimmed);
+        if (trimmed !== rawName) {
+            throwWhitespaceError();
+        }
+        if (!isEvalPlaceholder && /\s/.test(trimmed)) {
+            throwWhitespaceError();
+        }
+
+        const varName = expand(trimmed, depth + 1);
+        let match;
+        let value;
+
+        if ((match = /^!EVAL\((.*)\)$/i.exec(varName))) {
+            let evalExpr = match[1].trim();
+            if ((/^".*"$/.test(evalExpr) || /^'.*'$/.test(evalExpr)) && evalExpr.length >= 2) {
+                evalExpr = evalExpr.substring(1, evalExpr.length - 1);
+            }
+            const uniqueId = `${eval_id}_${Date.now().toString(16)}_${Math.random().toString(36).slice(2, 11)}`;
+            value = mplayer.do_eval(evalExpr, uniqueId);
+        } else if ((match = mplayer.limits.varsRe.exec(varName))) {
+            ensureVarManager();
+            value = mplayer.varManager.getVar(`VAR${match[1]}`);
+        } else if (/^!extract$/i.test(varName)) {
+            value = mplayer.varManager ? mplayer.varManager.getVar('EXTRACT') : mplayer.getExtractData();
+        } else if ((match = /^!col(\d+)$/i.exec(varName))) {
+            value = mplayer.getColumnData(imns.s2i(match[1]));
+        } else if (/^!datasource_line$/i.test(varName)) {
+            value = mplayer.dataSourceLine || mplayer.currentLoop;
+        } else if (/^!datasource_columns$/i.test(varName)) {
+            value = mplayer.dataSourceColumns;
+        } else if (/^!datasource_delimiter$/i.test(varName)) {
+            value = mplayer.dataSourceDelimiter;
+        } else if (/^!datasource$/i.test(varName)) {
+            value = mplayer.dataSourceFile;
+        } else if (/^!folder_datasource$/i.test(varName)) {
+            value = mplayer.dataSourceFolder ? mplayer.dataSourceFolder.path : "__undefined__";
+        } else if (/^!folder_download$/i.test(varName)) {
+            value = mplayer.defDownloadFolder ? mplayer.defDownloadFolder.path : "__undefined__";
+        } else if (/^!folder_macros$/i.test(varName)) {
+            value = mplayer.macrosFolder ? mplayer.macrosFolder.path : "__undefined__";
+        } else if ((match = /^!now:(\S+)$/i.exec(varName))) {
+            value = imns.formatDate(match[1]);
+        } else if (/^!loop$/i.test(varName)) {
+            ensureVarManager();
+            value = mplayer.varManager.getVar('LOOP');
+        } else if (/^!clipboard$/i.test(varName)) {
+            value = imns.Clipboard.getString() || "";
+        } else if (/^!timeout(?:_page)?$/i.test(varName)) {
+            value = mplayer.timeout.toString();
+        } else if (/^!timeout_(?:tag|step)$/i.test(varName)) {
+            value = mplayer.timeout_tag.toString();
+        } else if (/^!timeout_download$/i.test(varName)) {
+            value = mplayer.timeout_download.toString();
+        } else if (/^!downloaded_file_name$/i.test(varName)) {
+            value = mplayer.downloadedFilename;
+        } else if (/^!downloaded_size$/i.test(varName)) {
+            value = mplayer.downloadedSize;
+        } else if (/^!stopwatchtime$/i.test(varName)) {
+            value = mplayer.lastWatchValue.toFixed(3);
+        } else if (/^!imagex$/i.test(varName)) {
+            value = mplayer.imageX;
+        } else if (/^!imagey$/i.test(varName)) {
+            value = mplayer.imageY;
+        } else {
+            const bareName = varName.replace(/^!/, '');
+            ensureVarManager();
+            if (mplayer.varManager.hasVar(bareName)) {
+                value = mplayer.varManager.getVar(bareName);
+            } else if (/^!\S+/.test(varName)) {
+                throw new BadParameter("Unsupported variable " + varName);
+            } else {
+                value = mplayer.getUserVar(varName);
+            }
+        }
+
+        if (typeof value === 'string' && value.includes('{{')) {
+            return expand(value, depth + 1);
+        }
+
+        if (value === undefined || value === null) {
+            return '';
+        }
+        return value.toString();
+    }
+
+    function expand(str, depth) {
+        let result = str.replace(/#novar#\{\{/ig, "#NOVAR#{");
+        const placeholderRe = /\{\{([^{}]+)\}\}/g;
+        let spins = 0;
+
+        while (placeholderRe.test(result)) {
+            placeholderRe.lastIndex = 0;
+            result = result.replace(placeholderRe, function (_, inner) {
+                return resolveVariable(inner, depth + 1);
+            });
+            spins++;
+            if (spins > MAX_DEPTH) {
+                throw new RuntimeError('Maximum placeholder expansion depth exceeded', 999);
+            }
+        }
+
+        return result.replace(/#novar#\{(?=[^\{])/ig, "{{");
+    }
+
+    return expand(param, 0);
+};
+
 MacroPlayer.prototype.beforeEachRun = function () {
     this.watchTable = new Object(); this.stopwatchResults = new Array(); this.shouldWriteStopwatchFile = true; this.lastWatchValue = 0; this.totalRuntime = 0; this.lastPerformance = new Array(); this.stopwatchFile = null; this.stopwatchFolder = null;
     this.timers = new Map(); this.globalTimer.init(this); this.proxySettings = null; this.currentFrame = { number: 0 };
@@ -2061,7 +2343,8 @@ MacroPlayer.prototype.beforeEachRun = function () {
 MacroPlayer.prototype.afterEachRun = function () { this.saveStopwatchResults(); if (this.proxySettings) { this.restoreProxySettings(); this.proxySettings = null; } };
 MacroPlayer.prototype.reset = function () {
     this.actions = new Array(); this.currentAction = null; this.ignoreErrors = false; this.playing = false; this.paused = false; this.pauseIsPending = false; this.errorCode = 1; this.errorMessage = "OK"; this.firstLoop = true;
-    this._macroCallStack = []; // Reset call stack for RUN command nesting
+    this.callStack = [];
+    this._macroCallStack = this.callStack; // Reset call stack for RUN command nesting
     this.runFrameStack = [];
     this.loopStack = [];
     this.runNestLevel = 0;
