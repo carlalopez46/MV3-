@@ -288,6 +288,10 @@
                 expected: 'C:/Extra/Slashes'
             },
             {
+                input: 'FILE://localhost/D:/Projects/App',
+                expected: 'D:/Projects/App'
+            },
+            {
                 input: 'C:/NoPrefix/Path',
                 expected: 'C:/NoPrefix/Path'
             }

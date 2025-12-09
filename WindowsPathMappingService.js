@@ -30,6 +30,12 @@ function stripFileUriPrefix(path) {
     const filePrefixMatch = normalized.match(/^file:\/\//i);
     if (filePrefixMatch) {
         normalized = normalized.substring(filePrefixMatch[0].length);
+
+        // file://localhost/C:/... 形式を localhost 部分を除去したパスとして扱う
+        if (/^localhost[/\\]/i.test(normalized)) {
+            normalized = normalized.substring('localhost'.length + 1);
+        }
+
         // file:///C:/... のようにスラッシュが残る場合を考慮して先頭のスラッシュをすべて削除
         if (normalized.startsWith('/')) {
             normalized = normalized.replace(/^\/+/, '');
