@@ -20,6 +20,7 @@ function MacroPlayer(win_id) {
     this.callStack = [];
     this.loopStack = [];
     this.runNestLevel = 0;
+    this.autoplaySuppressed = false;
 
     // Macro context
     this.currentMacro = null;
@@ -94,15 +95,19 @@ MacroPlayer.prototype.next = function () {
     return true;
 };
 
-MacroPlayer.prototype._pushFrame = function (actionType) {
+MacroPlayer.prototype._pushFrame = function (actionType, options) {
     if (this.runNestLevel >= 10) {
         throw new RuntimeError('Maximum RUN nesting exceeded (780)');
     }
 
+    const frameOptions = options || {};
     const frame = {
         callerId: actionType,
         loopStack: this.deepCopy(this.loopStack),
-        localContext: this.varManager.snapshotLocalContext()
+        localContext: this.varManager.snapshotLocalContext(),
+        autoplaySuppressed: Object.prototype.hasOwnProperty.call(frameOptions, 'autoplaySuppressed')
+            ? frameOptions.autoplaySuppressed
+            : this.autoplaySuppressed
     };
     this.callStack.push(frame);
     this.runNestLevel += 1;
@@ -113,6 +118,9 @@ MacroPlayer.prototype._popFrame = function () {
     const frame = this.callStack.pop();
     this.loopStack = this.deepCopy(frame.loopStack);
     this.varManager.restoreLocalContext(frame.localContext);
+    if (Object.prototype.hasOwnProperty.call(frame, 'autoplaySuppressed')) {
+        this.autoplaySuppressed = frame.autoplaySuppressed;
+    }
     this.runNestLevel = Math.max(0, this.runNestLevel - 1);
     this.next(frame.callerId || 'run');
 };
@@ -388,7 +396,10 @@ MacroPlayer.prototype.ActionTable['run'] = async function (cmd) {
     // Child macros must not mutate caller loop frames
     this.loopStack = this.deepCopy(this.loopStack);
 
-    this._pushFrame('run');
+    const autoplaySuppressedBeforeRun = this.autoplaySuppressed;
+    this.autoplaySuppressed = false;
+
+    this._pushFrame('run', { autoplaySuppressed: autoplaySuppressedBeforeRun });
 
     const actions = this.parseInlineMacro(source);
     actions.forEach(action => this.action_stack.push(action));
