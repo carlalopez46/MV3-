@@ -244,10 +244,34 @@
     }, { category: 'PathMapping' });
 
     TestRunner.addTest('WindowsPathMappingService: Path Normalization', function() {
-        // normalizeWindowsPath is an internal function
-        // It will be tested indirectly through path resolution tests
-        console.log('Path normalization: tested indirectly through resolveWindowsPath');
-    }, { category: 'PathMapping', skip: true });
+        const cases = [
+            {
+                input: 'FILE:///C:/Users//Test\\Folder/ ',
+                expected: 'c:/users/test/folder'
+            },
+            {
+                input: ' file://d:\\Projects\\ ',
+                expected: 'd:/projects'
+            },
+            {
+                input: 'C:////Temp//',
+                expected: 'c:/temp'
+            }
+        ];
+
+        cases.forEach(({ input, expected }) => {
+            const normalized = normalizeWindowsPath(input);
+            if (normalized !== expected) {
+                throw new Error(`Expected ${input} -> ${expected}, got ${normalized}`);
+            }
+        });
+
+        // Uppercase FILE:// prefixes should still be treated as Windows absolute paths
+        const uppercaseFilePath = 'FILE:///E:/Data/file.txt';
+        if (!isWindowsAbsolutePath(uppercaseFilePath)) {
+            throw new Error('isWindowsAbsolutePath should handle case-insensitive file:// prefix');
+        }
+    }, { category: 'PathMapping' });
 
     // ===========================
     // PATH VALIDATION TESTS
