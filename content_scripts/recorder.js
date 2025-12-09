@@ -256,10 +256,10 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         connector.postMessage(
             "record-action", { action: str, extra: extra || null },
             function (response) {
-                if (!response || response.error) {
+                if (response && response.error) {
                     logWarning('[CSRecorder] record-action was not accepted by background', {
                         url: window.location.href,
-                        error: response ? response.error : 'no-response'
+                        error: response.error
                     });
                 }
             }

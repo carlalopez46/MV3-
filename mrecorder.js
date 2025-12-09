@@ -264,17 +264,17 @@ Recorder.prototype.recordAction = function (cmd) {
         console.warn("[iMacros Recorder] recordAction called but actions array is undefined. Recording not active? Sending stop-recording to sync.");
         // Sync state with content script to stop it
         communicator.broadcastMessage("stop-recording", {}, this.win_id);
-        return;
+        return false;
     }
 
     if (!this.recording) {
         console.warn("[iMacros Recorder] Ignoring recordAction while recorder is idle", { action: cmd, win_id: this.win_id });
-        return;
+        return false;
     }
 
     if (typeof cmd !== "string" || cmd.length === 0) {
         console.warn("[iMacros Recorder] Ignoring invalid recordAction payload", { type: typeof cmd, win_id: this.win_id });
-        return;
+        return false;
     }
 
     this.beforeRecordAction(cmd);
@@ -296,6 +296,7 @@ Recorder.prototype.recordAction = function (cmd) {
     this.afterRecordAction(cmd);
     // console.info("recorded action: "+cmd);
     this.saveState();
+    return true;
 }
 
 Recorder.prototype.recordActions = function (...actions) {
@@ -386,8 +387,6 @@ Recorder.prototype.onRecordAction = function (data, tab_id, callback) {
     }
 
     console.log("[DEBUG] onRecordAction called - action:", data.action, "tab_id:", tab_id);
-    typeof callback === "function" &&   // release resources
-        callback();
 
     if (data._frame) {
         this.checkForFrameChange(data._frame);
@@ -395,7 +394,13 @@ Recorder.prototype.onRecordAction = function (data, tab_id, callback) {
 
     let in_event_mode = Storage.getChar("record-mode") == "event"
     console.log("[DEBUG] Recording action, in_event_mode:", in_event_mode);
-    this.recordAction(data.action)
+
+    const recorded = this.recordAction(data.action)
+    if (!recorded) {
+        typeof callback === "function" && callback({ error: "record-failed" });
+        return;
+    }
+
     // test action for password element
     if (!in_event_mode && data.extra && data.extra.encrypt) {
         // handle password
@@ -403,6 +408,9 @@ Recorder.prototype.onRecordAction = function (data, tab_id, callback) {
     } else if (in_event_mode && data.extra) {
         this.packAction(data.extra)
     }
+
+    typeof callback === "function" &&   // release resources
+        callback();
 }
 
 
