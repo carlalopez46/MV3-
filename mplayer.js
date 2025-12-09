@@ -94,14 +94,15 @@ MacroPlayer.prototype.next = function () {
 };
 
 MacroPlayer.prototype._pushFrame = function (actionType) {
+    if (this.runNestLevel >= 10) {
+        throw new RuntimeError('Maximum RUN nesting exceeded (780)');
+    }
+
     const frame = {
         callerId: actionType,
         loopStack: this.deepCopy(this.loopStack),
         localContext: this.varManager.snapshotLocalContext()
     };
-    if (this.runNestLevel >= 10) {
-        throw new RuntimeError('Maximum RUN nesting exceeded (780)');
-    }
     this.callStack.push(frame);
     this.runNestLevel += 1;
 };
