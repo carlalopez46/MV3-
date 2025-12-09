@@ -22,6 +22,16 @@ self.updatePanels = function () {
 
 
 
+// If bg_common has not been loaded (e.g., due to a previous load error), try to import it
+// so the shared handlers are available just like in MV2.
+if (typeof registerSharedBackgroundHandlers !== 'function') {
+    try {
+        importScripts('bg_common.js');
+    } catch (e) {
+        console.error("Failed to import bg_common.js for shared handlers", e);
+    }
+}
+
 if (typeof registerSharedBackgroundHandlers === 'function') {
     registerSharedBackgroundHandlers(self);
 } else {

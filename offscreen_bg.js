@@ -33,6 +33,15 @@ window.updatePanels = function () {
 
 
 
+// If bg_common.js failed to load earlier, attempt to import it to restore MV2 parity
+if (typeof registerSharedBackgroundHandlers !== 'function') {
+    try {
+        importScripts('bg_common.js');
+    } catch (e) {
+        console.error("Failed to import bg_common.js for offscreen handlers", e);
+    }
+}
+
 if (typeof registerSharedBackgroundHandlers === 'function') {
     registerSharedBackgroundHandlers(window);
 } else {
