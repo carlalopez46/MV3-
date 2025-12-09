@@ -1,0 +1,129 @@
+/*
+Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
+*/
+
+@font-face {
+    font-family: "imicons";
+    src: url("imicons/fonts/imicons.eot");
+    src: url("imicons/fonts/imicons.eot?#iefix") format("embedded-opentype"), 
+        url("imicons/fonts/imicons.woff") format("woff"), 
+        url("imicons/fonts/imicons.ttf") format("truetype"), 
+        url("imicons/fonts/imicons.svg#imicons") format("svg");
+    font-weight: normal;
+    font-style: normal;
+}
+
+#loading_message {
+    margin: 10px;
+    font-family: Verdana, Arial, sans-serif;
+}
+  
+body[treetype="bookmarks"] {
+    padding: 2px;
+    margin: 0px;
+    background-color: #ffffdc;
+}
+
+body[treetype="files"] {
+    padding: 2px;
+    margin: 0px;
+    background-color: #ffffff;
+}
+
+#no-file-io-message {
+    padding-top: 50%;
+	padding-left: 5px;
+	padding-right: 5px;
+}
+#no-file-io-paragraph {
+    padding: 10px;
+    background-color: #d1d2d4;
+    border-color: #1a62a4;
+    border-style: solid;
+    font-family: Arial;
+    font-size: 1.1em;
+    text-align: left;
+}
+
+.no-bold-link {
+    font-weight: normal;
+}
+
+#no-file-icon {
+	font-family: imicons;
+    display: inline-block;
+    font-size: 3em;
+    color: #f0554c;
+	text-align: center;
+    margin-bottom: inherit;
+    vertical-align: middle;
+}
+
+.tree-menu {
+    -webkit-padding-start: 0px !important;
+}
+
+.jstree-anchor {
+    margin-left: -16px !important; /*-10px*/
+}
+
+
+.jstree-default > .jstree-no-dots .jstree-open > .jstree-ocl {
+    background-position: -44px -4px !important; /*-36px -4px;*/
+}
+
+.jstree-default > .jstree-no-dots .jstree-closed > .jstree-ocl {
+    background-position: -10px -4px !important; /*-4px -4px;*/
+}
+
+ul[class="vakata-context jstree-contextmenu jstree-default-contextmenu"] {
+    background: #217CCE !important;
+    border: 1px solid #217CCE !important;
+    box-shadow: 2px 2px 2px #808080 !important;
+    color: ghostwhite !important;
+    text-decoration-color: ghostwhite !important;
+    position: absolute;
+    display:flex;
+}
+
+.vakata-contextmenu-sep {
+    background: ghostwhite !important;
+    color: #217CCE !important;
+}
+
+.vakata-context li > a {
+    display: block;
+    padding: 0 2em 0 2em;
+    text-decoration: none;
+    width: auto;
+    color: ghostwhite !important;
+    white-space: nowrap;
+    line-height: 2.4em;
+    text-shadow: 0px 0px 0 ghostwhite !important;
+    border-radius: 1px;
+
+}
+
+.vakata-context li > a:hover {
+    background: #1A62A4 !important;
+}
+
+.vakata-context .vakata-context-hover >a{
+    background-color: #1A62A4 !important;
+    box-shadow: 0 0 2px #217CCE !important;
+}
+
+.jstree-default .jstree-node{
+    margin-left: 8px !important;
+}
+
+.jstree-icon.jstree-themeicon.jstree-themeicon-custom:before {
+    font-family: imicons;
+    display: inline-block;
+    content: "X";
+    text-align: center;
+    vertical-align: middle;
+    font-size: 15px;
+    color: #4CC4D1;
+    font-style: normal;
+}

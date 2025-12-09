@@ -1,0 +1,821 @@
+{
+  "summary": {
+    "totalFiles": 8,
+    "totalMethods": 11,
+    "totalWarnings": 0
+  },
+  "fileDetails": [
+    {
+      "file": "/home/user/iMacrosMV3/AsyncFileIO.js",
+      "methodCount": 10,
+      "methods": [
+        "openNode",
+        "readTextFile",
+        "writeTextFile",
+        "appendTextFile",
+        "getNodesInDir",
+        "getNodesInDir",
+        "getDefaultDir",
+        "makeDirectory",
+        "writeImageToFile",
+        "writeImageToFile"
+      ],
+      "patterns": []
+    },
+    {
+      "file": "/home/user/iMacrosMV3/bg.js",
+      "methodCount": 22,
+      "methods": [
+        "isInstalled",
+        "isInstalled",
+        "openNode",
+        "writeTextFile",
+        "getDefaultDir",
+        "makeDirectory",
+        "getDefaultDir",
+        "writeTextFile",
+        "getDefaultDir",
+        "writeTextFile",
+        "getDefaultDir",
+        "writeTextFile",
+        "getDefaultDir",
+        "queryLimits",
+        "NodeObject.append",
+        "NodeObject.exists",
+        "NodeObject.append",
+        "NodeObject.exists",
+        "NodeObject.append",
+        "NodeObject.clone",
+        "NodeObject.append",
+        "NodeObject.append"
+      ],
+      "patterns": [
+        "node_clone_append",
+        "promise_chain"
+      ]
+    },
+    {
+      "file": "/home/user/iMacrosMV3/editor/saveAsDialog.js",
+      "methodCount": 8,
+      "methods": [
+        "getDefaultDir",
+        "openNode",
+        "isInstalled",
+        "openNode",
+        "getDefaultDir",
+        "NodeObject.exists",
+        "NodeObject.append",
+        "NodeObject.exists"
+      ],
+      "patterns": [
+        "promise_chain"
+      ]
+    },
+    {
+      "file": "/home/user/iMacrosMV3/fileView.js",
+      "methodCount": 17,
+      "methods": [
+        "isInstalled",
+        "openNode",
+        "makeDirectory",
+        "makeDirectory",
+        "openNode",
+        "openNode",
+        "openNode",
+        "openNode",
+        "getDefaultDir",
+        "openNode",
+        "getNodesInDir",
+        "NodeObject.clone",
+        "NodeObject.clone",
+        "NodeObject.moveTo",
+        "NodeObject.remove",
+        "NodeObject.isDir",
+        "NodeObject.moveTo"
+      ],
+      "patterns": [
+        "node_clone_append",
+        "promise_chain"
+      ]
+    },
+    {
+      "file": "/home/user/iMacrosMV3/folderView.js",
+      "methodCount": 6,
+      "methods": [
+        "isInstalled",
+        "getLogicalDrives",
+        "getDefaultDir",
+        "openNode",
+        "openNode",
+        "getNodesInDir"
+      ],
+      "patterns": [
+        "promise_chain"
+      ]
+    },
+    {
+      "file": "/home/user/iMacrosMV3/mplayer.js",
+      "methodCount": 54,
+      "methods": [
+        "openNode",
+        "openNode",
+        "openNode",
+        "openNode",
+        "appendTextFile",
+        "writeTextFile",
+        "writeTextFile",
+        "writeImageToFile",
+        "openNode",
+        "writeImageToFile",
+        "openNode",
+        "openNode",
+        "openNode",
+        "appendTextFile",
+        "openNode",
+        "isInstalled",
+        "getDefaultDir",
+        "appendTextFile",
+        "openNode",
+        "readTextFile",
+        "writeTextFile",
+        "writeTextFile",
+        "openNode",
+        "readTextFile",
+        "NodeObject.append",
+        "NodeObject.clone",
+        "NodeObject.exists",
+        "NodeObject.append",
+        "NodeObject.exists",
+        "NodeObject.remove",
+        "NodeObject.moveTo",
+        "NodeObject.clone",
+        "NodeObject.exists",
+        "NodeObject.append",
+        "NodeObject.append",
+        "NodeObject.append",
+        "NodeObject.append",
+        "NodeObject.clone",
+        "NodeObject.exists",
+        "NodeObject.append",
+        "NodeObject.exists",
+        "NodeObject.exists",
+        "NodeObject.clone",
+        "NodeObject.append",
+        "NodeObject.clone",
+        "NodeObject.append",
+        "NodeObject.clone",
+        "NodeObject.append",
+        "NodeObject.clone",
+        "NodeObject.append",
+        "NodeObject.exists",
+        "NodeObject.clone",
+        "NodeObject.append",
+        "NodeObject.exists"
+      ],
+      "patterns": [
+        "localStorage_default_path",
+        "node_clone_append",
+        "promise_chain"
+      ]
+    },
+    {
+      "file": "/home/user/iMacrosMV3/nm_connector.js",
+      "methodCount": 10,
+      "methods": [
+        "isInstalled",
+        "openNode",
+        "openNode",
+        "writeImageToFile",
+        "openNode",
+        "openNode",
+        "readTextFile",
+        "NodeObject.append",
+        "NodeObject.append",
+        "NodeObject.exists"
+      ],
+      "patterns": [
+        "localStorage_default_path",
+        "promise_chain"
+      ]
+    },
+    {
+      "file": "/home/user/iMacrosMV3/panel.js",
+      "methodCount": 14,
+      "methods": [
+        "openNode",
+        "readTextFile",
+        "openNode",
+        "readTextFile",
+        "openNode",
+        "readTextFile",
+        "isInstalled",
+        "openNode",
+        "isInstalled",
+        "openNode",
+        "readTextFile",
+        "openNode",
+        "NodeObject.append",
+        "NodeObject.append"
+      ],
+      "patterns": [
+        "localStorage_default_path",
+        "promise_chain"
+      ]
+    }
+  ],
+  "methodUsage": [
+    {
+      "method": "openNode",
+      "usageCount": 33,
+      "files": [
+        "/home/user/iMacrosMV3/AsyncFileIO.js",
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/editor/saveAsDialog.js",
+        "/home/user/iMacrosMV3/editor/saveAsDialog.js",
+        "/home/user/iMacrosMV3/fileView.js",
+        "/home/user/iMacrosMV3/fileView.js",
+        "/home/user/iMacrosMV3/fileView.js",
+        "/home/user/iMacrosMV3/fileView.js",
+        "/home/user/iMacrosMV3/fileView.js",
+        "/home/user/iMacrosMV3/fileView.js",
+        "/home/user/iMacrosMV3/folderView.js",
+        "/home/user/iMacrosMV3/folderView.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/nm_connector.js",
+        "/home/user/iMacrosMV3/nm_connector.js",
+        "/home/user/iMacrosMV3/nm_connector.js",
+        "/home/user/iMacrosMV3/nm_connector.js",
+        "/home/user/iMacrosMV3/panel.js",
+        "/home/user/iMacrosMV3/panel.js",
+        "/home/user/iMacrosMV3/panel.js",
+        "/home/user/iMacrosMV3/panel.js",
+        "/home/user/iMacrosMV3/panel.js",
+        "/home/user/iMacrosMV3/panel.js"
+      ],
+      "locations": [
+        {
+          "file": "/home/user/iMacrosMV3/AsyncFileIO.js",
+          "line": 404
+        },
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 289
+        },
+        {
+          "file": "/home/user/iMacrosMV3/editor/saveAsDialog.js",
+          "line": 73
+        },
+        {
+          "file": "/home/user/iMacrosMV3/editor/saveAsDialog.js",
+          "line": 129
+        },
+        {
+          "file": "/home/user/iMacrosMV3/fileView.js",
+          "line": 88
+        },
+        {
+          "file": "/home/user/iMacrosMV3/fileView.js",
+          "line": 136
+        },
+        {
+          "file": "/home/user/iMacrosMV3/fileView.js",
+          "line": 167
+        },
+        {
+          "file": "/home/user/iMacrosMV3/fileView.js",
+          "line": 245
+        },
+        {
+          "file": "/home/user/iMacrosMV3/fileView.js",
+          "line": 246
+        },
+        {
+          "file": "/home/user/iMacrosMV3/fileView.js",
+          "line": 331
+        },
+        {
+          "file": "/home/user/iMacrosMV3/folderView.js",
+          "line": 104
+        },
+        {
+          "file": "/home/user/iMacrosMV3/folderView.js",
+          "line": 116
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 1392
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 1574
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 1581
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 1990
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 2198
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 2366
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 2389
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 2441
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 2473
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 3868
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 4089
+        },
+        {
+          "file": "/home/user/iMacrosMV3/nm_connector.js",
+          "line": 93
+        },
+        {
+          "file": "/home/user/iMacrosMV3/nm_connector.js",
+          "line": 97
+        },
+        {
+          "file": "/home/user/iMacrosMV3/nm_connector.js",
+          "line": 171
+        },
+        {
+          "file": "/home/user/iMacrosMV3/nm_connector.js",
+          "line": 173
+        },
+        {
+          "file": "/home/user/iMacrosMV3/panel.js",
+          "line": 68
+        },
+        {
+          "file": "/home/user/iMacrosMV3/panel.js",
+          "line": 146
+        },
+        {
+          "file": "/home/user/iMacrosMV3/panel.js",
+          "line": 199
+        },
+        {
+          "file": "/home/user/iMacrosMV3/panel.js",
+          "line": 253
+        },
+        {
+          "file": "/home/user/iMacrosMV3/panel.js",
+          "line": 442
+        },
+        {
+          "file": "/home/user/iMacrosMV3/panel.js",
+          "line": 461
+        }
+      ]
+    },
+    {
+      "method": "readTextFile",
+      "usageCount": 8,
+      "files": [
+        "/home/user/iMacrosMV3/AsyncFileIO.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/nm_connector.js",
+        "/home/user/iMacrosMV3/panel.js",
+        "/home/user/iMacrosMV3/panel.js",
+        "/home/user/iMacrosMV3/panel.js",
+        "/home/user/iMacrosMV3/panel.js"
+      ],
+      "locations": [
+        {
+          "file": "/home/user/iMacrosMV3/AsyncFileIO.js",
+          "line": 410
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 3882
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 4097
+        },
+        {
+          "file": "/home/user/iMacrosMV3/nm_connector.js",
+          "line": 185
+        },
+        {
+          "file": "/home/user/iMacrosMV3/panel.js",
+          "line": 70
+        },
+        {
+          "file": "/home/user/iMacrosMV3/panel.js",
+          "line": 148
+        },
+        {
+          "file": "/home/user/iMacrosMV3/panel.js",
+          "line": 200
+        },
+        {
+          "file": "/home/user/iMacrosMV3/panel.js",
+          "line": 443
+        }
+      ]
+    },
+    {
+      "method": "writeTextFile",
+      "usageCount": 9,
+      "files": [
+        "/home/user/iMacrosMV3/AsyncFileIO.js",
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js"
+      ],
+      "locations": [
+        {
+          "file": "/home/user/iMacrosMV3/AsyncFileIO.js",
+          "line": 421
+        },
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 310
+        },
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 790
+        },
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 801
+        },
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 810
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 2049
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 2064
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 3884
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 3894
+        }
+      ]
+    },
+    {
+      "method": "appendTextFile",
+      "usageCount": 4,
+      "files": [
+        "/home/user/iMacrosMV3/AsyncFileIO.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js"
+      ],
+      "locations": [
+        {
+          "file": "/home/user/iMacrosMV3/AsyncFileIO.js",
+          "line": 432
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 2040
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 2453
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 3706
+        }
+      ]
+    },
+    {
+      "method": "getNodesInDir",
+      "usageCount": 4,
+      "files": [
+        "/home/user/iMacrosMV3/AsyncFileIO.js",
+        "/home/user/iMacrosMV3/AsyncFileIO.js",
+        "/home/user/iMacrosMV3/fileView.js",
+        "/home/user/iMacrosMV3/folderView.js"
+      ],
+      "locations": [
+        {
+          "file": "/home/user/iMacrosMV3/AsyncFileIO.js",
+          "line": 443
+        },
+        {
+          "file": "/home/user/iMacrosMV3/AsyncFileIO.js",
+          "line": 447
+        },
+        {
+          "file": "/home/user/iMacrosMV3/fileView.js",
+          "line": 337
+        },
+        {
+          "file": "/home/user/iMacrosMV3/folderView.js",
+          "line": 122
+        }
+      ]
+    },
+    {
+      "method": "getDefaultDir",
+      "usageCount": 11,
+      "files": [
+        "/home/user/iMacrosMV3/AsyncFileIO.js",
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/editor/saveAsDialog.js",
+        "/home/user/iMacrosMV3/editor/saveAsDialog.js",
+        "/home/user/iMacrosMV3/fileView.js",
+        "/home/user/iMacrosMV3/folderView.js",
+        "/home/user/iMacrosMV3/mplayer.js"
+      ],
+      "locations": [
+        {
+          "file": "/home/user/iMacrosMV3/AsyncFileIO.js",
+          "line": 474
+        },
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 645
+        },
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 779
+        },
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 798
+        },
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 807
+        },
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 1083
+        },
+        {
+          "file": "/home/user/iMacrosMV3/editor/saveAsDialog.js",
+          "line": 48
+        },
+        {
+          "file": "/home/user/iMacrosMV3/editor/saveAsDialog.js",
+          "line": 130
+        },
+        {
+          "file": "/home/user/iMacrosMV3/fileView.js",
+          "line": 323
+        },
+        {
+          "file": "/home/user/iMacrosMV3/folderView.js",
+          "line": 103
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 3337
+        }
+      ]
+    },
+    {
+      "method": "makeDirectory",
+      "usageCount": 4,
+      "files": [
+        "/home/user/iMacrosMV3/AsyncFileIO.js",
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/fileView.js",
+        "/home/user/iMacrosMV3/fileView.js"
+      ],
+      "locations": [
+        {
+          "file": "/home/user/iMacrosMV3/AsyncFileIO.js",
+          "line": 488
+        },
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 745
+        },
+        {
+          "file": "/home/user/iMacrosMV3/fileView.js",
+          "line": 100
+        },
+        {
+          "file": "/home/user/iMacrosMV3/fileView.js",
+          "line": 115
+        }
+      ]
+    },
+    {
+      "method": "writeImageToFile",
+      "usageCount": 5,
+      "files": [
+        "/home/user/iMacrosMV3/AsyncFileIO.js",
+        "/home/user/iMacrosMV3/AsyncFileIO.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/nm_connector.js"
+      ],
+      "locations": [
+        {
+          "file": "/home/user/iMacrosMV3/AsyncFileIO.js",
+          "line": 498
+        },
+        {
+          "file": "/home/user/iMacrosMV3/AsyncFileIO.js",
+          "line": 501
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 2081
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 2229
+        },
+        {
+          "file": "/home/user/iMacrosMV3/nm_connector.js",
+          "line": 110
+        }
+      ]
+    },
+    {
+      "method": "isInstalled",
+      "usageCount": 9,
+      "files": [
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/editor/saveAsDialog.js",
+        "/home/user/iMacrosMV3/fileView.js",
+        "/home/user/iMacrosMV3/folderView.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/nm_connector.js",
+        "/home/user/iMacrosMV3/panel.js",
+        "/home/user/iMacrosMV3/panel.js"
+      ],
+      "locations": [
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 8
+        },
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 25
+        },
+        {
+          "file": "/home/user/iMacrosMV3/editor/saveAsDialog.js",
+          "line": 116
+        },
+        {
+          "file": "/home/user/iMacrosMV3/fileView.js",
+          "line": 16
+        },
+        {
+          "file": "/home/user/iMacrosMV3/folderView.js",
+          "line": 6
+        },
+        {
+          "file": "/home/user/iMacrosMV3/mplayer.js",
+          "line": 3334
+        },
+        {
+          "file": "/home/user/iMacrosMV3/nm_connector.js",
+          "line": 83
+        },
+        {
+          "file": "/home/user/iMacrosMV3/panel.js",
+          "line": 251
+        },
+        {
+          "file": "/home/user/iMacrosMV3/panel.js",
+          "line": 365
+        }
+      ]
+    },
+    {
+      "method": "queryLimits",
+      "usageCount": 1,
+      "files": [
+        "/home/user/iMacrosMV3/bg.js"
+      ],
+      "locations": [
+        {
+          "file": "/home/user/iMacrosMV3/bg.js",
+          "line": 1211
+        }
+      ]
+    },
+    {
+      "method": "getLogicalDrives",
+      "usageCount": 1,
+      "files": [
+        "/home/user/iMacrosMV3/folderView.js"
+      ],
+      "locations": [
+        {
+          "file": "/home/user/iMacrosMV3/folderView.js",
+          "line": 88
+        }
+      ]
+    }
+  ],
+  "patterns": [
+    {
+      "pattern": "node_clone_append",
+      "description": "Clones node and appends path",
+      "fileCount": 3,
+      "files": [
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/fileView.js",
+        "/home/user/iMacrosMV3/mplayer.js"
+      ]
+    },
+    {
+      "pattern": "promise_chain",
+      "description": "Uses promise chaining",
+      "fileCount": 7,
+      "files": [
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/editor/saveAsDialog.js",
+        "/home/user/iMacrosMV3/fileView.js",
+        "/home/user/iMacrosMV3/folderView.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/nm_connector.js",
+        "/home/user/iMacrosMV3/panel.js"
+      ]
+    },
+    {
+      "pattern": "localStorage_default_path",
+      "description": "Uses localStorage for default paths",
+      "fileCount": 3,
+      "files": [
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/nm_connector.js",
+        "/home/user/iMacrosMV3/panel.js"
+      ]
+    }
+  ],
+  "warnings": [],
+  "recommendations": [
+    {
+      "priority": "HIGH",
+      "type": "HEAVILY_USED",
+      "message": "Method openNode is heavily used (33 times) - ensure thorough testing"
+    },
+    {
+      "priority": "HIGH",
+      "type": "HEAVILY_USED",
+      "message": "Method getDefaultDir is heavily used (11 times) - ensure thorough testing"
+    },
+    {
+      "priority": "HIGH",
+      "type": "DEPENDENCY",
+      "message": "AsyncFileIO.js requires Storage object from utils.js",
+      "affectedFiles": [
+        "/home/user/iMacrosMV3/AsyncFileIO.js",
+        "/home/user/iMacrosMV3/bg.js",
+        "/home/user/iMacrosMV3/mplayer.js",
+        "/home/user/iMacrosMV3/panel.js"
+      ]
+    }
+  ]
+}

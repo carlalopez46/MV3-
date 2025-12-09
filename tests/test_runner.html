@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iMacros MV3 テストランナー</title>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --text-primary: #eee;
+            --text-secondary: #aaa;
+            --accent: #0f3460;
+            --success: #00bf63;
+            --error: #e94560;
+            --warning: #f1c40f;
+            --info: #3498db;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 2px solid var(--accent);
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: var(--text-secondary);
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            background: var(--accent);
+            color: var(--text-primary);
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s;
+        }
+
+        button:hover {
+            background: #1a4980;
+            transform: translateY(-2px);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-primary {
+            background: var(--info);
+        }
+
+        .btn-success {
+            background: var(--success);
+        }
+
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .summary-card {
+            background: var(--bg-secondary);
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .summary-card .number {
+            font-size: 2.5em;
+            font-weight: bold;
+            display: block;
+        }
+
+        .summary-card .label {
+            color: var(--text-secondary);
+            font-size: 0.9em;
+        }
+
+        .summary-card.passed .number {
+            color: var(--success);
+        }
+
+        .summary-card.failed .number {
+            color: var(--error);
+        }
+
+        .summary-card.skipped .number {
+            color: var(--warning);
+        }
+
+        .test-list {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .test-list-header {
+            background: var(--accent);
+            padding: 15px 20px;
+            font-weight: bold;
+        }
+
+        .test-item {
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .test-item:last-child {
+            border-bottom: none;
+        }
+
+        .test-status {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .test-status.passed {
+            background: var(--success);
+        }
+
+        .test-status.failed {
+            background: var(--error);
+        }
+
+        .test-status.skipped {
+            background: var(--warning);
+        }
+
+        .test-status.pending {
+            background: var(--text-secondary);
+        }
+
+        .test-name {
+            flex: 1;
+        }
+
+        .test-error {
+            color: var(--error);
+            font-size: 0.85em;
+            padding-left: 39px;
+            padding-bottom: 10px;
+        }
+
+        .log-output {
+            background: #0d0d15;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 30px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+        }
+
+        .log-output pre {
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 50px;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid var(--accent);
+            border-top-color: var(--info);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>🧪 iMacros MV3 テストランナー</h1>
+            <p class="subtitle">RUN コマンドと変数管理のテストスイート</p>
+        </header>
+
+        <div class="controls">
+            <button id="run-all" class="btn-primary">▶ すべてのテストを実行</button>
+            <button id="run-selected" disabled>選択したテストを実行</button>
+            <button id="clear-results">結果をクリア</button>
+        </div>
+
+        <div class="summary" id="summary" style="display: none;">
+            <div class="summary-card passed">
+                <span class="number" id="passed-count">0</span>
+                <span class="label">成功</span>
+            </div>
+            <div class="summary-card failed">
+                <span class="number" id="failed-count">0</span>
+                <span class="label">失敗</span>
+            </div>
+            <div class="summary-card skipped">
+                <span class="number" id="skipped-count">0</span>
+                <span class="label">スキップ</span>
+            </div>
+            <div class="summary-card">
+                <span class="number" id="total-count">0</span>
+                <span class="label">合計</span>
+            </div>
+        </div>
+
+        <div class="test-list" id="test-list">
+            <div class="test-list-header">テスト一覧</div>
+            <div id="test-items">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>テストを読み込み中...</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="log-output">
+            <pre id="log-content">テストを実行するには「すべてのテストを実行」ボタンをクリックしてください。</pre>
+        </div>
+    </div>
+
+    <!-- Mock Chrome API for file:// context -->
+    <script>
+        if (typeof chrome === 'undefined') {
+            window.chrome = {
+                runtime: {
+                    lastError: null,
+                    sendMessage: function (msg, cb) { console.log('Mock sendMessage:', msg); if (cb) cb(); },
+                    getURL: function (path) { return path; }
+                },
+                windows: {
+                    onCreated: { addListener: function () { }, hasListener: function () { }, removeListener: function () { } },
+                    onRemoved: { addListener: function () { }, hasListener: function () { }, removeListener: function () { } }
+                },
+                tabs: {
+                    onUpdated: { addListener: function () { }, hasListener: function () { }, removeListener: function () { } },
+                    query: function (q, cb) { if (cb) cb([]); }
+                },
+                downloads: {
+                    onDeterminingFilename: { addListener: function () { } }
+                },
+                storage: {
+                    local: {
+                        get: function (k, cb) { if (cb) cb({}); },
+                        set: function (d, cb) { if (cb) cb(); }
+                    }
+                }
+            };
+        }
+    </script>
+
+    <!-- Dependencies -->
+    <script src="../utils.js"></script>
+    <script src="../errorLogger.js"></script>
+    <script src="../promise-utils.js"></script>
+    <script src="../AsyncFileIO.js"></script>
+    <script src="../variable-manager.js"></script>
+    <script src="../mplayer.js"></script>
+    <script src="../mrecorder.js"></script>
+    <script src="../context.js"></script>
+    <script src="run_command_tests.js"></script>
+
+    <script>
+        const testItems = document.getElementById('test-items');
+        const logContent = document.getElementById('log-content');
+        const summary = document.getElementById('summary');
+        let logs = [];
+
+        // Override console.log to capture output
+        const originalLog = console.log;
+        const originalError = console.error;
+        const originalWarn = console.warn;
+
+        function captureLog(type, ...args) {
+            const message = args.map(a =>
+                typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)
+            ).join(' ');
+            logs.push({ type, message });
+            updateLogOutput();
+        }
+
+        console.log = (...args) => { captureLog('log', ...args); originalLog(...args); };
+        console.error = (...args) => { captureLog('error', ...args); originalError(...args); };
+        console.warn = (...args) => { captureLog('warn', ...args); originalWarn(...args); };
+
+        function updateLogOutput() {
+            logContent.innerHTML = logs.map(l => {
+                const color = l.type === 'error' ? '#e94560' : l.type === 'warn' ? '#f1c40f' : '#eee';
+                return '<span style="color:' + color + '">' + escapeHtml(l.message) + '</span>';
+            }).join('\n');
+            logContent.scrollTop = logContent.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initialize test list
+        function initializeTestList() {
+            if (typeof RunCommandTestSuite === 'undefined') {
+                testItems.innerHTML = '<div class="test-item">テストスイートの読み込みに失敗しました</div>';
+                return;
+            }
+
+            const tests = RunCommandTestSuite.tests;
+            if (tests.length === 0) {
+                testItems.innerHTML = '<div class="test-item">テストが見つかりません</div>';
+                return;
+            }
+
+            testItems.innerHTML = tests.map(function (test, index) {
+                return '<div class="test-item" data-index="' + index + '">' +
+                    '<div class="test-status pending">?</div>' +
+                    '<div class="test-name">' + escapeHtml(test.name) + '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        // Run all tests
+        async function runAllTests() {
+            if (typeof RunCommandTestSuite === 'undefined') {
+                alert('テストスイートが読み込まれていません');
+                return;
+            }
+
+            logs = [];
+            updateLogOutput();
+
+            const runButton = document.getElementById('run-all');
+            runButton.disabled = true;
+            runButton.textContent = '⏳ 実行中...';
+
+            // Reset UI
+            document.querySelectorAll('.test-status').forEach(function (el) {
+                el.className = 'test-status pending';
+                el.textContent = '?';
+            });
+
+            const results = await RunCommandTestSuite.runAll();
+
+            // Update summary
+            document.getElementById('passed-count').textContent = results.passed;
+            document.getElementById('failed-count').textContent = results.failed;
+            document.getElementById('skipped-count').textContent = results.skipped;
+            document.getElementById('total-count').textContent =
+                results.passed + results.failed + results.skipped;
+            summary.style.display = 'grid';
+
+            runButton.disabled = false;
+            runButton.textContent = '▶ すべてのテストを実行';
+        }
+
+        // Clear results
+        function clearResults() {
+            logs = [];
+            logContent.textContent = 'テストを実行するには「すべてのテストを実行」ボタンをクリックしてください。';
+            summary.style.display = 'none';
+            document.querySelectorAll('.test-status').forEach(function (el) {
+                el.className = 'test-status pending';
+                el.textContent = '?';
+            });
+        }
+
+        // Event listeners
+        document.getElementById('run-all').addEventListener('click', runAllTests);
+        document.getElementById('clear-results').addEventListener('click', clearResults);
+
+        // Initialize on load
+        window.addEventListener('load', function () {
+            setTimeout(initializeTestList, 100);
+        });
+    </script>
+</body>
+
+</html>

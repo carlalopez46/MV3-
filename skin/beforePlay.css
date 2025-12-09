@@ -1,0 +1,94 @@
+/*
+Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
+*/
+
+/* styles for beforePlay dialog */
+
+@font-face {
+    font-family: "imicons";
+    src: url("imicons/fonts/imicons.eot");
+    src: url("imicons/fonts/imicons.eot?#iefix") format("embedded-opentype"), 
+        url("imicons/fonts/imicons.woff") format("woff"), 
+        url("imicons/fonts/imicons.ttf") format("truetype"), 
+        url("imicons/fonts/imicons.svg#imicons") format("svg");
+    font-weight: normal;
+    font-style: normal;
+}
+
+#container {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+}
+
+#buttons {
+    display: -webkit-box;
+    -webkit-box-pack: center;
+    -webkit-box-orient: horizontal;
+}
+
+#message-div {
+    border: 1px solid #aaaaaa;
+    -webkit-border-radius: 3px;
+    padding: 7px;
+}
+
+#message {
+    padding: 0px;
+    margin: 0px;
+}
+
+#checkbox-div {
+    margin-top: 20px;
+    margin-bottom: 10px;
+    margin-left: 30px;
+    padding: 5px;
+    font-size: small !important;
+    font-family: Arial, sans-serif;
+    vertical-align: middle;
+}
+
+
+#play-button {
+    /*background-image: url("play.png");*/
+}
+
+#play-button:before {
+    font-family: imicons;
+    display: inline-block;
+    content: "c";
+    font-size: 16px;
+    color: ghostwhite;
+    margin-right: 10px;
+    margin-bottom: inherit;
+    vertical-align: middle;
+}
+
+#edit-button {
+    /*background-image: url("edit.png");*/
+}
+
+#edit-button:before {
+    font-family: imicons;
+    display: inline-block;
+    content: "h";
+    font-size: 16px;
+    color: ghostwhite;
+    margin-right: 10px;
+    margin-bottom: inherit;
+    vertical-align: middle;
+}
+
+#cancel-button {
+    /*background-image: url("cancel.png");*/
+}
+
+#cancel-button:before {
+    font-family: imicons;
+    display: inline-block;
+    content: "e";
+    font-size: 16px;
+    color: ghostwhite;
+    margin-right: 10px;
+    margin-bottom: inherit;
+    vertical-align: middle;
+}

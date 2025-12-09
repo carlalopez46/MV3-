@@ -1,0 +1,115 @@
+/*</JasobNoObfs>*/
+/*
+Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
+*/
+/*</JasobNoObfs>*/
+
+/* common styles for all dialogs */
+
+.button {
+    display: -webkit-box;
+    -webkit-box-pack: center;
+    -webkit-box-align: center;
+    height: 16px;
+    width: auto; 
+    margin-top: 3px;
+    margin-bottom: 3px;
+    margin-left: 7px;
+    margin-right: 7px;  /* padding-left: 22px; */
+    padding-left: 4px;
+    padding-right: 4px;
+    padding-top: 3px;
+    padding-bottom: 3px;
+    /* font-family: sans-serif; */
+    font-size: 1em;
+    color: ghostwhite;
+    background-color: #217CCE; /*#eeeeee;*/
+    border: 1px solid #217CCE; /*aaaaaa;*/
+    -webkit-border-radius: 0px;
+    border-radius: 0px; /*3;*/
+}
+#tabs-content .button {
+    margin: 3 auto;
+}
+
+
+.icon-button {
+    background-repeat: no-repeat;
+    /* background-position: left; */
+    background-position: 3px;
+    padding-left: 4px; /*22px;*/
+}
+
+
+.button[collapsed="true"] {
+    display: none;
+}
+
+.button:hover {
+    background-color: #1A62A4;/*#efefef;*/
+    /* border: 1px solid #aaaaaa; */
+    /* -webkit-border-radius: 3px; */
+    text-decoration: none;
+    cursor: hand;
+}
+
+.button[disabled="true"] {
+    color: #bbbbbb;
+    cursor: default;
+}
+
+.button[disabled="true"]:hover {
+    background-color: #217CCE;/*#eeeeee;*/
+    cursor: default;
+}
+
+.box {
+    display: -webkit-box;
+}
+
+.vbox {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+   
+}
+
+.vbox[hidden="true"] {
+    display: none;
+}
+
+
+.hbox {
+    display: -webkit-box;
+    -webkit-box-orient: horizontal;
+}
+
+.hbox[hidden="true"] {
+    display: none;
+}
+
+.centered {
+    -webkit-box-pack: center;
+}
+
+.box[hidden="true"] {
+    display: none;
+}
+
+.a-link {
+    color: #217CCE;/* blue;*/
+    font-weight: bold;
+}
+
+.a-link:hover {
+    text-decoration: underline;
+    color: #1A62A4;
+    cursor: hand;
+}
+
+.dialogs-global-settings {
+    max-width: 500px;
+}
+
+.disabled {
+    color: darkgrey;
+}

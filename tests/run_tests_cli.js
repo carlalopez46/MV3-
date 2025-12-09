@@ -1,0 +1,679 @@
+#!/usr/bin/env node
+/**
+ * CLI Test Runner for iMacros MV3
+ *
+ * Executes all tests in a headless environment and reports results.
+ * This enables automated testing without requiring a browser.
+ *
+ * Usage:
+ *   node run_tests_cli.js [options]
+ *
+ * Options:
+ *   --suite=<name>  Run specific test suite (fsaccess|afio|vars|macro|all)
+ *   --verbose       Show detailed output
+ *   --watch         Watch for file changes and re-run tests
+ */
+
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+const { Blob } = require('buffer');
+
+// ANSI color codes for terminal output
+const colors = {
+    reset: '\x1b[0m',
+    bright: '\x1b[1m',
+    red: '\x1b[31m',
+    green: '\x1b[32m',
+    yellow: '\x1b[33m',
+    blue: '\x1b[34m',
+    magenta: '\x1b[35m',
+    cyan: '\x1b[36m',
+    white: '\x1b[37m',
+    bgRed: '\x1b[41m',
+    bgGreen: '\x1b[42m',
+    bgYellow: '\x1b[43m'
+};
+
+function colorize(text, color) {
+    return `${colors[color]}${text}${colors.reset}`;
+}
+
+function logHeader(text) {
+    console.log('\n' + colorize('='.repeat(80), 'cyan'));
+    console.log(colorize(text, 'bright'));
+    console.log(colorize('='.repeat(80), 'cyan') + '\n');
+}
+
+function logSuccess(text) {
+    console.log(colorize('✓ ' + text, 'green'));
+}
+
+function logError(text) {
+    console.log(colorize('✗ ' + text, 'red'));
+}
+
+function logWarning(text) {
+    console.log(colorize('⚠ ' + text, 'yellow'));
+}
+
+function logInfo(text) {
+    console.log(colorize('ℹ ' + text, 'blue'));
+}
+
+// Parse command line arguments
+const args = process.argv.slice(2);
+const options = {
+    suite: 'all',
+    verbose: false,
+    watch: false
+};
+
+// Shared sandbox for executing source and test files
+const sharedSandbox = Object.create(null);
+sharedSandbox.global = sharedSandbox;
+sharedSandbox.globalThis = sharedSandbox;
+sharedSandbox.console = console;
+sharedSandbox.setTimeout = setTimeout;
+sharedSandbox.setInterval = setInterval;
+sharedSandbox.clearTimeout = clearTimeout;
+sharedSandbox.clearInterval = clearInterval;
+sharedSandbox.setImmediate = setImmediate;
+sharedSandbox.clearImmediate = clearImmediate;
+sharedSandbox.Promise = Promise;
+sharedSandbox.Map = Map;
+sharedSandbox.Set = Set;
+sharedSandbox.Array = Array;
+sharedSandbox.Object = Object;
+sharedSandbox.String = String;
+sharedSandbox.Number = Number;
+sharedSandbox.Boolean = Boolean;
+sharedSandbox.Error = Error;
+sharedSandbox.TypeError = TypeError;
+sharedSandbox.ReferenceError = ReferenceError;
+sharedSandbox.SyntaxError = SyntaxError;
+sharedSandbox.RangeError = RangeError;
+sharedSandbox.Date = Date;
+sharedSandbox.JSON = JSON;
+sharedSandbox.Math = Math;
+sharedSandbox.RegExp = RegExp;
+sharedSandbox.Symbol = Symbol;
+sharedSandbox.Function = Function;
+sharedSandbox.WeakMap = WeakMap;
+sharedSandbox.WeakSet = WeakSet;
+sharedSandbox.Uint8Array = Uint8Array;
+sharedSandbox.Int8Array = Int8Array;
+sharedSandbox.Uint16Array = Uint16Array;
+sharedSandbox.Uint32Array = Uint32Array;
+sharedSandbox.Float32Array = Float32Array;
+sharedSandbox.Float64Array = Float64Array;
+sharedSandbox.BigInt64Array = BigInt64Array;
+sharedSandbox.BigUint64Array = BigUint64Array;
+sharedSandbox.ArrayBuffer = ArrayBuffer;
+sharedSandbox.TextEncoder = TextEncoder;
+sharedSandbox.TextDecoder = TextDecoder;
+sharedSandbox.BigInt = BigInt;
+sharedSandbox.URL = URL;
+sharedSandbox.AbortController = AbortController;
+sharedSandbox.Blob = Blob;
+// Deliberately omit Node internals (process, require, module, etc.) to reduce
+// sandbox escape surface; add only broadly safe, browser-like globals.
+const sharedContext = vm.createContext(sharedSandbox);
+
+args.forEach(arg => {
+    if (arg.startsWith('--suite=')) {
+        options.suite = arg.split('=')[1];
+    } else if (arg === '--verbose') {
+        options.verbose = true;
+    } else if (arg === '--watch') {
+        options.watch = true;
+    }
+});
+
+/**
+ * Simulate browser environment for tests
+ */
+function setupBrowserEnvironment() {
+    // Minimal DOM simulation
+    const eventListeners = {};
+
+    // Use the shared sandbox itself as the window/global object so that
+    // globals attached to window (e.g., test suites) are visible to the
+    // runner through the root context. This mirrors browser behavior where
+    // the global object is also exposed as window/self.
+    const windowObject = sharedSandbox;
+
+    windowObject.showDirectoryPicker = () => Promise.reject(new Error('File Picker not available in CLI tests'));
+    windowObject.showOpenFilePicker = () => Promise.reject(new Error('File Picker not available in CLI tests'));
+    windowObject.showSaveFilePicker = () => Promise.reject(new Error('File Picker not available in CLI tests'));
+    windowObject.addEventListener = function (type, handler) {
+        if (!eventListeners[type]) {
+            eventListeners[type] = [];
+        }
+        eventListeners[type].push(handler);
+    };
+    windowObject.removeEventListener = function (type, handler) {
+        if (!eventListeners[type]) return;
+        eventListeners[type] = eventListeners[type].filter(h => h !== handler);
+    };
+    windowObject.postMessage = function (message, targetOrigin) {
+        if (!eventListeners.message) return;
+        const event = {
+            data: message,
+            source: windowObject,
+            origin: targetOrigin || '*'
+        };
+        eventListeners.message.forEach(handler => {
+            try {
+                handler(event);
+            } catch (err) {
+                console.error('Error in message handler:', err);
+            }
+        });
+    };
+    windowObject.location = {
+        href: 'http://localhost/',
+        origin: 'http://localhost',
+        protocol: 'http:',
+        host: 'localhost',
+        hostname: 'localhost',
+        port: '',
+        pathname: '/',
+        search: '',
+        hash: '',
+        toString() {
+            return this.href;
+        }
+    };
+    windowObject.screen = {
+        width: 1280,
+        height: 720
+    };
+    windowObject.open = function () { return null; };
+
+    // Provide symmetry references
+    windowObject.window = windowObject;
+    windowObject.self = windowObject;
+
+    sharedSandbox.document = {
+        createElement: () => ({}),
+        getElementById: () => null
+    };
+
+    sharedSandbox.navigator = {
+        userAgent: 'Node.js Test Environment',
+        platform: 'Win32',
+        language: 'en-US'
+    };
+
+    // IndexedDB mock (minimal, in-memory)
+    const mockStores = new Map();
+    function createObjectStore(name) {
+        if (!mockStores.has(name)) {
+            mockStores.set(name, new Map());
+        }
+        return mockStores.get(name);
+    }
+
+    const mockDB = {
+        name: 'MockIndexedDB',
+        objectStoreNames: {
+            contains: (name) => mockStores.has(name)
+        },
+        createObjectStore: (name) => createObjectStore(name),
+        transaction: (storeNames) => {
+            const stores = Array.isArray(storeNames) ? storeNames : [storeNames];
+            const tx = {
+                objectStore: (name) => {
+                    if (!stores.includes(name)) {
+                        throw new Error(`Object store ${name} not part of transaction`);
+                    }
+                    const store = createObjectStore(name);
+                    return {
+                        put: (value, key) => {
+                            const request = {};
+                            setTimeout(() => {
+                                store.set(key, value);
+                                if (typeof request.onsuccess === 'function') {
+                                    request.result = value;
+                                    request.onsuccess({ target: { result: value } });
+                                }
+                            }, 0);
+                            return request;
+                        },
+                        get: (key) => {
+                            const request = {};
+                            setTimeout(() => {
+                                const result = store.get(key);
+                                if (typeof request.onsuccess === 'function') {
+                                    request.result = result;
+                                    request.onsuccess({ target: { result } });
+                                }
+                            }, 0);
+                            return request;
+                        },
+                        openCursor: () => {
+                            const entries = Array.from(store.entries());
+                            let index = 0;
+                            const request = {};
+                            const continueCursor = () => {
+                                const [key, value] = entries[index] || [];
+                                if (index < entries.length) {
+                                    const cursor = {
+                                        key,
+                                        value,
+                                        continue: () => {
+                                            index += 1;
+                                            setTimeout(continueCursor, 0);
+                                        }
+                                    };
+                                    if (typeof request.onsuccess === 'function') {
+                                        request.result = cursor;
+                                        request.onsuccess({ target: { result: cursor } });
+                                    }
+                                } else if (typeof request.onsuccess === 'function') {
+                                    request.result = null;
+                                    request.onsuccess({ target: { result: null } });
+                                }
+                            };
+                            setTimeout(continueCursor, 0);
+                            return request;
+                        },
+                        delete: (key) => {
+                            const request = {};
+                            setTimeout(() => {
+                                store.delete(key);
+                                if (typeof request.onsuccess === 'function') {
+                                    request.result = undefined;
+                                    request.onsuccess({ target: { result: undefined } });
+                                }
+                            }, 0);
+                            return request;
+                        }
+                    };
+                }
+            };
+            setTimeout(() => {
+                if (typeof tx.oncomplete === 'function') {
+                    tx.oncomplete({});
+                }
+            }, 0);
+            return tx;
+        }
+    };
+
+    sharedSandbox.indexedDB = {
+        open: (name, version) => {
+            const db = { ...mockDB, name: name || 'MockIndexedDB', version: version || 1 };
+            const request = { result: db };
+            setTimeout(() => {
+                if (typeof request.onupgradeneeded === 'function') {
+                    request.onupgradeneeded({ target: { result: db } });
+                }
+                if (typeof request.onsuccess === 'function') {
+                    request.onsuccess({ target: { result: db } });
+                }
+            }, 0);
+            return request;
+        }
+    };
+
+    // Storage mock
+    sharedSandbox.Storage = class Storage {
+        constructor() {
+            this.data = {};
+        }
+        get length() {
+            return Object.keys(this.data).length;
+        }
+        key(index) {
+            return Object.keys(this.data)[index] || null;
+        }
+        getItem(key) {
+            return key in this.data ? this.data[key] : null;
+        }
+        setItem(key, value) {
+            this.data[key] = String(value);
+        }
+        removeItem(key) {
+            delete this.data[key];
+        }
+        clear() {
+            this.data = {};
+        }
+    };
+
+    sharedSandbox.localStorage = new sharedSandbox.Storage();
+    sharedSandbox.sessionStorage = new sharedSandbox.Storage();
+
+    logSuccess('Browser environment simulated');
+}
+
+/**
+ * Load source files
+ */
+function loadSourceFiles() {
+    const baseDir = path.join(__dirname, '..');
+    const sourceFiles = [
+        'utils.js',
+        'GlobalErrorLogger.js',
+        'VirtualFileService.js',
+        'WindowsPathMappingService.js',
+        'FileSystemAccessService.js',
+        'FileSyncBridge.js',
+        'AsyncFileIO.js',
+        'variable-manager.js',
+        'mplayer.js'
+    ];
+
+    logInfo('Loading source files...');
+
+    sourceFiles.forEach(file => {
+        const filePath = path.join(baseDir, file);
+        if (fs.existsSync(filePath)) {
+            try {
+                // Read file content
+                const code = fs.readFileSync(filePath, 'utf8');
+
+                // Execute in shared sandbox to preserve lexical bindings across files
+                // while keeping Node.js globals isolated.
+                vm.runInContext(code, sharedContext, { filename: file });
+
+                if (options.verbose) {
+                    logSuccess(`  ${file}`);
+                }
+            } catch (err) {
+                logError(`  Failed to load ${file}: ${err.message}`);
+                if (options.verbose) {
+                    console.error(err.stack);
+                }
+            }
+        } else {
+            logWarning(`  ${file} not found`);
+        }
+    });
+
+    // Promote loaded bindings to the shared sandbox so they are visible when
+    // test suites execute in a new VM context. We perform the promotion inside
+    // the shared VM context so lexical bindings created with `const`/`class`
+    // are hoisted onto `globalThis`.
+    const exportedGlobals = [
+        'FileSystemAccessService',
+        'WindowsPathMappingService',
+        'FileSyncBridge',
+        'VirtualFileService',
+        'AsyncFileIO',
+        'GlobalErrorLogger',
+        'afio'
+    ];
+
+    const promoteScript = new vm.Script(`
+        (function promoteGlobals(names) {
+            names.forEach(name => {
+                try {
+                    // Access lexical binding inside the shared context
+                    const value = eval(name);
+
+                    if (typeof value !== 'undefined') {
+                        globalThis[name] = value;
+                    } else if (typeof window !== 'undefined' && typeof window[name] !== 'undefined') {
+                        globalThis[name] = window[name];
+                    }
+                } catch (err) {
+                    if (typeof window !== 'undefined' && typeof window[name] !== 'undefined') {
+                        globalThis[name] = window[name];
+                    }
+                }
+            });
+        })(${JSON.stringify(exportedGlobals)});
+    `);
+
+    promoteScript.runInContext(sharedContext);
+
+    logSuccess(`Loaded ${sourceFiles.length} source files`);
+}
+
+/**
+ * Load test suites
+ */
+function loadTestSuites() {
+    const testDir = __dirname;
+    const testFiles = [
+        'filesystem_access_test_suite.js',
+        'afio_test_suite.js',
+        'variable_expansion_test_suite.js',
+        'macro_run_test_suite.js'
+    ];
+
+    logInfo('Loading test suites...');
+
+    testFiles.forEach(file => {
+        const filePath = path.join(testDir, file);
+        if (fs.existsSync(filePath)) {
+            try {
+                const code = fs.readFileSync(filePath, 'utf8');
+                // Execute tests in the shared sandbox so they see the same globals
+                vm.runInContext(code, sharedContext, { filename: file });
+
+                if (options.verbose) {
+                    logSuccess(`  ${file}`);
+                }
+            } catch (err) {
+                logError(`  Failed to load ${file}: ${err.message}`);
+                if (options.verbose) {
+                    console.error(err.stack);
+                }
+            }
+        } else {
+            logWarning(`  ${file} not found`);
+        }
+    });
+
+    // Expose suites placed on the simulated window to the shared sandbox so
+    // the CLI runner (executing in the Node context) can access them.
+    const suiteGlobals = ['FileSystemAccessTestSuite', 'AfioTestSuite', 'MacroRunTestSuite'];
+    suiteGlobals.forEach(name => {
+        if (sharedSandbox.window && typeof sharedSandbox.window[name] !== 'undefined') {
+            sharedSandbox[name] = sharedSandbox.window[name];
+        }
+    });
+
+    logSuccess('Test suites loaded');
+}
+
+/**
+ * Run tests and collect results
+ */
+async function runTests() {
+    logHeader('iMacros MV3 Test Suite - CLI Runner');
+
+    // Setup environment
+    setupBrowserEnvironment();
+
+    // Load files
+    loadSourceFiles();
+    loadTestSuites();
+
+    const { FileSystemAccessTestSuite, AfioTestSuite, VariableExpansionTestSuite, MacroRunTestSuite } = sharedSandbox;
+
+    function normalizeSuiteResult(rawResult, suiteName) {
+        const defaultResults = { passed: 0, failed: 0, skipped: 0 };
+        if (!rawResult || typeof rawResult !== 'object') {
+            return { results: { ...defaultResults }, errors: [] };
+        }
+
+        const results = rawResult.results ? rawResult.results : { ...defaultResults };
+        let errors = [];
+        if (Array.isArray(rawResult.errors)) {
+            errors = rawResult.errors;
+        } else if (rawResult.errors && Array.isArray(rawResult.errors.errors)) {
+            errors = rawResult.errors.errors;
+        }
+        return { results, errors };
+    }
+
+    const results = {
+        passed: 0,
+        failed: 0,
+        skipped: 0,
+        errors: []
+    };
+
+    try {
+        // Run variable expansion tests
+        if (options.suite === 'all' || options.suite === 'vars') {
+            logHeader('Variable Expansion Tests');
+
+            if (typeof VariableExpansionTestSuite !== 'undefined') {
+                try {
+                    const expansionResult = normalizeSuiteResult(await VariableExpansionTestSuite.run(), 'VariableExpansionTestSuite');
+                    results.passed += expansionResult.results.passed || 0;
+                    results.failed += expansionResult.results.failed || 0;
+                    results.skipped += expansionResult.results.skipped || 0;
+                    results.errors.push(...expansionResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Variable Expansion tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'VariableExpansionTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('VariableExpansionTestSuite not available');
+            }
+        }
+
+        // Run RUN/macro chaining tests
+        if (options.suite === 'all' || options.suite === 'macro') {
+            logHeader('Macro RUN Command Tests');
+
+            if (typeof MacroRunTestSuite !== 'undefined') {
+                try {
+                    const macroRunResult = normalizeSuiteResult(await MacroRunTestSuite.run(), 'MacroRunTestSuite');
+                    results.passed += macroRunResult.results.passed || 0;
+                    results.failed += macroRunResult.results.failed || 0;
+                    results.skipped += macroRunResult.results.skipped || 0;
+                    results.errors.push(...macroRunResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Macro RUN tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'MacroRunTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('MacroRunTestSuite not available');
+            }
+        }
+
+        // Run File System Access tests
+        if (options.suite === 'all' || options.suite === 'fsaccess') {
+            logHeader('File System Access API Tests');
+
+            if (typeof FileSystemAccessTestSuite !== 'undefined') {
+                try {
+                    const fsResult = normalizeSuiteResult(await FileSystemAccessTestSuite.run(), 'FileSystemAccessTestSuite');
+                    results.passed += fsResult.results.passed || 0;
+                    results.failed += fsResult.results.failed || 0;
+                    results.skipped += fsResult.results.skipped || 0;
+                    results.errors.push(...fsResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in FS Access tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'FileSystemAccessTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('FileSystemAccessTestSuite not available');
+            }
+        }
+
+        // Run AFIO tests
+        if (options.suite === 'all' || options.suite === 'afio') {
+            logHeader('AsyncFileIO Tests');
+
+            if (typeof AfioTestSuite !== 'undefined') {
+                try {
+                    const afioResult = normalizeSuiteResult(await AfioTestSuite.run(), 'AfioTestSuite');
+                    results.passed += afioResult.results.passed || 0;
+                    results.failed += afioResult.results.failed || 0;
+                    results.skipped += afioResult.results.skipped || 0;
+                    results.errors.push(...afioResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in AFIO tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'AfioTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('AfioTestSuite not available');
+            }
+        }
+
+    } catch (err) {
+        logError(`Fatal error: ${err.message}`);
+        if (options.verbose) {
+            console.error(err.stack);
+        }
+    }
+
+    // Print summary
+    printSummary(results);
+
+    // Exit with appropriate code
+    process.exit(results.failed > 0 ? 1 : 0);
+}
+
+/**
+ * Print test summary
+ */
+function printSummary(results) {
+    logHeader('Test Summary');
+
+    const total = results.passed + results.failed + results.skipped;
+    const passRate = total > 0 ? Math.round((results.passed / total) * 100) : 0;
+
+    console.log(colorize(`  Total:   ${total}`, 'bright'));
+    console.log(colorize(`  Passed:  ${results.passed} (${passRate}%)`, 'green'));
+    console.log(colorize(`  Failed:  ${results.failed}`, results.failed > 0 ? 'red' : 'white'));
+    console.log(colorize(`  Skipped: ${results.skipped}`, results.skipped > 0 ? 'yellow' : 'white'));
+
+    if (results.failed > 0) {
+        console.log('\n' + colorize('Failed Tests:', 'red'));
+        results.errors.slice(0, 10).forEach(error => {
+            console.log(colorize(`  ✗ ${error.context}: ${error.message}`, 'red'));
+            if (options.verbose && error.stack) {
+                console.log(colorize(`    ${error.stack.split('\n')[0]}`, 'white'));
+            }
+        });
+
+        if (results.errors.length > 10) {
+            console.log(colorize(`  ... and ${results.errors.length - 10} more errors`, 'yellow'));
+        }
+    }
+
+    console.log('');
+
+    if (results.failed === 0 && results.passed > 0) {
+        console.log(colorize('  ✓ ALL TESTS PASSED!', 'bgGreen'));
+    } else if (results.failed > 0) {
+        console.log(colorize(`  ✗ ${results.failed} TEST(S) FAILED`, 'bgRed'));
+    } else {
+        console.log(colorize('  ⚠ NO TESTS EXECUTED', 'bgYellow'));
+    }
+
+    console.log('');
+}
+
+// Run tests
+runTests().catch(err => {
+    logError(`Unhandled error: ${err.message}`);
+    console.error(err);
+    process.exit(1);
+});
