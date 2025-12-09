@@ -1091,7 +1091,7 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
                         this.varManager.setVar(cleaned, param);
                     }
                 } else {
-                    throw new Error("Unsupported variable: " + cmd[1]);
+                    throw new BadParameter("Unsupported variable: " + cmd[1]);
                 }
             } else {
                 this.setUserVar(cmd[1], param);
@@ -1241,7 +1241,7 @@ MacroPlayer.prototype.RegExpTable["run"] = "^macro\\s*=\\s*(" + im_strre + ")\\s
 MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
     const mplayer = this;
     const macroPathRaw = imns.unwrap(this.expandVariables(cmd[1], "run1"));
-    const macroPath = macroPathRaw && !/\.iim$/i.test(macroPathRaw) ? `${macroPathRaw}.iim` : macroPathRaw;
+    const macroPathNormalized = macroPathRaw && !/\.iim$/i.test(macroPathRaw) ? `${macroPathRaw}.iim` : macroPathRaw;
 
     if (typeof this.compileExpressions === 'function') {
         this.compileExpressions();
@@ -1256,30 +1256,28 @@ MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
     }
 
     const resolveMacroPath = function (path) {
-        const normalizedPath = path && !/\.iim$/i.test(path) ? `${path}.iim` : path;
-
-        if (typeof __is_full_path === 'function' && __is_full_path(normalizedPath)) {
-            return Promise.resolve(normalizedPath);
+        if (typeof __is_full_path === 'function' && __is_full_path(path)) {
+            return Promise.resolve(path);
         }
         if (mplayer.macrosFolder && typeof mplayer.macrosFolder.clone === 'function') {
             var node = mplayer.macrosFolder.clone();
-            if (typeof node.append === 'function') node.append(normalizedPath);
-            return Promise.resolve(node.path || normalizedPath);
+            if (typeof node.append === 'function') node.append(path);
+            return Promise.resolve(node.path || path);
         }
         if (typeof afio !== 'undefined' && afio && typeof afio.getDefaultDir === 'function') {
             return afio.getDefaultDir("savepath").then(function (dir) {
-                if (dir && typeof dir.append === 'function') dir.append(normalizedPath);
-                return dir && dir.path ? dir.path : normalizedPath;
+                if (dir && typeof dir.append === 'function') dir.append(path);
+                return dir && dir.path ? dir.path : path;
             });
         }
-        return Promise.resolve(normalizedPath);
+        return Promise.resolve(path);
     };
 
     const attemptInlineLoad = function () {
         if (typeof mplayer.loadMacroFile === 'function') {
-            return Promise.resolve(mplayer.loadMacroFile(macroPath)).then(function (inlineSource) {
+            return Promise.resolve(mplayer.loadMacroFile(macroPathNormalized)).then(function (inlineSource) {
                 if (inlineSource !== null && typeof inlineSource !== 'undefined') {
-                    return { fullPath: macroPath, source: inlineSource };
+                    return { fullPath: macroPathNormalized, source: inlineSource };
                 }
                 return null;
             });
@@ -1288,12 +1286,12 @@ MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
     };
 
     const resolvePathAndLoad = function () {
-        return resolveMacroPath(macroPath).then(function (fullPath) {
+        return resolveMacroPath(macroPathNormalized).then(function (fullPath) {
             function loadFromPath() {
                 if (typeof mplayer.loadMacroFile === 'function') {
                     return Promise.resolve(mplayer.loadMacroFile(fullPath)).then(function (result) {
-                        if ((result === null || typeof result === 'undefined') && fullPath !== macroPath) {
-                            return mplayer.loadMacroFile(macroPath);
+                        if ((result === null || typeof result === 'undefined') && fullPath !== macroPathNormalized) {
+                            return mplayer.loadMacroFile(macroPathNormalized);
                         }
                         return result;
                     });
@@ -1325,15 +1323,14 @@ MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
         if (inlineResult) return inlineResult;
         return resolvePathAndLoad();
     }).then(function (result) {
-        var fullPath = result ? result.fullPath : macroPath;
+        var fullPath = result ? result.fullPath : macroPathNormalized;
         var source = result ? result.source : "";
 
         const savedLocalContext = (mplayer.varManager && typeof mplayer.varManager.snapshotLocalContext === 'function')
             ? mplayer.deepCopy(mplayer.varManager.snapshotLocalContext())
             : null;
         const savedLoopStack = mplayer.deepCopy(mplayer.loopStack || []);
-        const isolatedLoopStack = mplayer.deepCopy(savedLoopStack || []);
-        mplayer.loopStack = isolatedLoopStack;
+        mplayer.loopStack = mplayer.deepCopy(mplayer.loopStack || []);
 
         if (savedLocalContext && mplayer.varManager && typeof mplayer.varManager.restoreLocalContext === 'function') {
             mplayer.varManager.restoreLocalContext(mplayer.deepCopy(savedLocalContext));
@@ -1376,29 +1373,6 @@ MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
             mplayer.actions.forEach(function (action) {
                 if (action && action.name === 'set') {
                     mplayer._ActionTable.set(action.args);
-                }
-            });
-        }
-
-        if (typeof source === 'string' && source.length) {
-            source.split('\n').forEach(function (line) {
-                // Match: SET var "value with spaces"  or  SET var value
-                const setMatch = /^\s*set\s+(\S+)\s+(?:"((?:[^"\\]|\\.)*)"|(.+))$/i.exec(line);
-                if (!setMatch) return;
-                const varNameRaw = setMatch[1];
-                const rawValue = setMatch[2] !== undefined && setMatch[2] !== null
-                    ? setMatch[2].replace(/\\"/g, '"')
-                    : setMatch[3];
-                const resolvedValue = imns.unwrap(mplayer.expandVariables(rawValue, 'run-set-inline'));
-                const varIndexMatch = mplayer.limits && mplayer.limits.varsRe ? mplayer.limits.varsRe.exec(varNameRaw) : null;
-                if (varIndexMatch) {
-                    const idx = imns.s2i(varIndexMatch[1]);
-                    mplayer.vars[idx] = resolvedValue;
-                    if (mplayer.varManager) {
-                        mplayer.varManager.setVar(`VAR${idx}`, resolvedValue);
-                    }
-                } else if (mplayer.varManager) {
-                    mplayer.varManager.setVar(varNameRaw.replace(/^!/, ''), resolvedValue);
                 }
             });
         }
@@ -1944,10 +1918,12 @@ MacroPlayer.prototype.parseMacro = function () {
     this.linenumber_delta = 0;
     this.source = this.source.replace(/\r+/g, "");
     var lines = this.source.split("\n");
+    let encounteredNonCommentLine = false;
     for (var i = 0; i < lines.length; i++) {
         var m = lines[i].match(linenumber_delta_re);
         if (m) { this.linenumber_delta = imns.s2i(m[1]); continue; }
         if (lines[i].match(comment)) continue;
+        encounteredNonCommentLine = true;
         const parsedLine = /^\s*(\w+)(?:\s+(.*))?$/.exec(lines[i]);
         if (parsedLine) {
             var command = parsedLine[1].toLowerCase();
@@ -1965,7 +1941,7 @@ MacroPlayer.prototype.parseMacro = function () {
         } else { continue; }
     }
 
-    if (!this.actions.length && lines.length) {
+    if (!this.actions.length && encounteredNonCommentLine) {
         const setRe = this.RegExpTable && this.RegExpTable.set ? this.RegExpTable.set : new RegExp(MacroPlayer.prototype.RegExpTable["set"], "i");
         lines.forEach((line, idx) => {
             const trimmed = line.trim();
@@ -2220,6 +2196,25 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
         throw new BadParameter('Whitespace is not allowed inside variable placeholders', 1);
     }
 
+    function expand(str, depth) {
+        let result = str.replace(/#novar#\{\{/ig, "#NOVAR#{");
+        const placeholderRe = /\{\{([^{}]+)\}\}/g;
+        let spins = 0;
+
+        while (placeholderRe.test(result)) {
+            placeholderRe.lastIndex = 0;
+            result = result.replace(placeholderRe, function (_, inner) {
+                return resolveVariable(inner, depth + 1);
+            });
+            spins++;
+            if (spins > MAX_DEPTH) {
+                throw new RuntimeError('Maximum placeholder expansion depth exceeded', 999);
+            }
+        }
+
+        return result.replace(/#novar#\{(?=[^\{])/ig, "{{");
+    }
+
     function resolveVariable(rawName, depth) {
         if (depth > MAX_DEPTH) {
             throw new RuntimeError('Maximum placeholder expansion depth exceeded', 999);
@@ -2266,6 +2261,8 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
             value = mplayer.defDownloadFolder ? mplayer.defDownloadFolder.path : "__undefined__";
         } else if (/^!folder_macros$/i.test(varName)) {
             value = mplayer.macrosFolder ? mplayer.macrosFolder.path : "__undefined__";
+        } else if (/^!urlcurrent$/i.test(varName)) {
+            value = mplayer.currentURL;
         } else if ((match = /^!now:(\S+)$/i.exec(varName))) {
             value = imns.formatDate(match[1]);
         } else if (/^!loop$/i.test(varName)) {
@@ -2309,25 +2306,6 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
             return '';
         }
         return value.toString();
-    }
-
-    function expand(str, depth) {
-        let result = str.replace(/#novar#\{\{/ig, "#NOVAR#{");
-        const placeholderRe = /\{\{([^{}]+)\}\}/g;
-        let spins = 0;
-
-        while (placeholderRe.test(result)) {
-            placeholderRe.lastIndex = 0;
-            result = result.replace(placeholderRe, function (_, inner) {
-                return resolveVariable(inner, depth + 1);
-            });
-            spins++;
-            if (spins > MAX_DEPTH) {
-                throw new RuntimeError('Maximum placeholder expansion depth exceeded', 999);
-            }
-        }
-
-        return result.replace(/#novar#\{(?=[^\{])/ig, "{{");
     }
 
     return expand(param, 0);
