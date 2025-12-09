@@ -410,7 +410,7 @@ Recorder.prototype.onRecordAction = function (data, tab_id, callback) {
     }
 
     typeof callback === "function" &&   // release resources
-        callback();
+        callback({ ok: true });
 }
 
 
