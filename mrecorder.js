@@ -766,7 +766,7 @@ Recorder.prototype.onTabUpdated = function (tab_id, changeInfo, tab) {
     const recorder = this;
 
     // Prefer provided tab info but fall back to querying the tab if needed
-    const ensureTab = tab && tab.url !== undefined ?
+    const ensureTab = tab && 'url' in tab ?
         Promise.resolve(tab) :
         getTab(tab_id);
 
@@ -774,8 +774,8 @@ Recorder.prototype.onTabUpdated = function (tab_id, changeInfo, tab) {
         if (!resolvedTab || resolvedTab.windowId !== recorder.win_id)
             return;
 
-        // Ignore updates triggered from popup/opener tabs to reduce noise
-        if (resolvedTab.openerTabId && resolvedTab.openerTabId !== resolvedTab.id) {
+        // Ignore updates for tabs opened by other tabs (popup/opener tabs) to reduce noise
+        if (resolvedTab.openerTabId) {
             return;
         }
 
