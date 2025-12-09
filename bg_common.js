@@ -10,6 +10,23 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // Define global scope for both Service Worker and Window contexts
 var globalScope = typeof self !== 'undefined' ? self : window;
 
+// Centralized helper to wrap callback-based chrome.* APIs with consistent
+// error handling.
+function chromeAsync(executor, contextMessage, metadata) {
+    return new Promise(function (resolve, reject) {
+        executor(function (result) {
+            if (chrome.runtime.lastError) {
+                var wrappedError = new Error(contextMessage + ": " + chrome.runtime.lastError.message);
+                if (typeof logError === 'function') {
+                    logError(wrappedError.message, metadata);
+                }
+                return reject(wrappedError);
+            }
+            resolve(result);
+        });
+    });
+}
+
 // ============================================================================
 // AFIO Cache & Validation
 // ============================================================================
@@ -318,35 +335,69 @@ globalScope.installSampleBookmarkletMacros = function () {
 // Bookmark Management Helpers
 // ============================================================================
 
-globalScope.ensureBookmarkFolderCreated = function (parent_id, name) {
-    return new Promise(function (resolve, reject) {
-        chrome.bookmarks.getChildren(parent_id, function (result) {
-            if (chrome.runtime.lastError) {
-                logError("Failed to get bookmark children: " + chrome.runtime.lastError.message, { parent_id: parent_id });
-                return reject(chrome.runtime.lastError);
-            }
-            if (!result) {
-                logError("Bookmark getChildren returned null result", { parent_id: parent_id });
-                return reject(new Error("Bookmark getChildren returned null result"));
-            }
-            // find a bookmark with matching name
-            for (var r of result) {
-                if (r.title === name)
-                    return resolve(r);
-            }
-            // otherwise create one
-            chrome.bookmarks.create(
-                { parentId: parent_id, title: name },
-                function (createdFolder) {
-                    if (chrome.runtime.lastError) {
-                        logError("Failed to create bookmark folder: " + chrome.runtime.lastError.message, { parent_id: parent_id, name: name });
-                        return reject(chrome.runtime.lastError);
-                    }
-                    resolve(createdFolder);
-                }
-            );
+var handleOverwriteDialog = globalScope.handleOverwriteDialog = async function (existingMacro, url, title, folder_id, children) {
+    try {
+        const dialogResult = await dialogUtils.openDialog("overwriteDialog.html", "overwriteDialog", {
+            macroName: title
         });
-    });
+
+        if (dialogResult.action === "overwrite") {
+            return chromeAsync(cb => chrome.bookmarks.update(existingMacro.id, { url: url, title: title }, cb),
+                "Failed to update bookmark (overwrite)", { bookmark_id: existingMacro.id, title: title });
+        }
+
+        if (dialogResult.action === "save-new") {
+            let found = false, count = 1, name = title;
+            for (; ;) {
+                found = false;
+                for (var x of children) {
+                    if (x.title === name && x.url) {
+                        found = true;
+                        if (/\.iim$/.test(title)) {
+                            name = title.replace(/\.iim$/, "(" + count + ").iim");
+                        } else {
+                            name = title + "(" + count + ")";
+                        }
+                        count++;
+                        break;
+                    }
+                }
+                if (!found) break;
+            }
+
+            return chromeAsync(cb => chrome.bookmarks.create({ parentId: folder_id, title: name, url: url }, cb),
+                "Failed to create bookmark (save-new)", { folder_id: folder_id, title: name });
+        }
+
+        throw new Error("User cancelled save operation");
+    } catch (err) {
+        logError("Dialog error: " + err.message);
+        throw err;
+    }
+};
+
+globalScope.ensureBookmarkFolderCreated = async function (parent_id, name) {
+    const children = await chromeAsync(
+        cb => chrome.bookmarks.getChildren(parent_id, cb),
+        "Failed to get bookmark children",
+        { parent_id: parent_id }
+    );
+
+    if (!children) {
+        throw new Error("Bookmark getChildren returned null result");
+    }
+
+    for (var r of children) {
+        if (r.title === name) {
+            return r;
+        }
+    }
+
+    return chromeAsync(
+        cb => chrome.bookmarks.create({ parentId: parent_id, title: name }, cb),
+        "Failed to create bookmark folder",
+        { parent_id: parent_id, name: name }
+    );
 };
 
 // ============================================================================
@@ -369,73 +420,100 @@ globalScope.ensureDirectoryExists = function (node) {
 // Bookmark Creation & Saving Logic
 // ============================================================================
 
-globalScope.createBookmark = function (folder_id, title, url, bookmark_id, overwrite) {
-    return new Promise(function (resolve, reject) {
-        if (bookmark_id) {
-            chrome.bookmarks.update(
-                bookmark_id,
-                { url: url, title: title },
-                function (result) {
-                    if (chrome.runtime.lastError) {
-                        logError("Failed to update bookmark: " + chrome.runtime.lastError.message, { bookmark_id: bookmark_id, title: title });
-                        return reject(chrome.runtime.lastError);
-                    }
-                    resolve(result);
-                }
+globalScope.createBookmark = async function (folder_id, title, url, bookmark_id, overwrite) {
+    if (bookmark_id) {
+        return chromeAsync(
+            cb => chrome.bookmarks.update(bookmark_id, { url: url, title: title }, cb),
+            "Failed to update bookmark",
+            { bookmark_id: bookmark_id, title: title }
+        );
+    }
+
+    if (overwrite) {
+        throw new Error("bg.save() - trying to overwrite " + title + " while bookmark_id is not set");
+    }
+
+    const children = await chromeAsync(
+        cb => chrome.bookmarks.getChildren(folder_id, cb),
+        "Failed to get bookmark children",
+        { folder_id: folder_id }
+    );
+
+    if (!children) {
+        throw new Error("Bookmark getChildren returned null");
+    }
+
+    var existingMacro = null;
+    for (var x of children) {
+        if (x.title === title && x.url) {
+            existingMacro = x;
+            break;
+        }
+    }
+
+    if (existingMacro) {
+        if (typeof handleOverwriteDialog === 'function') {
+            return handleOverwriteDialog(existingMacro, url, title, folder_id, children);
+        }
+        throw new Error("Overwrite dialog handler not implemented in this context");
+    }
+
+    return chromeAsync(
+        cb => chrome.bookmarks.create({ parentId: folder_id, title: title, url: url }, cb),
+        "Failed to create bookmark (new)",
+        { folder_id: folder_id, title: title }
+    );
+};
+
+var saveToBookmark = globalScope.saveToBookmark = async function (save_data, overwrite, callback) {
+    try {
+        if (typeof chrome.bookmarks === 'undefined' || !chrome.bookmarks.getTree) {
+            throw new Error("Bookmark API not available in this context");
+        }
+
+        const tree = await chromeAsync(
+            cb => chrome.bookmarks.getTree(cb),
+            "Failed to get bookmark tree"
+        );
+
+        if (!tree || !tree[0] || !tree[0].children || !tree[0].children[0]) {
+            throw new Error("Invalid bookmark tree structure");
+        }
+
+        var p_id = tree[0].children[0].id;
+        const node = await ensureBookmarkFolderCreated(p_id, "iMacros");
+        var url = makeBookmarklet(save_data.name, save_data.source);
+        var iMacrosDirId = node.id;
+
+        if (overwrite && !save_data.bookmark_id) {
+            const children = await chromeAsync(
+                cb => chrome.bookmarks.getChildren(iMacrosDirId, cb),
+                "Failed to get bookmark children in saveToBookmark",
+                { folder_id: iMacrosDirId }
             );
-            return;
-        }
 
-        if (overwrite) {
-            reject(new Error("bg.save() - trying to overwrite " + title +
-                " while bookmark_id is not set"));
-            return;
-        }
-
-        // Check if a macro with the same name already exists
-        chrome.bookmarks.getChildren(folder_id, function (children) {
-            if (chrome.runtime.lastError) {
-                logError("Failed to get bookmark children: " + chrome.runtime.lastError.message, { folder_id: folder_id });
-                return reject(chrome.runtime.lastError);
-            }
-            if (!children) {
-                logError("Bookmark getChildren returned null", { folder_id: folder_id });
-                return reject(new Error("Bookmark getChildren returned null"));
-            }
-
-            var existingMacro = null;
             for (var x of children) {
-                if (x.title === title && x.url) {
-                    existingMacro = x;
+                if (x.title === save_data.name) {
+                    save_data.bookmark_id = x.id;
                     break;
                 }
             }
+        }
 
-            if (existingMacro) {
-                // Determine environment and handle dialog
-                // Delegate to a global handler that must be implemented by the specific bg script
-                if (typeof handleOverwriteDialog === 'function') {
-                    handleOverwriteDialog(existingMacro, url, title, folder_id, resolve, reject, children);
-                } else {
-                    reject(new Error("Overwrite dialog handler not implemented in this context"));
-                }
-            } else {
-                // No existing macro, just create it
-                chrome.bookmarks.create(
-                    {
-                        parentId: folder_id,
-                        title: title,
-                        url: url
-                    }, function (result) {
-                        if (chrome.runtime.lastError) {
-                            logError("Failed to create bookmark (new): " + chrome.runtime.lastError.message, { folder_id: folder_id, title: title });
-                            return reject(chrome.runtime.lastError);
-                        }
-                        resolve(result);
-                    });
-            }
-        });
-    });
+        await createBookmark(
+            iMacrosDirId,
+            save_data.name,
+            url,
+            save_data.bookmark_id,
+            overwrite
+        );
+
+        typeof callback === "function" && callback(save_data);
+    } catch (err) {
+        logError("Failed to save bookmark: " + err.message, { name: save_data && save_data.name });
+        save_data.error = err.message || String(err);
+        typeof callback === "function" && callback(save_data);
+    }
 };
 
 
