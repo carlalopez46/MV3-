@@ -1331,8 +1331,7 @@ MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
             : null;
         // Preserve the caller's loop stack separately from the isolated copy used by the nested macro
         const savedLoopStack = mplayer.deepCopy(mplayer.loopStack || []);
-        const isolatedLoopStack = mplayer.deepCopy(savedLoopStack);
-        mplayer.loopStack = isolatedLoopStack;
+        mplayer.loopStack = mplayer.deepCopy(savedLoopStack);
 
         if (savedLocalContext && mplayer.varManager && typeof mplayer.varManager.restoreLocalContext === 'function') {
             mplayer.varManager.restoreLocalContext(mplayer.deepCopy(savedLocalContext));
@@ -1362,7 +1361,7 @@ MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
         console.log("[iMacros] RUN: Executing macro:", fullPath, "Nesting level:", mplayer.callStack.length);
 
         mplayer.source = source;
-        mplayer.currentMacro = (fullPath && fullPath.split('/').pop()) || macroPath;
+        mplayer.currentMacro = (fullPath && fullPath.split('/').pop()) || macroPathNormalized;
         mplayer.file_id = fullPath;
 
         mplayer.actions = [];
@@ -1410,13 +1409,15 @@ MacroPlayer.prototype._popFrame = function () {
 
     if (this.runFrameStack && this.runFrameStack.length) {
         frame = this.runFrameStack.pop();
-        this.loopStack = Array.isArray(frame.savedLoopStack) ? this.deepCopy(frame.savedLoopStack) : [];
-        if (frame.savedLocalContext && this.varManager && typeof this.varManager.restoreLocalContext === 'function') {
-            this.varManager.restoreLocalContext(this.deepCopy(frame.savedLocalContext));
-        }
-        this.runNestLevel = Math.max(0, frame.savedRunNestLevel);
-        if (Object.prototype.hasOwnProperty.call(frame, 'savedSuppressAutoPlay')) {
-            this._suppressAutoPlay = frame.savedSuppressAutoPlay;
+        if (frame) {
+            this.loopStack = Array.isArray(frame.savedLoopStack) ? this.deepCopy(frame.savedLoopStack) : [];
+            if (frame.savedLocalContext && this.varManager && typeof this.varManager.restoreLocalContext === 'function') {
+                this.varManager.restoreLocalContext(this.deepCopy(frame.savedLocalContext));
+            }
+            this.runNestLevel = Math.max(0, frame.savedRunNestLevel);
+            if (Object.prototype.hasOwnProperty.call(frame, 'savedSuppressAutoPlay')) {
+                this._suppressAutoPlay = frame.savedSuppressAutoPlay;
+            }
         }
     }
 
@@ -1940,7 +1941,9 @@ MacroPlayer.prototype.parseMacro = function () {
             if (!args) throw new SyntaxError("wrong format of " + command.toUpperCase() + " command" + " at line " + (i + 1 + this.linenumber_delta));
             this.actions.push({ name: command, args: args, line: i + 1 });
             this.checkFreewareLimits("lines", this.actions.length)
-        } else { continue; }
+        } else {
+            throw new SyntaxError("can not parse macro line " + (i + 1 + this.linenumber_delta) + ": " + lines[i]);
+        }
     }
 
     if (!this.actions.length && encounteredNonCommentLine) {
@@ -2244,9 +2247,10 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
             value = mplayer.do_eval(evalExpr, uniqueId);
         } else if ((match = mplayer.limits.varsRe.exec(varName))) {
             ensureVarManager();
-            value = mplayer.varManager.getVar(`VAR${match[1]}`);
+            const key = `VAR${match[1]}`;
+            value = mplayer.varManager.hasVar(key) ? mplayer.varManager.getVar(key) : mplayer.vars[imns.s2i(match[1])];
         } else if (/^!extract$/i.test(varName)) {
-            value = mplayer.varManager ? mplayer.varManager.getVar('EXTRACT') : mplayer.getExtractData();
+            value = mplayer.varManager && mplayer.varManager.hasVar('EXTRACT') ? mplayer.varManager.getVar('EXTRACT') : mplayer.getExtractData();
         } else if ((match = /^!col(\d+)$/i.exec(varName))) {
             value = mplayer.getColumnData(imns.s2i(match[1]));
         } else if (/^!datasource_line$/i.test(varName)) {
@@ -2269,7 +2273,7 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
             value = imns.formatDate(match[1]);
         } else if (/^!loop$/i.test(varName)) {
             ensureVarManager();
-            value = mplayer.varManager.getVar('LOOP');
+            value = mplayer.varManager.hasVar('LOOP') ? mplayer.varManager.getVar('LOOP') : mplayer.currentLoop;
         } else if (/^!clipboard$/i.test(varName)) {
             value = imns.Clipboard.getString() || "";
         } else if (/^!timeout(?:_page)?$/i.test(varName)) {
