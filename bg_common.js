@@ -663,7 +663,7 @@ var saveToBookmark = globalScope.saveToBookmark = async function (save_data, ove
             }
         }
 
-        const shouldOverwrite = !!save_data.bookmark_id;
+        const shouldOverwrite = overwrite && !!save_data.bookmark_id;
 
         await createBookmark(
             iMacrosDirId,
