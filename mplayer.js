@@ -404,4 +404,3 @@ if (typeof window !== 'undefined') {
 } else if (typeof global !== 'undefined') {
     global.MacroPlayer = MacroPlayer;
 }
-
