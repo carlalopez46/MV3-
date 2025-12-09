@@ -1329,8 +1329,10 @@ MacroPlayer.prototype.ActionTable["run"] = function (cmd) {
         const savedLocalContext = (mplayer.varManager && typeof mplayer.varManager.snapshotLocalContext === 'function')
             ? mplayer.deepCopy(mplayer.varManager.snapshotLocalContext())
             : null;
+        // Preserve the caller's loop stack separately from the isolated copy used by the nested macro
         const savedLoopStack = mplayer.deepCopy(mplayer.loopStack || []);
-        mplayer.loopStack = mplayer.deepCopy(mplayer.loopStack || []);
+        const isolatedLoopStack = mplayer.deepCopy(savedLoopStack);
+        mplayer.loopStack = isolatedLoopStack;
 
         if (savedLocalContext && mplayer.varManager && typeof mplayer.varManager.restoreLocalContext === 'function') {
             mplayer.varManager.restoreLocalContext(mplayer.deepCopy(savedLocalContext));
