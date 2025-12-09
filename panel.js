@@ -138,6 +138,78 @@ function edit() {
     });
 }
 
+// --- Tree View Switching ---
+
+function refreshTreeView() {
+    const iframe = document.getElementById("tree-iframe");
+    if (!iframe) return;
+
+    const viewWindow = iframe.contentWindow;
+    try {
+        if (viewWindow && viewWindow.TreeView && typeof viewWindow.TreeView.refresh === "function") {
+            viewWindow.TreeView.refresh();
+            return;
+        }
+    } catch (e) {
+        console.warn("[Panel] TreeView.refresh failed, falling back to iframe reload", e);
+    }
+
+    // Fallback: reload iframe
+    const src = iframe.getAttribute("src");
+    iframe.setAttribute("src", "");
+    iframe.setAttribute("src", src);
+}
+
+function applyTreeSelection(type, options = {}) {
+    const { persist = true, forceReload = false } = options;
+    let actualType = type;
+    if (actualType !== "files" && actualType !== "bookmarks") {
+        console.warn("[Panel] Unknown tree type, falling back to bookmarks:", type);
+        actualType = "bookmarks";
+    }
+
+    const iframe = document.getElementById("tree-iframe");
+    if (!iframe) {
+        console.error("[Panel] tree-iframe not found");
+        return;
+    }
+
+    const targetSrc = actualType === "files" ? "fileView.html" : "treeView.html";
+    if (forceReload || iframe.getAttribute("src") !== targetSrc) {
+        iframe.setAttribute("src", targetSrc);
+    }
+
+    const filesRadio = document.getElementById("radio-files-tree");
+    const bookmarksRadio = document.getElementById("radio-bookmarks-tree");
+    if (filesRadio) filesRadio.checked = actualType === "files";
+    if (bookmarksRadio) bookmarksRadio.checked = actualType === "bookmarks";
+
+    if (persist) {
+        Storage.setChar("tree-type", actualType);
+    }
+}
+
+async function selectInitialTree() {
+    let storedType = Storage.isSet("tree-type") ? Storage.getChar("tree-type") : "files";
+
+    try {
+        const installed = await afio.isInstalled();
+
+        // Automatically fall back to bookmarks tab if file access is unavailable
+        if (storedType !== "files" && storedType !== "bookmarks") {
+            storedType = installed ? "files" : "bookmarks";
+        } else if (storedType === "files" && !installed) {
+            console.warn("[Panel] File access unavailable, switching tree view to bookmarks");
+            storedType = "bookmarks";
+        }
+
+        applyTreeSelection(storedType, { persist: true, forceReload: true });
+    } catch (e) {
+        console.error("[Panel] Failed to determine initial tree type, defaulting to bookmarks", e);
+        applyTreeSelection("bookmarks", { persist: true, forceReload: true });
+    }
+}
+
 // --- UI更新 ---
 
 function onSelectionChanged(node) {
@@ -210,6 +282,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "macroStopped") {
         updatePanelState("idle");
     }
+    if (message.type === "UPDATE_PANEL_VIEWS") {
+        refreshTreeView();
+        sendResponse({ success: true });
+        return true;
+    }
 });
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -233,8 +310,48 @@ document.addEventListener("DOMContentLoaded", () => {
     addListener("settings-button", openSettings);
     addListener("edit-button", edit);
 
+    const filesRadio = document.getElementById("radio-files-tree");
+    const bookmarksRadio = document.getElementById("radio-bookmarks-tree");
+
+    if (filesRadio) {
+        filesRadio.addEventListener("change", async () => {
+            if (!filesRadio.checked) return;
+            try {
+                const installed = await afio.isInstalled();
+                if (!installed) {
+                    alert("File access module is not installed. Switching to Bookmarks view.");
+                    applyTreeSelection("bookmarks", { persist: true, forceReload: true });
+                    return;
+                }
+                applyTreeSelection("files", { persist: true });
+            } catch (e) {
+                console.error("[Panel] Failed to switch to files tree", e);
+                applyTreeSelection("bookmarks", { persist: true, forceReload: true });
+            }
+        });
+    }
+
+    if (bookmarksRadio) {
+        bookmarksRadio.addEventListener("change", () => {
+            if (!bookmarksRadio.checked) return;
+            applyTreeSelection("bookmarks", { persist: true });
+        });
+    }
+
     // 右クリック無効化
     document.body.oncontextmenu = (e) => { e.preventDefault(); return false; };
+
+    if (filesRadio) filesRadio.disabled = true;
+    if (bookmarksRadio) bookmarksRadio.disabled = true;
+
+    selectInitialTree()
+        .catch((error) => {
+            console.error("[Panel] Initialization failed", error);
+        })
+        .finally(() => {
+            if (filesRadio) filesRadio.disabled = false;
+            if (bookmarksRadio) bookmarksRadio.disabled = false;
+        });
 
     // 広告などの読み込み
     if (typeof setAdDetails === "function") setAdDetails();
