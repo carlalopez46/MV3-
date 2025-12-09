@@ -310,54 +310,72 @@ MacroPlayer.prototype.ActionTable['url'] = function () {
 
 MacroPlayer.prototype.ActionTable['run'] = async function (cmd) {
     const macroParam = cmd[0] || '';
-    const macroName = (macroParam.match(/macro\s*=\s*(.+)/i) || [null, cmd[1] || ''])[1];
-    if (!macroName) {
+    const macroNameRaw = (macroParam.match(/macro\s*=\s*(.+)/i) || [null, cmd[1] || ''])[1];
+    if (!macroNameRaw) {
         throw new BadParameter('macro parameter is required');
     }
 
-    const macroNode = await this.resolveMacroPath(macroName);
+    const extensionMatch = macroNameRaw.match(/\.([^\\/]+)$/);
+    const macroHasExtension = Boolean(extensionMatch);
+    const macroCandidates = macroHasExtension
+        ? [macroNameRaw]
+        : [`${macroNameRaw}.iim`, macroNameRaw];
+
     const basePath = (this.macrosFolder && this.macrosFolder.path)
         ? this.macrosFolder.path.replace(/\/$/, '')
         : null;
 
-    let content = null;
-    if (Object.prototype.hasOwnProperty.call(this, 'loadMacroFile')) {
-        content = await this.loadMacroFile(macroNode);
-    }
-
-    let resolvedPath = macroName;
-    if (macroNode && macroNode.path) {
-        resolvedPath = macroNode.path;
-    } else if (basePath) {
-        resolvedPath = basePath + '/' + macroName;
-    } else if ((content === null || typeof content === 'undefined') &&
-        typeof afio !== 'undefined' && typeof afio.getDefaultDir === 'function') {
-        try {
-            const dir = await afio.getDefaultDir();
-            if (dir && dir.path) {
-                resolvedPath = dir.path.replace(/\/$/, '') + '/' + macroName;
+    const tryInlineLoad = async () => {
+        if (typeof this.loadMacroFile !== 'function') return null;
+        for (const candidate of macroCandidates) {
+            const inlineSource = await this.loadMacroFile(candidate);
+            if (inlineSource !== null && typeof inlineSource !== 'undefined') {
+                return { source: inlineSource, fullPath: candidate };
             }
-        } catch (err) {
-            resolvedPath = macroName;
         }
-    } else if (typeof macroNode === 'string') {
-        resolvedPath = macroNode;
+        return null;
+    };
+
+    const tryFilesystemLoad = async () => {
+        for (const candidate of macroCandidates) {
+            const macroNode = await this.resolveMacroPath(candidate);
+            const resolvedPath = (macroNode && macroNode.path)
+                ? macroNode.path
+                : (basePath ? `${basePath}/${candidate}` : candidate);
+            let source = null;
+
+            try {
+                source = await this.loadMacroFileFromFs(macroNode);
+            } catch (err) {
+                if (Storage && Storage.getBool && Storage.getBool('debug')) {
+                    console.debug('[iMacros] Failed to load macro from filesystem', resolvedPath, err);
+                }
+            }
+
+            if (source !== null && typeof source !== 'undefined') {
+                return { source, fullPath: resolvedPath };
+            }
+        }
+        return null;
+    };
+
+    const inlineResult = await tryInlineLoad();
+    const loadResult = inlineResult || await tryFilesystemLoad();
+    if (!loadResult) {
+        throw new RuntimeError('Macro file not found: ' + macroCandidates.join(', '), 781);
     }
 
-    this.file_id = resolvedPath;
-    if (content === null || typeof content === 'undefined') {
-        const loadTarget = (macroNode && macroNode.path) ? macroNode
-            : (typeof afio !== 'undefined' && typeof afio.openNode === 'function'
-                ? await afio.openNode(resolvedPath)
-                : resolvedPath);
-        content = await this.loadMacroFileFromFs(loadTarget);
-    }
+    const { source, fullPath } = loadResult;
+
+    this.file_id = fullPath;
+    this.currentMacro = (fullPath && fullPath.split('/').pop()) || macroNameRaw;
+
     // Child macros must not mutate caller loop frames
     this.loopStack = this.deepCopy(this.loopStack);
 
     this._pushFrame('run');
 
-    const actions = this.parseInlineMacro(content);
+    const actions = this.parseInlineMacro(source);
     actions.forEach(action => this.action_stack.push(action));
 };
 
