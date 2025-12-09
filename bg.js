@@ -9,7 +9,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 //
 // Common logic moved to bg_common.js
-// ...
+// Ensure handler registration only runs when the helper is available.
 //
 
 // Global handler for panel updates (called from bg_common.js)
@@ -22,8 +22,11 @@ self.updatePanels = function () {
 
 
 
-
-registerSharedBackgroundHandlers(self);
+if (typeof registerSharedBackgroundHandlers === 'function') {
+    registerSharedBackgroundHandlers(self);
+} else {
+    console.error("registerSharedBackgroundHandlers is not available; shared background handlers not registered");
+}
 
 function edit(macro, overwrite, line) {
     var features = "titlebar=no,menubar=no,location=no," +

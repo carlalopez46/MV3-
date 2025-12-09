@@ -9,7 +9,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 //
 // Common logic moved to bg_common.js
-// ...
+// Ensure handler registration only runs when the helper is available.
 //
 
 // Global handler for panel updates (called from bg_common.js)
@@ -33,8 +33,11 @@ window.updatePanels = function () {
 
 
 
-
-registerSharedBackgroundHandlers(window);
+if (typeof registerSharedBackgroundHandlers === 'function') {
+    registerSharedBackgroundHandlers(window);
+} else {
+    console.error("registerSharedBackgroundHandlers is not available; shared background handlers not registered");
+}
 
 function edit(macro, overwrite, line) {
     console.log("[iMacros Offscreen] Opening editor for:", macro.name);
