@@ -1888,6 +1888,11 @@ MacroPlayer.prototype.play = function (macro, limits, callback) {
     this.cycledReplay = this.times - this.currentLoop > 0;
     this.debuggerAttached = false;
 
+    // Keep legacy loop counter and VariableManager in sync for placeholder expansion
+    if (this.varManager && typeof this.varManager.setVar === 'function') {
+        this.varManager.setVar('LOOP', this.currentLoop);
+    }
+
     this.reset().then(() => {
         try {
             this.checkFreewareLimits("loops", this.times);
@@ -2025,6 +2030,9 @@ MacroPlayer.prototype.playNextAction = function (caller_id) {
             if (this.currentLoop < this.times) {
                 this.firstLoop = false;
                 this.currentLoop++;
+                if (this.varManager && typeof this.varManager.setVar === 'function') {
+                    this.varManager.setVar('LOOP', this.currentLoop);
+                }
                 if (context && context[this.win_id]) {
                     var panel = context[this.win_id].panelWindow;
                     if (panel && !panel.closed) panel.setLoopValue(this.currentLoop);
@@ -2113,8 +2121,18 @@ MacroPlayer.prototype.stop = function () {
 MacroPlayer.prototype.checkFreewareLimits = function (type, value) { return value; };
 MacroPlayer.prototype.convertLimits = function (limits) { let convert = x => x == "unlimited" ? Number.MAX_SAFE_INTEGER : x; let obj = {}; for (var key in limits) { obj[key] = convert(limits[key]) } obj.varsRe = limits.maxVariables == "unlimited" || limits.maxVariables >= 10 ? /^!var([0-9]+)$/i : new RegExp("^!var([1-" + limits.maxVariables + "])$", "i"); obj.userVars = limits.maxVariables == "unlimited" || limits.maxVariables >= 10; return Object.freeze(obj); };
 MacroPlayer.prototype.getExtractData = function () { return this.extractData; };
-MacroPlayer.prototype.addExtractData = function (str) { if (this.extractData.length) { this.extractData += "[EXTRACT]" + str; } else { this.extractData = str; } };
-MacroPlayer.prototype.clearExtractData = function () { this.extractData = ""; };
+MacroPlayer.prototype.addExtractData = function (str) {
+    if (this.extractData.length) { this.extractData += "[EXTRACT]" + str; } else { this.extractData = str; }
+    if (this.varManager && typeof this.varManager.setVar === 'function') {
+        this.varManager.setVar('EXTRACT', this.getExtractData());
+    }
+};
+MacroPlayer.prototype.clearExtractData = function () {
+    this.extractData = "";
+    if (this.varManager && typeof this.varManager.setVar === 'function') {
+        this.varManager.setVar('EXTRACT', '');
+    }
+};
 MacroPlayer.prototype.resetVariableStateForNewMacro = function () {
     if (this.varManager && typeof this.varManager.clearGlobalVars === 'function') {
         this.varManager.clearGlobalVars();
