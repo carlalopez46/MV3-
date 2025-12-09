@@ -1,0 +1,68 @@
+<html translate="no">
+
+<head>
+  <meta charset="UTF-8">
+  <title>iMacros</title>
+  <link rel="stylesheet" type="text/css" href="skin/common.css" />
+  <link rel="stylesheet" type="text/css" href="skin/treeView.css" />
+  <link rel="stylesheet" href="vendor/jstree/themes/default/style.css" />
+  <script src="errorLogger.js"></script>
+  <script src="vendor/jQuery/jquery-2.2.1.min.js"></script>
+  <script src="vendor/jstree/jstree.min.js"></script>
+  <script src="utils.js"></script>
+  <script src="VirtualFileService.js"></script>
+  <script src="WindowsPathMappingService.js"></script>
+  <script src="FileSystemAccessService.js"></script>
+  <script src="FileSyncBridge.js"></script>
+  <script src="AsyncFileIO.js"></script>
+  <script src="fileView.js"></script>
+
+</head>
+
+<body treetype="files">
+  <div id="no-file-io-message" hidden="true">
+    <p id="no-file-io-paragraph">
+      File access is not available in the freeware version.
+      <br><br>
+      See <span id="comparison" class="a-link no-bold-link">the feature comparison chart</span>.
+      <br><br>
+      <span id="customer" class="a-link no-bold-link">Already a customer?</span>
+    </p>
+  </div>
+  <div id="filesystem-access-message" hidden="true" style="padding: 20px; text-align: center;">
+    <p>
+      <strong>Local Filesystem Access</strong>
+      <br><br>
+      To access your local filesystem, click the button below to select a directory.
+      <br>
+      Your browser will ask for permission to access the selected directory.
+      <br><br>
+      <button id="select-filesystem-button" style="padding: 10px 20px; font-size: 14px; cursor: pointer;">
+        Select Local Directory
+      </button>
+      <br><br>
+      <small>This uses the File System Access API (Chrome 86+)</small>
+    </p>
+  </div>
+  <div id="loading_message" hidden="true">
+    Scanning directory...
+  </div>
+
+  <div id="virtual-fs-upgrade-banner" hidden="true"
+    style="background: #f0f7ff; border: 1px solid #b3d9ff; padding: 8px 12px; margin: 8px; border-radius: 4px; font-size: 12px; text-align: center;">
+    <span style="color: #0066cc;">
+      📁 Using virtual storage (8MB limit).
+      <a id="upgrade-to-real-fs" href="#" style="color: #0066cc; text-decoration: underline; font-weight: bold;">Access
+        your local filesystem instead</a>
+    </span>
+  </div>
+
+  <ul id="jstree" class="tree-menu">
+  </ul>
+
+  <div id="imacros-bookmark-div" style="display:none">
+    <textarea id="imacros-macro-container"></textarea>
+  </div>
+</body>
+
+</html>

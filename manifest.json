@@ -1,0 +1,107 @@
+{
+    "update_url": "https://clients2.google.com/service/update2/crx",
+    "manifest_version": 3,
+    "content_scripts": [
+        {
+            "js": [
+                "content_scripts/bookmarks_handler.js",
+                "content_scripts/si_listener.js"
+            ],
+            "matches": [
+                "http://*/*",
+                "https://*/*",
+                "file://*"
+            ],
+            "run_at": "document_start",
+            "all_frames": false
+        },
+        {
+            "js": [
+                "utils.js",
+                "errorLogger.js",
+                "content_scripts/connector.js",
+                "content_scripts/recorder.js",
+                "content_scripts/player.js"
+            ],
+            "matches": [
+                "http://*/*",
+                "https://*/*",
+                "file://*"
+            ],
+            "run_at": "document_idle",
+            "all_frames": true
+        }
+    ],
+    "description": "Automate your web browser. Record and replay repetitious work",
+    "name": "iMacros for Chrome",
+    "version": "10.1.1",
+    "minimum_chrome_version": "109",
+    "homepage_url": "https://imacros.net",
+    "action": {
+        "default_title": "iMacros for Chrome",
+        "default_icon": {
+            "19": "skin/logo19.png",
+            "38": "skin/logo38.png"
+        }
+    },
+    "background": {
+        "service_worker": "background.js"
+    },
+    "options_page": "options.html",
+    "permissions": [
+        "tabs",
+        "bookmarks",
+        "proxy",
+        "cookies",
+        "pageCapture",
+        "webNavigation",
+        "notifications",
+        "webRequest",
+        "nativeMessaging",
+        "downloads",
+        "contextMenus",
+        "debugger",
+        "storage",
+        "offscreen",
+        "clipboardWrite",
+        "clipboardRead",
+        "scripting"
+    ],
+    "host_permissions": [
+        "<all_urls>",
+        "file:///*"
+    ],
+    "icons": {
+        "16": "skin/logo16.png",
+        "48": "skin/logo48.png",
+        "128": "skin/logo128.png"
+    },
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "skin/logo24.png"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
+    ],
+    "sandbox": {
+        "pages": [
+            "sandbox.html",
+            "sandbox/eval_executor.html"
+        ]
+    },
+    "content_security_policy": {
+        "extension_pages": "script-src 'self'; object-src 'self'",
+        "sandbox": "sandbox allow-scripts; script-src 'self' 'unsafe-eval'; object-src 'self'"
+    },
+    "commands": {
+        "_execute_action": {
+            "suggested_key": {
+                "default": "Ctrl+8",
+                "mac": "Command+8"
+            }
+        }
+    }
+}
