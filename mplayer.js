@@ -3,6 +3,16 @@
  * Focuses on variable expansion and RUN command support used in unit tests.
  */
 
+// Provide a minimal RuntimeError definition when the shared utilities are not loaded.
+if (typeof RuntimeError === 'undefined') {
+    function RuntimeError(msg, num) {
+        this.name = 'RuntimeError';
+        this.message = msg;
+        this.num = num;
+    }
+    RuntimeError.prototype = Error.prototype;
+}
+
 function MacroPlayer(win_id) {
     if (typeof VariableManager !== 'function') {
         throw new Error('VariableManager is not defined');
