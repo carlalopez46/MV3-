@@ -149,7 +149,7 @@ globalScope.makeBookmarklet = function (name, code) {
 function sharedSave(save_data, overwrite, callback) {
     // saves into file or bookmark
     if (save_data.file_id) {
-        save_file(save_data, overwrite, callback);
+        globalScope.save_file(save_data, overwrite, callback);
         return;
     }
 
