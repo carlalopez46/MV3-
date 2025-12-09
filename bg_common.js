@@ -664,7 +664,7 @@ var saveToBookmark = globalScope.saveToBookmark = async function (save_data, ove
             );
 
             for (var x of children) {
-                if (x.title === save_data.name) {
+                if (x.url && x.title === save_data.name) {
                     save_data.bookmark_id = x.id;
                     break;
                 }
@@ -672,15 +672,16 @@ var saveToBookmark = globalScope.saveToBookmark = async function (save_data, ove
         }
 
         const bookmarkId = save_data.bookmark_id;
-        const shouldOverwrite = overwrite && Boolean(bookmarkId);
+        if (overwrite && !bookmarkId) {
+            throw new Error("bg.save() - trying to overwrite " + save_data.name + " while bookmark_id is not set");
+        }
 
-        
         await createBookmark(
             iMacrosDirId,
             save_data.name,
             url,
             bookmarkId,
-            shouldOverwrite
+            overwrite
         );
 
         typeof callback === "function" && callback(save_data);
