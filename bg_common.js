@@ -141,6 +141,169 @@ globalScope.makeBookmarklet = function (name, code) {
 
 
 // ============================================================================
+// Shared background helpers used by bg.js and offscreen_bg.js
+// ============================================================================
+
+function sharedSave(save_data, overwrite, callback) {
+    // saves into file or bookmark
+    if (save_data.file_id) {
+        save_file(save_data, overwrite, callback);
+        return;
+    }
+
+    // If tree-type is "files" but file_id is not set, prompt user with saveAs dialog
+    // to choose file location instead of falling back to bookmark storage
+    if (Storage.getChar("tree-type") === "files" && !save_data.file_id) {
+        afioCache.isInstalled().then(function (installed) {
+            if (installed) {
+                // Open saveAs dialog to let user choose file location
+                var features = "titlebar=no,menubar=no,location=no," +
+                    "resizable=yes,scrollbars=no,status=no";
+                var win = window.open("saveAsDialog.html", null, features);
+                dialogUtils.setArgs(win, { save_data: save_data });
+                // The saveAsDialog will call save() again with file_id set
+                return;
+            }
+            // If afio is not installed, fall back to bookmark storage
+            saveToBookmark(save_data, overwrite, callback);
+        }).catch(function (err) {
+            console.error("Error checking afio installation:", err);
+            // Fall back to bookmark storage on error
+            saveToBookmark(save_data, overwrite, callback);
+        });
+        return;
+    }
+
+    // Default: save to bookmark
+    saveToBookmark(save_data, overwrite, callback);
+}
+
+function sharedPlayMacro(macro, win_id) {
+    // Ensure context is initialized before playing
+    var contextPromise = context[win_id] && context[win_id]._initialized
+        ? Promise.resolve(context[win_id])
+        : context.init(win_id);
+
+    contextPromise.then(function (ctx) {
+        return getLimits().then(
+            limits => ctx.mplayer.play(macro, limits)
+        );
+    }).catch(err => {
+        logError("Failed to initialize context, get limits, or play macro in playMacro: " + err.message, { win_id: win_id, macro_name: macro.name });
+    });
+}
+
+async function sharedDockPanel(win_id) {
+    // MV3: Docking panel is not supported in Service Worker due to lack of DOM access
+    // and reliable timers. This feature is disabled.
+    if (context[win_id] && context[win_id].dockInterval) {
+        clearInterval(context[win_id].dockInterval);
+        context[win_id].dockInterval = null;
+    }
+    if (!context[win_id] || !context[win_id]._initialized) {
+        return;
+    }
+
+    var panel = context[win_id].panelWindow;
+    if (!panel || panel.closed) {
+        return;
+    }
+    if (!Storage.getBool("dock-panel"))
+        return;
+
+    try {
+        const w = await chromeAsync(cb => chrome.windows.get(win_id, cb), "Failed to get window in dockPanel", { win_id: win_id });
+        if (!w) {
+            logWarning("Window not found in dockPanel", { win_id: win_id });
+            return;
+        }
+
+        var new_x = w.left - panel.outerWidth;
+        if (new_x < 0)
+            new_x = 0;
+
+        var updateInfo = {
+            height: w.height,
+            width: Math.round(panel.outerWidth),
+            left: new_x,
+            top: w.top
+        };
+
+        await chromeAsync(cb => chrome.windows.update(context[win_id].panelId, updateInfo, cb), "Failed to update panel window", { panelId: context[win_id] ? context[win_id].panelId : 'unknown' });
+
+        var ctx = context[win_id];
+        if (!ctx) {
+            return;
+        }
+        // Update cached dimensions
+        ctx.panelWidth = updateInfo.width;
+        ctx.panelHeight = updateInfo.height;
+    } catch (err) {
+        // chromeAsync already logs context-aware errors; fallback here for unexpected exceptions
+        logError("Dock panel update failed: " + err.message, { win_id: win_id });
+    }
+}
+
+function sharedOpenPanel(win_id) {
+    // Safety check: ensure context exists and is initialized
+    if (!context[win_id] || !context[win_id]._initialized) {
+        console.warn("Cannot open panel: context not initialized for window " + win_id);
+        return;
+    }
+
+    // MV3: Delegate panel creation to Service Worker via message
+    // This avoids duplicate panel creation between bg.js and background.js
+    console.log(`[iMacros MV3] Requesting panel open for window ${win_id}`);
+    chrome.runtime.sendMessage({
+        command: "openPanel",
+        win_id: win_id
+    });
+}
+
+async function sharedOpenPanelWindow(win_id) {
+    try {
+        const win = await chromeAsync(cb => chrome.windows.get(win_id, cb), "Failed to get window in openPanel", { win_id: win_id });
+        if (!win) {
+            logWarning("Window not found in openPanel", { win_id: win_id });
+            return;
+        }
+
+        var panelBox = Storage.getObject("panel-box");
+        if (!panelBox) {
+            panelBox = new Object();
+            panelBox.width = 210;
+            if (Storage.getBool("dock-panel"))
+                panelBox.height = win.height;
+            else
+                panelBox.height = 600;
+            panelBox.top = win.top;
+            panelBox.left = win.left - panelBox.width;
+            if (panelBox.left < 0)
+                panelBox.left = 0;
+        }
+
+        var createData = {
+            url: "panel.html", type: "popup",
+            top: panelBox.top, left: panelBox.left,
+            width: panelBox.width, height: panelBox.height
+        };
+
+        await chromeAsync(cb => chrome.windows.create(createData, cb), "Failed to create panel window", { createData: createData });
+    } catch (err) {
+        logError("Failed to create panel window: " + err.message, { win_id: win_id });
+    }
+}
+
+globalScope.registerSharedBackgroundHandlers = function (scope) {
+    scope.save = sharedSave;
+    scope.playMacro = sharedPlayMacro;
+    scope.dockPanel = sharedDockPanel;
+    scope.openPanel = sharedOpenPanel;
+    scope._openPanelWindow = sharedOpenPanelWindow;
+};
+
+
+// ============================================================================
 // Sample Macros Installation
 // ============================================================================
 
