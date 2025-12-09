@@ -2266,9 +2266,20 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
         } else if ((match = mplayer.limits.varsRe.exec(varName))) {
             ensureVarManager();
             const key = `VAR${match[1]}`;
-            value = mplayer.varManager.hasVar(key) ? mplayer.varManager.getVar(key) : mplayer.vars[imns.s2i(match[1])];
+            if (mplayer.varManager.hasVar(key)) {
+                value = mplayer.varManager.getVar(key);
+            } else {
+                value = mplayer.vars[imns.s2i(match[1])];
+                // Keep legacy array and VariableManager in sync
+                mplayer.varManager.setVar(key, value);
+            }
         } else if (/^!extract$/i.test(varName)) {
-            value = mplayer.varManager && mplayer.varManager.hasVar('EXTRACT') ? mplayer.varManager.getVar('EXTRACT') : mplayer.getExtractData();
+            const extractValue = mplayer.varManager && mplayer.varManager.hasVar('EXTRACT')
+                ? mplayer.varManager.getVar('EXTRACT')
+                : mplayer.getExtractData();
+            value = extractValue;
+            ensureVarManager();
+            mplayer.varManager.setVar('EXTRACT', extractValue);
         } else if ((match = /^!col(\d+)$/i.exec(varName))) {
             value = mplayer.getColumnData(imns.s2i(match[1]));
         } else if (/^!datasource_line$/i.test(varName)) {
@@ -2291,7 +2302,12 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
             value = imns.formatDate(match[1]);
         } else if (/^!loop$/i.test(varName)) {
             ensureVarManager();
-            value = mplayer.varManager.hasVar('LOOP') ? mplayer.varManager.getVar('LOOP') : mplayer.currentLoop;
+            if (mplayer.varManager.hasVar('LOOP')) {
+                value = mplayer.varManager.getVar('LOOP');
+            } else {
+                value = mplayer.currentLoop;
+                mplayer.varManager.setVar('LOOP', value);
+            }
         } else if (/^!clipboard$/i.test(varName)) {
             value = imns.Clipboard.getString() || "";
         } else if (/^!timeout(?:_page)?$/i.test(varName)) {
