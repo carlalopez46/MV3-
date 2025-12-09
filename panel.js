@@ -57,16 +57,21 @@ function sendCommand(command, payload = {}) {
         };
         console.log(`[Panel] Sending command: ${command}`, message);
         return new Promise((resolve) => {
-            chrome.runtime.sendMessage(message, (response) => {
-                if (chrome.runtime.lastError) {
-                    console.error("[Panel] Message error:", chrome.runtime.lastError);
-                    // 通信エラーは無視してよい場合が多い
-                    resolve();
-                } else {
-                    console.log(`[Panel] Command ${command} response:`, response);
-                    resolve(response);
-                }
-            });
+            try {
+                chrome.runtime.sendMessage(message, (response) => {
+                    if (chrome.runtime.lastError) {
+                        console.error("[Panel] Message error:", chrome.runtime.lastError);
+                        // 通信エラーは無視してよい場合が多い
+                        resolve();
+                    } else {
+                        console.log(`[Panel] Command ${command} response:`, response);
+                        resolve(response);
+                    }
+                });
+            } catch (e) {
+                console.error("[Panel] Failed to send message:", e);
+                resolve();
+            }
         });
     });
 }
