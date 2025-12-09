@@ -5,6 +5,7 @@ var selectedMacro = null;
 
 // パネルのウィンドウIDを保持
 var currentWindowId = null;
+var currentTreeType = null;
 
 // ウィンドウIDを取得
 function initWindowId() {
@@ -138,6 +139,78 @@ function edit() {
     });
 }
 
+// --- ツリー切り替え ---
+
+function refreshTreeView() {
+    const iframe = document.getElementById("tree-iframe");
+    if (!iframe) return;
+
+    const viewWindow = iframe.contentWindow;
+    try {
+        if (viewWindow && viewWindow.TreeView && typeof viewWindow.TreeView.refresh === "function") {
+            viewWindow.TreeView.refresh();
+            return;
+        }
+    } catch (e) {
+        console.warn("[Panel] TreeView.refresh failed, falling back to iframe reload", e);
+    }
+
+    // フォールバック: iframe をリロード
+    const src = iframe.getAttribute("src");
+    iframe.setAttribute("src", src);
+}
+
+function applyTreeSelection(type, options = {}) {
+    const { persist = true, forceReload = false } = options;
+    if (type !== "files" && type !== "bookmarks") {
+        console.warn("[Panel] Unknown tree type, falling back to bookmarks:", type);
+        type = "bookmarks";
+    }
+
+    const iframe = document.getElementById("tree-iframe");
+    if (!iframe) {
+        console.error("[Panel] tree-iframe not found");
+        return;
+    }
+
+    const targetSrc = type === "files" ? "fileView.html" : "treeView.html";
+    if (forceReload || iframe.getAttribute("src") !== targetSrc) {
+        iframe.setAttribute("src", targetSrc);
+    }
+
+    const filesRadio = document.getElementById("radio-files-tree");
+    const bookmarksRadio = document.getElementById("radio-bookmarks-tree");
+    if (filesRadio) filesRadio.checked = type === "files";
+    if (bookmarksRadio) bookmarksRadio.checked = type === "bookmarks";
+
+    if (persist) {
+        Storage.setChar("tree-type", type);
+    }
+    currentTreeType = type;
+}
+
+async function selectInitialTree() {
+    let storedType = Storage.isSet("tree-type") ? Storage.getChar("tree-type") : "files";
+    if (storedType !== "files" && storedType !== "bookmarks") {
+        storedType = "files";
+    }
+
+    try {
+        const installed = await afio.isInstalled();
+
+        // Fileアクセスが無効なら自動的にブックマークタブへフォールバック
+        if (storedType === "files" && !installed) {
+            console.warn("[Panel] File access unavailable, switching tree view to bookmarks");
+            storedType = "bookmarks";
+        }
+
+        applyTreeSelection(storedType, { persist: true, forceReload: true });
+    } catch (e) {
+        console.error("[Panel] Failed to determine initial tree type, defaulting to bookmarks", e);
+        applyTreeSelection("bookmarks", { persist: true, forceReload: true });
+    }
+}
+
 // --- UI更新 ---
 
 function onSelectionChanged(node) {
@@ -210,6 +283,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "macroStopped") {
         updatePanelState("idle");
     }
+    if (message.type === "UPDATE_PANEL_VIEWS") {
+        refreshTreeView();
+        if (sendResponse) sendResponse({ success: true });
+    }
 });
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -233,8 +310,36 @@ document.addEventListener("DOMContentLoaded", () => {
     addListener("settings-button", openSettings);
     addListener("edit-button", edit);
 
+    const filesRadio = document.getElementById("radio-files-tree");
+    const bookmarksRadio = document.getElementById("radio-bookmarks-tree");
+
+    if (filesRadio) {
+        filesRadio.addEventListener("change", async () => {
+            try {
+                const installed = await afio.isInstalled();
+                if (!installed) {
+                    alert("File access module is not installed. Switching to Bookmarks view.");
+                    applyTreeSelection("bookmarks", { persist: true, forceReload: true });
+                    return;
+                }
+                applyTreeSelection("files", { persist: true });
+            } catch (e) {
+                console.error("[Panel] Failed to switch to files tree", e);
+                applyTreeSelection("bookmarks", { persist: true, forceReload: true });
+            }
+        });
+    }
+
+    if (bookmarksRadio) {
+        bookmarksRadio.addEventListener("change", () => {
+            applyTreeSelection("bookmarks", { persist: true });
+        });
+    }
+
     // 右クリック無効化
     document.body.oncontextmenu = (e) => { e.preventDefault(); return false; };
+
+    selectInitialTree();
 
     // 広告などの読み込み
     if (typeof setAdDetails === "function") setAdDetails();
