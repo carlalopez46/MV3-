@@ -233,6 +233,9 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id, depthMap) {
         result = result.replace(/\{\{([^{}]+)\}\}/g, replacePlaceholder);
         safety++;
     }
+    if (safety >= MAX_EXPANSION_ITERATIONS && /\{\{[^{}]+\}\}/.test(result)) {
+        throw new RuntimeError('Maximum placeholder expansion iterations exceeded');
+    }
     return result;
 };
 
@@ -370,7 +373,7 @@ MacroPlayer.prototype.ActionTable['run'] = async function (cmd) {
             try {
                 source = await this.loadMacroFileFromFs(macroNode);
             } catch (err) {
-                if (Storage && Storage.getBool && Storage.getBool('debug')) {
+                if (typeof Storage !== 'undefined' && Storage.getBool && Storage.getBool('debug')) {
                     console.debug('[iMacros] Failed to load macro from filesystem', resolvedPath, err);
                 }
             }
