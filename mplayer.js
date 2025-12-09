@@ -2268,6 +2268,8 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
             const key = `VAR${match[1]}`;
             if (mplayer.varManager.hasVar(key)) {
                 value = mplayer.varManager.getVar(key);
+                // Keep legacy VAR array aligned with the VariableManager snapshot
+                mplayer.vars[imns.s2i(match[1])] = value;
             } else {
                 value = mplayer.vars[imns.s2i(match[1])];
                 // Keep legacy array and VariableManager in sync
@@ -2280,6 +2282,7 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
             value = extractValue;
             ensureVarManager();
             mplayer.varManager.setVar('EXTRACT', extractValue);
+            mplayer.extractData = typeof extractValue === 'string' ? extractValue : '';
         } else if ((match = /^!col(\d+)$/i.exec(varName))) {
             value = mplayer.getColumnData(imns.s2i(match[1]));
         } else if (/^!datasource_line$/i.test(varName)) {
@@ -2304,6 +2307,10 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
             ensureVarManager();
             if (mplayer.varManager.hasVar('LOOP')) {
                 value = mplayer.varManager.getVar('LOOP');
+                const parsedLoop = imns.s2i(value);
+                if (!isNaN(parsedLoop)) {
+                    mplayer.currentLoop = parsedLoop;
+                }
             } else {
                 value = mplayer.currentLoop;
                 mplayer.varManager.setVar('LOOP', value);
@@ -2331,6 +2338,7 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
             ensureVarManager();
             if (mplayer.varManager.hasVar(bareName)) {
                 value = mplayer.varManager.getVar(bareName);
+                mplayer.setUserVar(bareName, value);
             } else if (/^!\S+/.test(varName)) {
                 throw new BadParameter("Unsupported variable " + varName);
             } else {
