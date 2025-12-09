@@ -1,0 +1,56 @@
+'====
+'Yahoo!かんたん決済におけるカード決済の許可/不許可を自動判定
+'create at 2017/5/27
+'====
+'Yahoo!かんたん決済はデフォルトで有効のため必ず設定されるが
+'カテゴリによって不許可がある。
+'調べてテンプレートを作るのが面倒なため、
+'自動差し込みとしたい
+'--
+'---
+'出品作成中の判定
+'--
+TAG POS=1 TYPE=P ATTR=TXT:カテゴリを選択してください
+TAG POS=R1 TYPE=B ATTR=TXT:オークション* EXTRACT=TXT
+SET category {{!EXTRACT}}
+SET !EXTRACT NULL
+SET category EVAL("s='{{category}}'.split('>');s1=s[2];s1;")
+PROMPT {{category}}
+'施設利用券が返る
+'===
+'OLD
+'==
+'SET category_hantei EVAL("var h=\"{{category}}\"; h=h.trim();if (h==='施設利用券') {var x='クレジットカード利用可能';} else if (h==='整理券、予約券') {var x='クレジットカード利用可能';} else if (h==='興行チケット') {var x='クレジットカード利用可能';}else{var x='クレジットカード利用不可';} x;")
+'施設利用券が返る
+'==
+'New
+'==
+SET category_hantei EVAL("var h=\"{{category}}\"; h=h.trim();if (h==='施設利用券') {var x='可';} else if (h==='整理券、予約券') {var x='可';} else if (h==='興行チケット') {var x='可';}else{var x='不可';} x;")
+PROMPT {{category_hantei}}
+SET yahoo_html EVAL("var h=\"{{category_hantei}}\"; h=h.trim();if (h==='可'){var x='kantan_ok';}else{var x='kantan_ng';};x;")
+PROMPT {{yahoo_html}}
+'===
+'--init
+'DATASOURCEからsnipetを読む(TEST)
+'===
+SET !DATASOURCE {{yahoo_html}}.txt
+SET !DATASOURCE_LINE 1
+SET yahoo_html {{!COL1}}
+PROMPT {{yahoo_html}}
+'___DEMO___
+'create_html
+'===
+SET header <center><br/><br/><table<SP>border="0"<SP>width="600"<SP>cellspacing="1"<SP>cellpadding="10"<SP>bgcolor="#E69065"><tbody>
+SET footer </tbody></table></center>
+SET create_html "{{header}}{{yahoo_html}}{{footer}}"
+'==
+'TO_EDITOR
+'==
+TAB OPEN
+TAB T=2
+URL GOTO=http://yokohamaticket.co.jp/mayunekosama.html
+WAIT SECONDS=0.2
+TAG POS=1 TYPE=BUTTON ATTR=TABINDEX:-1&&TYPE:button&&ROLE:presentation&&TXT:
+WAIT SECONDS=0.2
+TAG POS=1 TYPE=TEXTAREA ATTR=ID:mceu_*&&HIDEFOCUS:1&&SPELLCHECK:false&&CLASS:mce-textbox<SP>mce-multiline<SP>mce-abs-layout-item<SP>mce-first<SP>mce-last&&TXT: CONTENT="{{create_html}}"
+TAG POS=1 TYPE=BUTTON ATTR=TXT:Ok

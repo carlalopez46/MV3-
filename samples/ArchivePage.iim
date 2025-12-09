@@ -1,0 +1,6 @@
+﻿'Simple but effective macro to save the current page
+'Ask for a name
+PROMPT Enter<SP>a<SP>Page<SP>Name !VAR1 NoName_Time_{{!NOW:yyyymmdd_hhnnss}} 
+
+'Save the page    
+SAVEAS TYPE=MHT FOLDER=* FILE={{!VAR1}} 

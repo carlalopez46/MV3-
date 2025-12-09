@@ -1,0 +1,18 @@
+﻿'===
+'2023_11_25
+'(ys)10percent税分離v2.iim
+'imacros://run/?m=(ys)10percent税分離v2.iim
+'日本の消費税の計算では、通常、小数点以下を四捨五入する必要があります。
+'税込価格から税抜価格と消費税額を正確に計算するためのものです。
+'税込価格を1.1で割って税抜価格を求め、四捨五入しています。
+'===
+PROMPT 消費税額がわかってるバージョン<BR>税込価格の金額を入れてください {{!VAR1}}
+PROMPT レシートの消費税を入れてください !VAR2 
+SET inprice {{!VAR1}}
+SET tax_amount {{!VAR2}}
+''PROMPT {{inprice}}
+SET tax_amount EVAL("var s='{{tax_amount}}';s;")
+''PROMPT {{tax_amount}}
+SET price_without_tax EVAL("var s=parseFloat('{{inprice}}'); m=parseFloat('{{tax_amount}}');res=s-m;res;")
+PROMPT 税込価格:{{inprice}}円<BR>税抜価格:{{price_without_tax}}円<BR>消費税:{{tax_amount}}円
+SET !CLIPBOARD 税込価格:{{inprice}}円<BR>税抜価格:{{price_without_tax}}円<BR>消費税:{{tax_amount}}円
