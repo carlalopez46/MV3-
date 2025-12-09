@@ -4,6 +4,8 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 // Common background logic shared between Service Worker (bg.js) and Offscreen Document (offscreen_bg.js)
 // Depends on: utils.js, afio (AsyncFileIO.js), communicator.js
+/* global chrome, logError, logWarning, context, getLimits, afioCache, dialogUtils, Storage, makeBookmarklet,
+   ensureBookmarkFolderCreated, createBookmark, saveToBookmark, afio, window, FileSyncBridge, communicator */
 
 "use strict";
 
@@ -155,7 +157,7 @@ function sharedSave(save_data, overwrite, callback) {
     // to choose file location instead of falling back to bookmark storage
     if (Storage.getChar("tree-type") === "files" && !save_data.file_id) {
         afioCache.isInstalled().then(function (installed) {
-            if (installed) {
+            if (installed && typeof window !== 'undefined' && window && typeof window.open === 'function') {
                 // Open saveAs dialog to let user choose file location
                 var features = "titlebar=no,menubar=no,location=no," +
                     "resizable=yes,scrollbars=no,status=no";
@@ -164,7 +166,8 @@ function sharedSave(save_data, overwrite, callback) {
                 // The saveAsDialog will call save() again with file_id set
                 return;
             }
-            // If afio is not installed, fall back to bookmark storage
+            // If afio is not installed or window.open is unavailable (e.g., MV3 Service Worker),
+            // fall back to bookmark storage
             saveToBookmark(save_data, overwrite, callback);
         }).catch(function (err) {
             console.error("Error checking afio installation:", err);
@@ -210,6 +213,11 @@ async function sharedDockPanel(win_id) {
     }
     if (!Storage.getBool("dock-panel"))
         return;
+
+    if (typeof panel.outerWidth !== 'number') {
+        logWarning("Panel window width unavailable; skipping docking", { win_id: win_id });
+        return;
+    }
 
     try {
         const w = await chromeAsync(cb => chrome.windows.get(win_id, cb), "Failed to get window in dockPanel", { win_id: win_id });
