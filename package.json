@@ -10,7 +10,8 @@
     "test:verbose": "node tests/run_tests_cli.js --verbose",
     "test:fsaccess": "node tests/run_tests_cli.js --suite=fsaccess",
     "test:afio": "node tests/run_tests_cli.js --suite=afio",
-    "test:watch": "node tests/run_tests_cli.js --watch"
+    "test:watch": "node tests/run_tests_cli.js --watch",
+    "check:conflicts": "git grep -n '^<<<<<<<' -- ."
   },
   "keywords": ["imacros", "chrome-extension", "automation"],
   "author": "",
