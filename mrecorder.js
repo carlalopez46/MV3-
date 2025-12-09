@@ -29,6 +29,7 @@ function Recorder(win_id) {
     this.win_id = win_id;
     this.recording = false;
     this.actions = [];
+    this.lastTabUrls = new Map();
     communicator.registerHandler("record-action",
         this.onRecordAction.bind(this), win_id);
     communicator.registerHandler("password-element-focused",
@@ -39,7 +40,7 @@ function Recorder(win_id) {
     // make bindings of event listeners
     this.onActivated = this.onTabActivated.bind(this);
     this.onCreated = this.onTabCreated.bind(this);
-    // this.onUpdated = this.onTabUpdated.bind(this);
+    this.onUpdated = this.onTabUpdated.bind(this);
     this.onRemoved = this.onTabRemoved.bind(this);
     this.onMoved = this.onTabMoved.bind(this);
     this.onAttached = this.onTabAttached.bind(this);
@@ -761,18 +762,54 @@ Recorder.prototype.onTabCreated = function (tab) {
 };
 
 // // tab update
-// Recorder.prototype.onTabUpdated = function(tab_id, obj, tab) {
-//     if (this.win_id != tab.windowId)
-//         return;
-//     chrome.tabs.get(tab_id, function (tab) {
-//         // TODO: wait for they added 'type' property
-//         console.log("onTabUpdated, openerTabId %s", tab.openerTabId);
-//         if (obj.status == "loading" && obj.url && !tab.openerTabId) {
-//             var cmd = "URL GOTO="+obj.url;
-//             recorder.recordAction(cmd);
-//         }
-//     });
-// };
+Recorder.prototype.onTabUpdated = function (tab_id, changeInfo, tab) {
+    const recorder = this;
+
+    // Prefer provided tab info but fall back to querying the tab if needed
+    const ensureTab = tab && 'url' in tab ?
+        Promise.resolve(tab) :
+        getTab(tab_id);
+
+    ensureTab.then(function (resolvedTab) {
+        if (!resolvedTab || resolvedTab.windowId !== recorder.win_id)
+            return;
+
+        // Ignore updates for tabs opened by other tabs (popup/opener tabs) to reduce noise
+        if (resolvedTab.openerTabId) {
+            return;
+        }
+
+        // Determine the navigated URL. changeInfo.url is the most accurate signal
+        // for new top-level navigations, but fall back to tab.url to avoid
+        // missing updates in environments that omit the url field.
+        const navigatedUrl = changeInfo.url || resolvedTab.pendingUrl || resolvedTab.url;
+
+        // Only record during active recording sessions to avoid restoring events
+        // while the recorder is idle or still initializing.
+        if (!recorder.recording || !navigatedUrl)
+            return;
+
+        // Record once per URL per tab to avoid duplicate commands when multiple
+        // update events fire for the same navigation lifecycle.
+        const lastRecorded = recorder.lastTabUrls.get(tab_id);
+        if (lastRecorded === navigatedUrl)
+            return;
+
+        // Only capture meaningful navigations signaled by loading state or an
+        // explicit URL change payload.
+        const isNavigationSignal = changeInfo.status === "loading" || Boolean(changeInfo.url);
+        if (!isNavigationSignal)
+            return;
+
+        recorder.lastTabUrls.set(tab_id, navigatedUrl);
+        recorder.recordAction("URL GOTO=" + navigatedUrl);
+    }).catch(function (err) {
+        // Tab may disappear mid-update; avoid noisy logs unless debugging.
+        if (Storage.getBool("debug")) {
+            console.debug("onTabUpdated lookup failed:", err.message || err);
+        }
+    });
+};
 
 
 // tab closed
@@ -1122,7 +1159,7 @@ Recorder.prototype.addListeners = function () {
     if (chrome.tabs && chrome.tabs.onActivated) {
         chrome.tabs.onActivated.addListener(this.onActivated);
         chrome.tabs.onCreated.addListener(this.onCreated);
-        // chrome.tabs.onUpdated.addListener(this.onUpdated);
+        chrome.tabs.onUpdated.addListener(this.onUpdated);
         chrome.tabs.onRemoved.addListener(this.onRemoved);
         chrome.tabs.onMoved.addListener(this.onMoved);
         chrome.tabs.onAttached.addListener(this.onAttached);
@@ -1209,7 +1246,7 @@ Recorder.prototype.removeListeners = function () {
     if (chrome.tabs && chrome.tabs.onActivated) {
         chrome.tabs.onActivated.removeListener(this.onActivated);
         chrome.tabs.onCreated.removeListener(this.onCreated);
-        // chrome.tabs.onUpdated.removeListener(this.onUpdated);
+        chrome.tabs.onUpdated.removeListener(this.onUpdated);
         chrome.tabs.onRemoved.removeListener(this.onRemoved);
         chrome.tabs.onMoved.removeListener(this.onMoved);
         chrome.tabs.onAttached.removeListener(this.onAttached);
