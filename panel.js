@@ -34,25 +34,39 @@ function initWindowId() {
     });
 }
 
+let windowIdReadyPromise = null;
+
 // 通信機能: バックグラウンドへメッセージを送る
+function ensureWindowId() {
+    if (currentWindowId !== null) {
+        return Promise.resolve(currentWindowId);
+    }
+    if (!windowIdReadyPromise) {
+        windowIdReadyPromise = initWindowId();
+    }
+    return windowIdReadyPromise;
+}
+
 function sendCommand(command, payload = {}) {
-    // 自動的にウィンドウIDを追加
-    const message = {
-        ...payload,
-        command: command,
-        win_id: payload.win_id || currentWindowId
-    };
-    console.log(`[Panel] Sending command: ${command}`, message);
-    return new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage(message, (response) => {
-            if (chrome.runtime.lastError) {
-                console.error("[Panel] Message error:", chrome.runtime.lastError);
-                // 通信エラーは無視してよい場合が多い
-                resolve();
-            } else {
-                console.log(`[Panel] Command ${command} response:`, response);
-                resolve(response);
-            }
+    return ensureWindowId().then(() => {
+        // 自動的にウィンドウIDを追加
+        const message = {
+            ...payload,
+            command: command,
+            win_id: payload.win_id || currentWindowId
+        };
+        console.log(`[Panel] Sending command: ${command}`, message);
+        return new Promise((resolve) => {
+            chrome.runtime.sendMessage(message, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error("[Panel] Message error:", chrome.runtime.lastError);
+                    // 通信エラーは無視してよい場合が多い
+                    resolve();
+                } else {
+                    console.log(`[Panel] Command ${command} response:`, response);
+                    resolve(response);
+                }
+            });
         });
     });
 }
@@ -197,7 +211,7 @@ document.addEventListener("DOMContentLoaded", () => {
     console.log("[Panel] DOMContentLoaded");
 
     // ウィンドウIDを初期化
-    initWindowId();
+    windowIdReadyPromise = initWindowId();
 
     // イベントリスナーの登録
     const addListener = (id, handler) => {
