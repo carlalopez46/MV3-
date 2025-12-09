@@ -244,10 +244,66 @@
     }, { category: 'PathMapping' });
 
     TestRunner.addTest('WindowsPathMappingService: Path Normalization', function() {
-        // normalizeWindowsPath is an internal function
-        // It will be tested indirectly through path resolution tests
-        console.log('Path normalization: tested indirectly through resolveWindowsPath');
-    }, { category: 'PathMapping', skip: true });
+        const cases = [
+            {
+                input: 'FILE:///C:/Users//Test\\Folder/ ',
+                expected: 'c:/users/test/folder'
+            },
+            {
+                input: ' file://d:\\Projects\\ ',
+                expected: 'd:/projects'
+            },
+            {
+                input: 'C:////Temp//',
+                expected: 'c:/temp'
+            }
+        ];
+
+        cases.forEach(({ input, expected }) => {
+            const normalized = normalizeWindowsPath(input);
+            if (normalized !== expected) {
+                throw new Error(`Expected ${input} -> ${expected}, got ${normalized}`);
+            }
+        });
+
+        // Uppercase FILE:// prefixes should still be treated as Windows absolute paths
+        const uppercaseFilePath = 'FILE:///E:/Data/file.txt';
+        if (!isWindowsAbsolutePath(uppercaseFilePath)) {
+            throw new Error('isWindowsAbsolutePath should handle case-insensitive file:// prefix');
+        }
+    }, { category: 'PathMapping' });
+
+    TestRunner.addTest('WindowsPathMappingService: stripFileUriPrefix handles whitespace and slashes', function() {
+        const cases = [
+            {
+                input: '  file:///C:/Users/Example  ',
+                expected: 'C:/Users/Example'
+            },
+            {
+                input: 'FILE://d:/projects',
+                expected: 'd:/projects'
+            },
+            {
+                input: 'file:////C:/Extra/Slashes',
+                expected: 'C:/Extra/Slashes'
+            },
+            {
+                input: 'FILE://localhost/D:/Projects/App',
+                expected: 'D:/Projects/App'
+            },
+            {
+                input: 'C:/NoPrefix/Path',
+                expected: 'C:/NoPrefix/Path'
+            }
+        ];
+
+        cases.forEach(({ input, expected }) => {
+            const result = stripFileUriPrefix(input);
+            if (result !== expected) {
+                throw new Error(`stripFileUriPrefix(${input}) expected ${expected}, got ${result}`);
+            }
+        });
+    }, { category: 'PathMapping' });
 
     // ===========================
     // PATH VALIDATION TESTS

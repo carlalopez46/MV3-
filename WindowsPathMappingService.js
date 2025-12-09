@@ -23,14 +23,26 @@ const PATH_MAPPING_STORE_NAME = 'pathMappings';
 function stripFileUriPrefix(path) {
     if (!path) return '';
 
-    // file:/// または file:// プレフィックスを削除
-    if (path.startsWith('file:///')) {
-        path = path.substring(8); // 'file:///' を削除
-    } else if (path.startsWith('file://')) {
-        path = path.substring(7); // 'file://' を削除
+    // 文字列化して余分な空白を除去
+    let normalized = String(path).trim();
+
+    // file:/// または file:// プレフィックスを大文字小文字を無視して削除
+    const filePrefixMatch = normalized.match(/^file:\/\//i);
+    if (filePrefixMatch) {
+        normalized = normalized.substring(filePrefixMatch[0].length);
+
+        // file://localhost/C:/... 形式を localhost 部分を除去したパスとして扱う
+        if (/^localhost[/\\]/i.test(normalized)) {
+            normalized = normalized.substring('localhost'.length + 1);
+        }
+
+        // file:///C:/... のようにスラッシュが残る場合を考慮して先頭のスラッシュをすべて削除
+        if (normalized.startsWith('/')) {
+            normalized = normalized.replace(/^\/+/, '');
+        }
     }
 
-    return path;
+    return normalized;
 }
 
 /**
@@ -44,6 +56,9 @@ function normalizeWindowsPath(path) {
 
     // バックスラッシュをスラッシュに変換
     let normalized = path.replace(/\\/g, '/');
+
+    // 連続スラッシュを1つにまとめる（UNCパスは想定しないため単純圧縮でOK）
+    normalized = normalized.replace(/\/+/g, '/');
 
     // 末尾のスラッシュを削除
     if (normalized.length > 1 && normalized.endsWith('/')) {
