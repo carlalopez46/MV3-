@@ -236,6 +236,91 @@
             }
         },
         {
+            name: 'RUN prefers default extension before raw macro name',
+            async run() {
+                const macros = {
+                    'DefaultExt.iim': 'SET !VAR1 default-ext',
+                    'DefaultExt': 'SET !VAR1 raw-name'
+                };
+
+                const player = createPlayer({ macros });
+
+                const attempts = [];
+                player.loadMacroFile = async function (macroPath) {
+                    attempts.push(macroPath);
+                    if (Object.prototype.hasOwnProperty.call(macros, macroPath)) {
+                        return macros[macroPath];
+                    }
+                    return null;
+                };
+
+                await MacroPlayer.prototype.ActionTable["run"].call(player,
+                    ['macro=DefaultExt', 'DefaultExt']);
+                await waitForPlayerToDrain(player);
+
+                assertEqual(JSON.stringify(attempts), JSON.stringify(['DefaultExt.iim']), 'Default extension attempted first');
+                assertEqual(player.varManager.getVar('VAR1'), 'default-ext', 'Macro with default extension executed');
+            }
+        },
+        {
+            name: 'RUN falls back to raw name when default extension is missing',
+            async run() {
+                const macros = {
+                    'NoExt': 'SET !VAR1 raw-only'
+                };
+
+                const player = createPlayer({ macros });
+
+                const attempts = [];
+                player.loadMacroFile = async function (macroPath) {
+                    attempts.push(macroPath);
+                    if (Object.prototype.hasOwnProperty.call(macros, macroPath)) {
+                        return macros[macroPath];
+                    }
+                    return null;
+                };
+
+                await MacroPlayer.prototype.ActionTable["run"].call(player,
+                    ['macro=NoExt', 'NoExt']);
+                await waitForPlayerToDrain(player);
+
+                assertEqual(JSON.stringify(attempts), JSON.stringify(['NoExt.iim', 'NoExt']), 'Default extension attempted before raw fallback');
+                assertEqual(player.varManager.getVar('VAR1'), 'raw-only', 'Macro without extension still executes');
+            }
+        },
+        {
+            name: 'RUN bypasses autoplay suppression for nested execution and restores caller state',
+            async run() {
+                const macros = {
+                    'Parent.iim': '',
+                    'Child.iim': 'SET !VAR1 child-ran'
+                };
+
+                const player = createPlayer({ macros });
+
+                player.autoplaySuppressed = true;
+
+                const observedSuppressionStates = [];
+                player.parseInlineMacro = function (content) {
+                    observedSuppressionStates.push(this.autoplaySuppressed);
+                    return content ? MacroPlayer.prototype.parseInlineMacro.call(this, content) : [];
+                };
+
+                await MacroPlayer.prototype.ActionTable["run"].call(player,
+                    ['macro=Parent.iim', 'Parent.iim']);
+
+                await MacroPlayer.prototype.ActionTable["run"].call(player,
+                    ['macro=Child.iim', 'Child.iim']);
+
+                await waitForPlayerToDrain(player);
+
+                assertEqual(observedSuppressionStates.every(state => state === false), true,
+                    'Autoplay suppression bypassed during RUN execution');
+                assertEqual(player.varManager.getVar('VAR1'), 'child-ran', 'Nested macro executes under suppression');
+                assertEqual(player.autoplaySuppressed, true, 'Caller autoplay suppression state restored after nested runs');
+            }
+        },
+        {
             name: 'VariableManager snapshots are deep-copied and restore local context',
             async run() {
                 const player = createPlayer();
@@ -282,6 +367,8 @@
                 };
 
                 const player = createPlayer();
+                player.resolveMacroPath = MacroPlayer.prototype.resolveMacroPath.bind(player);
+                player.loadMacroFileFromFs = MacroPlayer.prototype.loadMacroFileFromFs.bind(player);
                 player.macrosFolder = makeNode('/macros');
                 fakeFs['/macros/Sub.iim'] = 'SET !VAR1 relative-macro';
 
@@ -319,6 +406,8 @@
                 };
 
                 const player = createPlayer();
+                player.resolveMacroPath = MacroPlayer.prototype.resolveMacroPath.bind(player);
+                player.loadMacroFileFromFs = MacroPlayer.prototype.loadMacroFileFromFs.bind(player);
                 player.macrosFolder = null;
 
                 try {
