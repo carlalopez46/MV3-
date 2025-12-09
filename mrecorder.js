@@ -266,6 +266,17 @@ Recorder.prototype.recordAction = function (cmd) {
         communicator.broadcastMessage("stop-recording", {}, this.win_id);
         return;
     }
+
+    if (!this.recording) {
+        console.warn("[iMacros Recorder] Ignoring recordAction while recorder is idle", { action: cmd, win_id: this.win_id });
+        return;
+    }
+
+    if (typeof cmd !== "string" || cmd.length === 0) {
+        console.warn("[iMacros Recorder] Ignoring invalid recordAction payload", { type: typeof cmd, win_id: this.win_id });
+        return;
+    }
+
     this.beforeRecordAction(cmd);
     // MV3: Send message to panel
     try {
@@ -282,7 +293,6 @@ Recorder.prototype.recordAction = function (cmd) {
         text: this.actions.length.toString()
     });
 
-    this.afterRecordAction(cmd);
     this.afterRecordAction(cmd);
     // console.info("recorded action: "+cmd);
     this.saveState();
@@ -363,8 +373,19 @@ Recorder.prototype.onPasswordElementFocused = function (data, tab_id, callback) 
 }
 
 Recorder.prototype.onRecordAction = function (data, tab_id, callback) {
+    if (!data || typeof data.action !== "string" || data.action.length === 0) {
+        console.warn("[iMacros Recorder] Received malformed record-action payload", { hasData: !!data, tab_id: tab_id });
+        typeof callback === "function" && callback({ error: "invalid-payload" });
+        return;
+    }
+
+    if (!this.recording) {
+        console.warn("[iMacros Recorder] Dropping record-action because recorder is not active", { tab_id: tab_id });
+        typeof callback === "function" && callback({ error: "not-recording" });
+        return;
+    }
+
     console.log("[DEBUG] onRecordAction called - action:", data.action, "tab_id:", tab_id);
-    // console.log("onRecordAction, data="+JSON.stringify(data));
     typeof callback === "function" &&   // release resources
         callback();
 
