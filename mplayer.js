@@ -77,7 +77,7 @@ MacroPlayer.prototype.deepCopy = function (value) {
 MacroPlayer.prototype.convertLimits = function (limits) {
     let convert = x => x === "unlimited" ? Number.MAX_SAFE_INTEGER : x;
     let obj = {};
-    for (key in limits) {
+    for (let key in limits) {
         obj[key] = convert(limits[key]);
     }
     obj.varsRe = limits.maxVariables === "unlimited" || limits.maxVariables >= 10 ?
@@ -90,12 +90,15 @@ MacroPlayer.prototype.next = function () {
     return true;
 };
 
-MacroPlayer.prototype._pushFrame = function (callerId) {
+MacroPlayer.prototype._pushFrame = function (actionType) {
     const frame = {
-        callerId,
+        callerId: actionType,
         loopStack: this.deepCopy(this.loopStack),
         localContext: this.varManager.snapshotLocalContext()
     };
+    if (this.runNestLevel >= 10) {
+        throw new RuntimeError('Maximum RUN nesting exceeded (780)');
+    }
     this.callStack.push(frame);
     this.runNestLevel += 1;
 };
@@ -122,13 +125,28 @@ MacroPlayer.prototype.getColumnData = function (col) {
     return '';
 };
 
+/**
+ * Recursively expands variable placeholders in the given string, supporting nested placeholders,
+ * EVAL expressions, and column references. Detects and prevents circular references using a depth map.
+ *
+ * Placeholders are in the form {{!VAR}}, {{!EVAL(expr)}}, or {{!COLn}}.
+ * Nested placeholders within variable names are supported.
+ *
+ * @param {string} param - The string containing variable placeholders to expand.
+ * @param {string} [eval_id] - Optional evaluation context identifier for EVAL expressions.
+ * @param {Map<string, boolean>} [depthMap] - Internal map used to track recursion depth and detect circular references.
+ *        Should not be provided by callers; used internally during recursion.
+ * @throws {BadParameter} If a placeholder contains whitespace, or if an unsupported variable is referenced.
+ * @throws {RuntimeError} If a circular reference is detected (maximum expansion depth exceeded).
+ * @returns {string} The input string with all variable placeholders recursively expanded.
+ */
 MacroPlayer.prototype.expandVariables = function (param, eval_id, depthMap) {
     const evalIdBase = eval_id || 'eval';
     const visited = depthMap || new Map();
 
     const replacePlaceholder = (match, inner) => {
         if (inner.trim() !== inner) {
-            throw new BadParameter('Whitespace is not allowed inside variable placeholder');
+            throw new BadParameter(`Whitespace is not allowed inside variable placeholder: {{${inner}}}`);
         }
 
         // Handle nested placeholders in variable names first
@@ -144,52 +162,71 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id, depthMap) {
         const markVisited = () => visited.set(varName, true);
         const unmarkVisited = () => visited.delete(varName);
 
+        // Inline EVAL
+        const evalMatch = inner.match(/^!EVAL\((.*)\)$/i);
+        if (evalMatch) {
+            let expr = evalMatch[1];
+            if ((expr.startsWith('"') && expr.endsWith('"')) || (expr.startsWith("'") && expr.endsWith("'"))) {
+                expr = expr.slice(1, -1);
+            }
+            const unique = Math.random().toString(36).slice(2, 11);
+            const evalId = `${evalIdBase}_${Date.now().toString(36)}_${unique}`;
+            return String(this.do_eval(expr, evalId));
+        }
+
+        // Datasource columns
+        const colMatch = inner.match(/^!COL(\d+)$/i);
+        if (colMatch) {
+            return String(this.getColumnData(parseInt(colMatch[1], 10)));
+        }
+
+        // Standard variables via VariableManager
+        const value = this.varManager.getVar(varName);
+        const hasVar = this.varManager.globalVars.has(varName) ||
+            Object.prototype.hasOwnProperty.call(this.varManager.localContext, varName);
+
+        if (!hasVar && value === '') {
+            throw new BadParameter('Unsupported variable !' + varName);
+        }
+
+        markVisited();
         try {
-            // Inline EVAL
-            const evalMatch = inner.match(/^!EVAL\((.*)\)$/i);
-            if (evalMatch) {
-                let expr = evalMatch[1];
-                if ((expr.startsWith('"') && expr.endsWith('"')) || (expr.startsWith("'") && expr.endsWith("'"))) {
-                    expr = expr.slice(1, -1);
-                }
-                const unique = Math.random().toString(36).slice(2, 11);
-                const evalId = `${evalIdBase}_${Date.now().toString(36)}_${unique}`;
-                return String(this.do_eval(expr, evalId));
-            }
-
-            // Datasource columns
-            const colMatch = inner.match(/^!COL(\d+)$/i);
-            if (colMatch) {
-                return String(this.getColumnData(parseInt(colMatch[1], 10)));
-            }
-
-            // Standard variables via VariableManager
-            const value = this.varManager.getVar(varName);
-            const hasVar = this.varManager.globalVars.has(varName) ||
-                Object.prototype.hasOwnProperty.call(this.varManager.localContext, varName);
-
-            if (!hasVar && value === '') {
-                throw new BadParameter('Unsupported variable !' + varName);
-            }
-
-            markVisited();
             const expanded = this.expandVariables(String(value), evalIdBase, visited);
-            unmarkVisited();
             return expanded;
         } finally {
-            visited.delete(varName);
+            unmarkVisited();
         }
     };
 
     let result = param;
+    const MAX_EXPANSION_ITERATIONS = 50; // Prevent infinite loops in variable expansion
     let safety = 0;
-    while (/\{\{[^{}]+\}\}/.test(result) && safety < 50) {
+    while (/\{\{[^{}]+\}\}/.test(result) && safety < MAX_EXPANSION_ITERATIONS) {
         result = result.replace(/\{\{([^{}]+)\}\}/g, replacePlaceholder);
         safety++;
     }
     return result;
 };
 
+/**
+ * Resolves the full path to a macro file using a prioritized fallback strategy.
+ *
+ * Path resolution priority:
+ *  1. If `this.macrosFolder` is set, returns its path joined with `macroPath`.
+ *  2. Otherwise, if the global `afio` object is available and has `getDefaultDir`, uses its path.
+ *  3. Otherwise, returns the raw `macroPath` as-is.
+ *
+ * Return value:
+ *  - If the global `afio` object and its `openNode` function are available, returns the result of `afio.openNode(targetPath)`.
+ *  - Otherwise, returns a plain object with `path`, `leafName`, and stub `append`/`clone` methods.
+ *
+ * Async behavior:
+ *  - This function is asynchronous and may throw if afio methods (e.g., `getDefaultDir`, `openNode`) fail.
+ *
+ * @param {string} macroPath - The relative or raw path to the macro file.
+ * @returns {Promise<Object>} A promise resolving to an afio node or a plain object representing the macro file path.
+ * @throws {Error} If afio methods throw during path resolution.
+ */
 MacroPlayer.prototype.resolveMacroPath = async function (macroPath) {
     const buildPath = async () => {
         if (this.macrosFolder && this.macrosFolder.path) {
@@ -279,7 +316,7 @@ MacroPlayer.prototype.ActionTable['run'] = async function (cmd) {
         ? this.macrosFolder.path.replace(/\/$/, '')
         : null;
 
-    let content;
+    let content = null;
     if (Object.prototype.hasOwnProperty.call(this, 'loadMacroFile')) {
         content = await this.loadMacroFile(macroNode);
     }
@@ -307,7 +344,7 @@ MacroPlayer.prototype.ActionTable['run'] = async function (cmd) {
     if (content === null || typeof content === 'undefined') {
         const loadTarget = (macroNode && macroNode.path) ? macroNode
             : (typeof afio !== 'undefined' && typeof afio.openNode === 'function'
-                ? afio.openNode(resolvedPath)
+                ? await afio.openNode(resolvedPath)
                 : resolvedPath);
         content = await this.loadMacroFileFromFs(loadTarget);
     }
@@ -320,7 +357,7 @@ MacroPlayer.prototype.ActionTable['run'] = async function (cmd) {
     actions.forEach(action => this.action_stack.push(action));
 };
 
-// Default inline EVAL executor; overridden by tests when needed
+// Default inline EVAL executor; overridden by tests when needed. Not safe for untrusted input.
 MacroPlayer.prototype.do_eval = function (s, eval_id) {
     return eval(s);
 };
