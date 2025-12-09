@@ -4,10 +4,13 @@
  */
 
 function MacroPlayer(win_id) {
+    if (typeof VariableManager !== 'function') {
+        throw new Error('VariableManager is not defined');
+    }
     this.win_id = win_id || 'default-window';
 
     // Legacy containers
-    this.vars = new Array();
+    this.vars = [];
     this.userVars = new Map();
 
     // Modern variable manager
@@ -114,7 +117,7 @@ MacroPlayer.prototype._popFrame = function () {
 
 MacroPlayer.prototype.resetVariableStateForNewMacro = function () {
     this.varManager = new VariableManager();
-    this.vars = new Array();
+    this.vars = [];
     this.userVars.clear();
 };
 
