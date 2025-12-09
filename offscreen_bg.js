@@ -9,68 +9,8 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 //
 // Common logic moved to bg_common.js
-// ...
+// Ensure handler registration only runs when the helper is available.
 //
-
-// Global handler for overwrite dialog (called from bg_common.js)
-// This implements the environment-specific dialog and booking logic delegated from createBookmark
-window.handleOverwriteDialog = function (existingMacro, url, title, folder_id, resolve, reject, children) {
-    dialogUtils.openDialog("overwriteDialog.html", "overwriteDialog", {
-        macroName: title
-    }).then(function (result) {
-        if (result.action === "overwrite") {
-            // Overwrite the existing macro
-            chrome.bookmarks.update(
-                existingMacro.id,
-                { url: url, title: title },
-                function (result) {
-                    if (chrome.runtime.lastError) {
-                        logError("Failed to update bookmark (overwrite): " + chrome.runtime.lastError.message, { bookmark_id: existingMacro.id, title: title });
-                        return reject(chrome.runtime.lastError);
-                    }
-                    resolve(result);
-                }
-            );
-        } else if (result.action === "save-new") {
-            // Create with auto-incremented name
-            var found = false, count = 1, name = title;
-            for (; ;) {
-                found = false;
-                for (var x of children) {
-                    if (x.title === name && x.url) {
-                        found = true;
-                        if (/\.iim$/.test(title)) {
-                            name = title.replace(/\.iim$/, "(" + count + ").iim");
-                        } else {
-                            name = title + "(" + count + ")";
-                        }
-                        count++;
-                        break;
-                    }
-                }
-                if (!found) break;
-            }
-            chrome.bookmarks.create(
-                {
-                    parentId: folder_id,
-                    title: name,
-                    url: url
-                }, function (result) {
-                    if (chrome.runtime.lastError) {
-                        logError("Failed to create bookmark (save-new): " + chrome.runtime.lastError.message, { folder_id: folder_id, title: name });
-                        return reject(chrome.runtime.lastError);
-                    }
-                    resolve(result);
-                });
-        } else {
-            // Cancel - reject the promise
-            reject(new Error("User cancelled save operation"));
-        }
-    }).catch(function (err) {
-        logError("Dialog error: " + err.message);
-        reject(err);
-    });
-};
 
 // Global handler for panel updates (called from bg_common.js)
 window.updatePanels = function () {
@@ -93,123 +33,20 @@ window.updatePanels = function () {
 
 
 
-
-function save(save_data, overwrite, callback) {
-    // saves into file or bookmark
-    if (save_data.file_id) {
-        save_file(save_data, overwrite, callback);
-        return;
+// If bg_common.js failed to load earlier, attempt to import it to restore MV2 parity
+if (typeof registerSharedBackgroundHandlers !== 'function') {
+    try {
+        importScripts('bg_common.js');
+    } catch (e) {
+        console.error("Failed to import bg_common.js for offscreen handlers", e);
     }
-
-    // If tree-type is "files" but file_id is not set, prompt user with saveAs dialog
-    // to choose file location instead of falling back to bookmark storage
-    if (Storage.getChar("tree-type") === "files" && !save_data.file_id) {
-        afioCache.isInstalled().then(function (installed) {
-            if (installed) {
-                // Open saveAs dialog to let user choose file location
-                var features = "titlebar=no,menubar=no,location=no," +
-                    "resizable=yes,scrollbars=no,status=no";
-                var win = window.open("saveAsDialog.html", null, features);
-                dialogUtils.setArgs(win, { save_data: save_data });
-                // The saveAsDialog will call save() again with file_id set
-                return;
-            }
-            // If afio is not installed, fall back to bookmark storage
-            saveToBookmark(save_data, overwrite, callback);
-        }).catch(function (err) {
-            console.error("Error checking afio installation:", err);
-            // Fall back to bookmark storage on error
-            saveToBookmark(save_data, overwrite, callback);
-        });
-        return;
-    }
-
-    // Default: save to bookmark
-    saveToBookmark(save_data, overwrite, callback);
 }
 
-function saveToBookmark(save_data, overwrite, callback) {
-    // Check if bookmarks API is available (not available in Offscreen Document)
-    if (typeof chrome.bookmarks === 'undefined' || !chrome.bookmarks.getTree) {
-        console.warn('[iMacros] chrome.bookmarks API not available in this context');
-        save_data.error = "Bookmark API not available in this context";
-        typeof callback === "function" && callback(save_data);
-        return;
-    }
-
-    chrome.bookmarks.getTree(function (tree) {
-        if (chrome.runtime.lastError) {
-            logError("Failed to get bookmark tree: " + chrome.runtime.lastError.message);
-            save_data.error = "Failed to get bookmark tree: " + chrome.runtime.lastError.message;
-            typeof callback === "function" && callback(save_data);
-            return;
-        }
-        if (!tree || !tree[0] || !tree[0].children || !tree[0].children[0]) {
-            logError("Invalid bookmark tree structure");
-            save_data.error = "Invalid bookmark tree structure";
-            typeof callback === "function" && callback(save_data);
-            return;
-        }
-
-        var p_id = tree[0].children[0].id;
-        ensureBookmarkFolderCreated(p_id, "iMacros").then(function (node) {
-            var url = makeBookmarklet(save_data.name, save_data.source);
-            var iMacrosDirId = node.id;
-            if (overwrite && !save_data.bookmark_id) {
-                // we should check if "name" exists and if it does then
-                // find its bookmark_id
-                chrome.bookmarks.getChildren(iMacrosDirId, function (ar) {
-                    if (chrome.runtime.lastError) {
-                        logError("Failed to get bookmark children in saveToBookmark: " + chrome.runtime.lastError.message);
-                        return;
-                    }
-                    for (var x of ar) {
-                        if (x.title === save_data.name) {
-                            save_data.bookmark_id = x.id;
-                            createBookmark(
-                                iMacrosDirId, save_data.name, url,
-                                save_data.bookmark_id,
-                                overwrite
-                            ).then(function () {
-                                typeof callback === "function" && callback(save_data);
-                            }).catch(function (err) {
-                                logError("Failed to create bookmark (overwrite): " + err.message, { name: save_data.name });
-                            });
-                            return;
-                        }
-                    };
-                    // no macro was found so create a new one
-                    createBookmark(
-                        iMacrosDirId, save_data.name, url,
-                        save_data.bookmark_id,
-                        false
-                    ).then(function () {
-                        typeof callback === "function" &&
-                            callback(save_data);
-                    }).catch(function (err) {
-                        logError("Failed to create bookmark (new): " + err.message, { name: save_data.name });
-                    });
-                });
-            } else {
-                createBookmark(
-                    iMacrosDirId, save_data.name, url,
-                    save_data.bookmark_id,
-                    overwrite
-                ).then(function () {
-                    typeof callback === "function" &&
-                        callback(save_data);
-                }).catch(function (err) {
-                    logError("Failed to create bookmark: " + err.message, { name: save_data.name });
-                });
-            }
-        }).catch(function (err) {
-            logError("Failed to ensure bookmark folder created: " + err.message, { parent_id: p_id });
-            save_data.error = "Failed to ensure bookmark folder created: " + (err.message || err);
-            typeof callback === "function" && callback(save_data);
-        });
-    });
+if (typeof registerSharedBackgroundHandlers === 'function') {
+    registerSharedBackgroundHandlers(window);
+} else {
+    console.error("registerSharedBackgroundHandlers is not available; shared background handlers not registered");
 }
-
 
 function edit(macro, overwrite, line) {
     console.log("[iMacros Offscreen] Opening editor for:", macro.name);
@@ -255,164 +92,6 @@ function edit(macro, overwrite, line) {
         });
     });
 }
-
-
-function playMacro(macro, win_id) {
-    // Ensure context is initialized before playing
-    var contextPromise = context[win_id] && context[win_id]._initialized
-        ? Promise.resolve(context[win_id])
-        : context.init(win_id);
-
-    contextPromise.then(function (ctx) {
-        return getLimits().then(
-            limits => ctx.mplayer.play(macro, limits)
-        );
-    }).catch(err => {
-        logError("Failed to initialize context, get limits, or play macro in playMacro: " + err.message, { win_id: win_id, macro_name: macro.name });
-    });
-}
-
-function dockPanel(win_id) {
-    // MV3: Docking panel is not supported in Service Worker due to lack of DOM access
-    // and reliable timers. This feature is disabled.
-    if (context[win_id] && context[win_id].dockInterval) {
-        clearInterval(context[win_id].dockInterval);
-        context[win_id].dockInterval = null;
-    }
-    return;
-    /*
-    // Safety check: ensure context exists and is initialized
-    if (!context[win_id] || !context[win_id]._initialized) {
-        return;
-    }
- 
-    var panel = context[win_id].panelWindow;
-    if (!panel || panel.closed) {
-        clearInterval(context[win_id].dockInterval);
-        return;
-    }
-    if (!Storage.getBool("dock-panel"))
-        return;
- 
-    chrome.windows.get(win_id, function (w) {
-        if (chrome.runtime.lastError) {
-            logError("Failed to get window in dockPanel: " + chrome.runtime.lastError.message, { win_id: win_id });
-            clearInterval(context[win_id].dockInterval);
-            return;
-        }
-        if (!w) {
-            logWarning("Window not found in dockPanel", { win_id: win_id });
-            clearInterval(context[win_id].dockInterval);
-            return;
-        }
- 
-        var new_x = w.left - panel.outerWidth;
-        if (new_x < 0)
-            new_x = 0;
- 
-        var updateInfo = {
-            height: w.height,
-            width: Math.round(panel.outerWidth),
-            left: new_x,
-            top: w.top
-        };
- 
-        chrome.windows.update(context[win_id].panelId, updateInfo, function () {
-            if (chrome.runtime.lastError) {
-                logError("Failed to update panel window: " + chrome.runtime.lastError.message, { panelId: context[win_id] ? context[win_id].panelId : 'unknown' });
-                return;
-            }
-            var ctx = context[win_id];
-            if (!ctx) {
-                return;
-            }
-            // Update cached dimensions
-            ctx.panelWidth = updateInfo.width;
-            ctx.panelHeight = updateInfo.height;
-        });
-    });
-    */
-}
-
-function openPanel(win_id) {
-    // Safety check: ensure context exists and is initialized
-    if (!context[win_id] || !context[win_id]._initialized) {
-        console.warn("Cannot open panel: context not initialized for window " + win_id);
-        return;
-    }
-
-    // MV3: Check if panel is already open using panelId
-    if (context[win_id].panelId) {
-        console.log(`[iMacros] Panel already open for window ${win_id}, panel ID: ${context[win_id].panelId}`);
-        return;
-    }
-
-    console.log("[iMacros] Requesting Service Worker to open panel for window " + win_id);
-
-    // Delegate panel creation to Service Worker (chrome.windows API not available in Offscreen)
-    chrome.runtime.sendMessage({
-        command: "openPanel",
-        win_id: win_id,
-        existingPanelId: context[win_id].panelId || null
-    });
-}
-
-
-// MV3: _openPanelWindow is no longer used - panel creation delegated to Service Worker
-// This function used chrome.windows API which is not available in Offscreen Document
-/*
-function _openPanelWindow(win_id) {
-    chrome.windows.get(win_id, function (win) {
-        if (chrome.runtime.lastError) {
-            logError("Failed to get window in openPanel: " + chrome.runtime.lastError.message, { win_id: win_id });
-            return;
-        }
-        if (!win) {
-            logWarning("Window not found in openPanel", { win_id: win_id });
-            return;
-        }
- 
-        var panelBox = Storage.getObject("panel-box");
-        if (!panelBox) {
-            panelBox = new Object();
-            panelBox.width = 210;
-            if (Storage.getBool("dock-panel"))
-                panelBox.height = win.height;
-            else
-                panelBox.height = 600;
-            panelBox.top = win.top;
-            panelBox.left = win.left - panelBox.width;
-            if (panelBox.left < 0)
-                panelBox.left = 0;
-        }
- 
-        var createData = {
-            url: "panel.html", type: "popup",
-            top: panelBox.top, left: panelBox.left,
-            width: panelBox.width, height: panelBox.height
-        };
- 
-        chrome.windows.create(createData, function (w) {
-            if (chrome.runtime.lastError) {
-                logError("Failed to create panel window: " + chrome.runtime.lastError.message, { win_id: win_id });
-                return;
-            }
-            if (!w) {
-                logError("Panel window creation returned null", { win_id: win_id });
-                return;
-            }
- 
-            context[win_id].panelId = w.id;
-            // Cache panel dimensions for proxy
-            context[win_id].panelWidth = w.width;
-            context[win_id].panelHeight = w.height;
-            context[win_id].dockInterval = setInterval(function () {
-                dockPanel(win.id);
-            }, 500);
-        });
-    });
-}
-*/
 
 
 // called from panel

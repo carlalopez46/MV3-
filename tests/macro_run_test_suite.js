@@ -236,6 +236,103 @@
             }
         },
         {
+            name: 'VariableManager snapshots are deep-copied and restore local context',
+            async run() {
+                const player = createPlayer();
+                player.varManager.localContext = {
+                    LOOP: 3,
+                    TABNUMBER: 2,
+                    EMBED: { nested: true }
+                };
+
+                const snapshot = player.varManager.snapshotLocalContext();
+
+                // Mutate live context after the snapshot
+                player.varManager.localContext.LOOP = 7;
+                player.varManager.localContext.EMBED.nested = false;
+
+                player.varManager.restoreLocalContext(snapshot);
+
+                assertEqual(player.varManager.getVar('LOOP'), 3, 'LOOP restored from snapshot');
+                assertEqual(player.varManager.localContext.EMBED.nested, true, 'Nested object restored');
+
+                // Ensure post-restore changes to the snapshot do not leak back
+                snapshot.EMBED.nested = 'mutated';
+                assertEqual(player.varManager.localContext.EMBED.nested, true, 'Snapshot remains isolated after restore');
+            }
+        },
+        {
+            name: 'RUN resolves macro paths relative to macros folder',
+            async run() {
+                const fakeFs = Object.create(null);
+                const resolvedPaths = [];
+                const makeNode = (path) => ({
+                    path,
+                    leafName: path.split('/').pop(),
+                    exists: () => Promise.resolve(Object.prototype.hasOwnProperty.call(fakeFs, path)),
+                    append(name) { this.path = this.path.replace(/\/$/, ''); this.path += '/' + name; this.leafName = name; return this.path; },
+                    clone() { return makeNode(this.path); }
+                });
+
+                const originalAfio = globalThis.afio;
+                globalThis.afio = {
+                    getDefaultDir() { return Promise.resolve(makeNode('/default')); },
+                    openNode(path) { resolvedPaths.push(path); return makeNode(path); },
+                    readTextFile(node) { return Promise.resolve(fakeFs[node.path]); }
+                };
+
+                const player = createPlayer();
+                player.macrosFolder = makeNode('/macros');
+                fakeFs['/macros/Sub.iim'] = 'SET !VAR1 relative-macro';
+
+                try {
+                    await MacroPlayer.prototype.ActionTable["run"].call(player, ['macro=Sub.iim', 'Sub.iim']);
+                    await waitForPlayerToDrain(player);
+                } finally {
+                    globalThis.afio = originalAfio;
+                }
+
+                assertEqual(player.file_id, '/macros/Sub.iim', 'RUN resolved relative to macros folder');
+                assertEqual(resolvedPaths[0], '/macros/Sub.iim', 'af.openNode called with resolved path');
+                assertEqual(player.varManager.getVar('VAR1'), 'relative-macro', 'Macro executed and updated variable');
+            }
+        },
+        {
+            name: 'RUN falls back to default dir when macros folder is missing',
+            async run() {
+                const fakeFs = Object.create(null);
+                const makeNode = (path) => ({
+                    path,
+                    leafName: path.split('/').pop(),
+                    exists: () => Promise.resolve(Object.prototype.hasOwnProperty.call(fakeFs, path)),
+                    append(name) { this.path = this.path.replace(/\/$/, ''); this.path += '/' + name; this.leafName = name; return this.path; },
+                    clone() { return makeNode(this.path); }
+                });
+
+                fakeFs['/default/Fallback.iim'] = 'SET !VAR1 fallback-macro';
+
+                const originalAfio = globalThis.afio;
+                globalThis.afio = {
+                    getDefaultDir() { return Promise.resolve(makeNode('/default')); },
+                    openNode(path) { return makeNode(path); },
+                    readTextFile(node) { return Promise.resolve(fakeFs[node.path]); }
+                };
+
+                const player = createPlayer();
+                player.macrosFolder = null;
+
+                try {
+                    await MacroPlayer.prototype.ActionTable["run"].call(player, ['macro=Fallback.iim', 'Fallback.iim']);
+                    await waitForPlayerToDrain(player);
+                } finally {
+                    globalThis.afio = originalAfio;
+                }
+
+                assertEqual(player.file_id, '/default/Fallback.iim', 'RUN resolved path via default dir');
+                assertEqual(player.varManager.getVar('VAR1'), 'fallback-macro', 'Fallback macro executed');
+            }
+        },
+        {
             name: 'VariableManager resets between standalone macro runs',
             async run() {
                 const player = createPlayer();
