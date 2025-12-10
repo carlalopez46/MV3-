@@ -829,13 +829,12 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             const globalMethod = GlobalErrorLogger[methodName] || GlobalErrorLogger.logError;
             return function (message, context, code) {
                 const { stack, caller } = createCallerContext();
-                const details = {
+                const details = Object.assign({
                     code: code || ErrorCodes.UNKNOWN,
                     legacyCall: true,
                     stack: stack,
-                    caller: caller,
-                    ...extraDetails
-                };
+                    caller: caller
+                }, extraDetails || {});
                 try {
                     return globalMethod.call(GlobalErrorLogger, context || 'Legacy', message, details);
                 } catch (err) {
