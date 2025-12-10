@@ -108,8 +108,16 @@ function promisify(fn, ...args) {
 /**
  * Chrome API 用の Promise ラッパー
  * chrome.runtime.lastError を自動チェック
+ *
+ * NOTE:
+ * MV3 の offscreen ドキュメントでは bg_common.js で同名の `chromeAsync`
+ * ヘルパーが定義される。ここで const で同じ名前を宣言すると後続の
+ * スクリプト読み込み時に "Identifier 'chromeAsync' has already been declared"
+ * となり、bg_common.js が実行されず openPanel などの共有ハンドラ登録が
+ * 失敗する。その結果、バッジクリックからパネル（list.html 相当）が
+ * 開けなくなるため、既存の定義を尊重して再宣言を避ける。
  */
-const chromeAsync = {
+const chromeAsyncWrapper = {
     /**
      * chrome.tabs.query を Promise 化
      */
@@ -160,7 +168,9 @@ if (typeof globalThis !== 'undefined') {
     globalThis.retryPromise = retryPromise;
     globalThis.withTimeout = withTimeout;
     globalThis.promisify = promisify;
-    globalThis.chromeAsync = chromeAsync;
+    if (typeof globalThis.chromeAsync === 'undefined') {
+        globalThis.chromeAsync = chromeAsyncWrapper;
+    }
 }
 
 // window オブジェクトが存在する場合もエクスポート
@@ -170,5 +180,7 @@ if (typeof window !== 'undefined') {
     window.retryPromise = retryPromise;
     window.withTimeout = withTimeout;
     window.promisify = promisify;
-    window.chromeAsync = chromeAsync;
+    if (typeof window.chromeAsync === 'undefined') {
+        window.chromeAsync = chromeAsyncWrapper;
+    }
 }
