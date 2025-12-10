@@ -25,6 +25,8 @@ body {
     padding: 0px;
     display: -webkit-box;
     -webkit-box-orient: vertical;
+    display: flex;
+    flex-direction: column;
 }
 
 #mole {
@@ -35,6 +37,8 @@ body {
     box-sizing: border-box;
     display: -webkit-box;
     -webkit-box-orient: vertical;
+    display: flex;
+    flex-direction: column;
     gap: 6px;
 }
 
@@ -69,6 +73,7 @@ body {
     border: 1px solid #217CCE; /*black;*/
     margin-left: -5px; /*-1px*/
     border-radius: 0px 0px 0px 0px; /*5px 5px 0px 0px;*/
+    flex: 1;
     -webkit-box-flex: 1;
 }
 
@@ -341,10 +346,6 @@ body {
     color: ghostwhite;
 }
 
-#tabs-content .button {
-    width: 100%;
-}
-
 #saveas-box {
 }
 
@@ -388,6 +389,7 @@ body {
     margin-right: 0px; /*2px;*/
     font-family: sans-serif;
     font-size: 0.8em ;
+    flex: 1;
     -webkit-box-flex: 1;
 }
 
