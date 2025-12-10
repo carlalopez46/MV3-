@@ -829,13 +829,12 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             const globalMethod = GlobalErrorLogger[methodName] || GlobalErrorLogger.logError;
             return function (message, context, code) {
                 const { stack, caller } = createCallerContext();
-                const details = {
+                const details = Object.assign({
                     code: code || ErrorCodes.UNKNOWN,
                     legacyCall: true,
                     stack: stack,
-                    caller: caller,
-                    ...extraDetails
-                };
+                    caller: caller
+                }, extraDetails || {});
                 try {
                     return globalMethod.call(GlobalErrorLogger, context || 'Legacy', message, details);
                 } catch (err) {
@@ -871,17 +870,18 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.lastError) {
             const stack = new Error().stack;
             const caller = errorLogger.extractCallerFromStack(stack, 1);
+            const baseContext = {
+                operation: operationName,
+                chromeError: chrome.runtime.lastError.message
+            };
+
             errorLogger.logError({
                 level: ErrorLevel.ERROR,
                 message: `Chrome API Error in ${operationName}: ${chrome.runtime.lastError.message}`,
                 code: ErrorCodes.CHROME_API,
                 filename: caller.filename,
                 lineno: caller.lineno,
-                context: {
-                    operation: operationName,
-                    chromeError: chrome.runtime.lastError.message,
-                    ...additionalContext
-                },
+                context: Object.assign(baseContext, additionalContext || {}),
                 stack: stack,
                 type: "ChromeAPIError"
             });
