@@ -294,14 +294,14 @@ MacroPlayer.prototype.onAuthRequired = function(details, callback) {
     if (this.tab_id != details.tabId)
         return;
     if (this.lastAuthRequestId == details.requestId) {
-        asyncRun(this.handleError.bind(this)(new RuntimeError(
+        asyncRun(this.handleError.bind(this, new RuntimeError(
             "Wrong credentials for HTTP authorization"
         ), 734));
         return {cancel: true};
     }
     this.lastAuthRequestId = details.requestId;
     if (!this.loginData || !this.waitForAuthDialog) {
-        asyncRun(this.handleError.bind(this)(new RuntimeError(
+        asyncRun(this.handleError.bind(this, new RuntimeError(
             "No credentials supplied for HTTP authorization"
         ), 734));
         return {cancel: true};
@@ -378,6 +378,7 @@ MacroPlayer.prototype.onTabUpdated = function(tab_id, obj, tab) {
     this.currentURL = tab.url;
     if (obj.status == "loading" && !this.timers.has("loading")) {
         this.waitingForPageLoad = true;
+        const mplayer = this;
         this.startTimer("loading", this.timeout, "Loading ", function() {
             mplayer.waitingForPageLoad = false;
             mplayer.handleError(
@@ -1287,7 +1288,7 @@ MacroPlayer.prototype.onFrameComplete = function(data) {
         var self = this;
         this.retry(function() {
             self.currentFrame = {number: 0};
-            throw new RuntimeError("frame "+param+" not found", 722);
+            throw new RuntimeError("frame "+self.requestedFrameParam+" not found", 722);
         }, "Frame waiting... ", "onFrameComplete", this.timeout_tag);
     } else {
         this.clearRetryInterval();
@@ -1299,6 +1300,7 @@ MacroPlayer.prototype.onFrameComplete = function(data) {
 MacroPlayer.prototype.ActionTable["frame"] = function (cmd) {
     var type = cmd[1].toLowerCase();
     var param = imns.unwrap(this.expandVariables(cmd[2], "frame2"));
+    this.requestedFrameParam = param;
     var frame_data = new Object();
 
     if (type == "f") {
@@ -1691,7 +1693,8 @@ MacroPlayer.prototype.ActionTable["onlogin"] = function (cmd) {
     var username = imns.unwrap(this.expandVariables(cmd[1], "onlogin1"));
     var password = imns.unwrap(this.expandVariables(cmd[2], "onlogin2"));
     this.loginData = {
-        username: username
+        username: username,
+        password: password
     }
     this.waitForAuthDialog = true;
     chrome.webRequest.onAuthRequired.addListener(
@@ -2505,9 +2508,9 @@ MacroPlayer.prototype.ActionTable["size"] = function (cmd) {
         return;
     var x = imns.s2i(imns.unwrap(this.expandVariables(cmd[1], "size1")));
     var y = imns.s2i(imns.unwrap(this.expandVariables(cmd[2], "size2")));
-    if (isNaN(x))
+    if (isNaN(x) || x <= 0)
         throw new BadParameter("positive integer", 1)
-    if (isNaN(y))
+    if (isNaN(y) || y <= 0)
         throw new BadParameter("positive integer", 2)
 
     var mplayer = this;
@@ -3202,11 +3205,75 @@ MacroPlayer.prototype.pause = function() {
 };
 
 MacroPlayer.prototype.unpause = function () {
-    if (!this.pauseIsPending) {
+    if (this.paused && !this.pauseIsPending) {
         this.paused = false
         context.updateState(this.win_id, "playing")
         this.next("unpause")
     }
+};
+
+
+// Resolve macro paths and load macro sources for RUN command support (MV3 bridge helper)
+MacroPlayer.prototype.resolveMacroPath = async function (macroPath) {
+    if (!macroPath)
+        throw new RuntimeError("Macro path is empty", 610);
+
+    const looksAbsolute = /^(?:[a-zA-Z]:\\|\/)/.test(macroPath);
+    if (looksAbsolute)
+        return macroPath;
+
+    let base = this.macrosFolder;
+    if (!base || !(await base.exists())) {
+        base = await afio.getDefaultDir();
+    }
+
+    const node = base.clone ? base.clone() : base;
+    if (node.append)
+        node.append(macroPath);
+    return node.path || macroPath;
+};
+
+MacroPlayer.prototype.loadMacroFileFromFs = async function (resolvedPath) {
+    const node = await afio.openNode(resolvedPath);
+    const source = await afio.readTextFile(node);
+    return {
+        name: node.leafName || resolvedPath,
+        source,
+        file_id: node.path || resolvedPath
+    };
+};
+
+MacroPlayer.prototype.parseInlineMacro = function (content) {
+    return {
+        name: this.currentMacro || "CODE",
+        source: content,
+        file_id: this.file_id,
+        times: this.times,
+        startLoop: this.currentLoop
+    };
+};
+
+MacroPlayer.prototype.RegExpTable["run"] =
+    "^macro\\s*=\\s*("+im_strre+")\\s*$";
+
+MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
+    const rawArg = cmd[1] || "";
+    const match = rawArg.match(/macro\s*=\s*(.*)/i);
+    const macroPath = match ? match[1] : rawArg;
+
+    const resolvedPath = await this.resolveMacroPath(macroPath);
+    const loaded = await Promise.resolve(
+        this.loadMacroFile ? this.loadMacroFile(resolvedPath) : null
+    );
+    const source = loaded != null ? loaded : await this.loadMacroFileFromFs(resolvedPath);
+    if (source == null)
+        throw new RuntimeError("Macro '"+macroPath+"' not found", 701);
+
+    const macro = typeof source === "string" ? this.parseInlineMacro(source) : source;
+    macro.name = macro.name || macroPath;
+    macro.file_id = macro.file_id || resolvedPath;
+
+    this.play(macro, this.limits);
 };
 
 
@@ -3291,14 +3358,14 @@ MacroPlayer.prototype.parseMacro = function() {
 
         if (/^\s*(\w+)(?:\s+(.*))?$/.test(lines[i])) {
             var command = RegExp.$1.toLowerCase();
-            var arguments = RegExp.$2 ? RegExp.$2 : "";
+            var cmdArguments = RegExp.$2 ? RegExp.$2 : "";
             // check if command is known
             if (!(command in this.RegExpTable))
                 throw new SyntaxError("unknown command: "+
                                       command.toUpperCase()+
                                       " at line "+(i+1+this.linenumber_delta));
             // parse arguments
-            var args = this.RegExpTable[command].exec(arguments);
+            var args = this.RegExpTable[command].exec(cmdArguments);
             if ( !args )
                 throw new SyntaxError("wrong format of "+
                                       command.toUpperCase()+" command"+
