@@ -871,17 +871,18 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.lastError) {
             const stack = new Error().stack;
             const caller = errorLogger.extractCallerFromStack(stack, 1);
+            const baseContext = {
+                operation: operationName,
+                chromeError: chrome.runtime.lastError.message
+            };
+
             errorLogger.logError({
                 level: ErrorLevel.ERROR,
                 message: `Chrome API Error in ${operationName}: ${chrome.runtime.lastError.message}`,
                 code: ErrorCodes.CHROME_API,
                 filename: caller.filename,
                 lineno: caller.lineno,
-                context: {
-                    operation: operationName,
-                    chromeError: chrome.runtime.lastError.message,
-                    ...additionalContext
-                },
+                context: Object.assign(baseContext, additionalContext || {}),
                 stack: stack,
                 type: "ChromeAPIError"
             });

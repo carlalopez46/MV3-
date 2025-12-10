@@ -400,6 +400,24 @@
         }
     });
 
+    TestRunner.addTest('NodeObject.createDirectory()', async function() {
+        const dir = afio.openNode(`/VirtualMacros/createDirTest_${Date.now()}/`);
+
+        await dir.createDirectory();
+
+        const exists = await dir.exists();
+        if (!exists) {
+            throw new Error('createDirectory() did not create directory');
+        }
+
+        const isDir = await dir.isDir();
+        if (!isDir) {
+            throw new Error('createDirectory() did not create a directory node');
+        }
+
+        await dir.remove();
+    });
+
     TestRunner.addTest('afio.getNodesInDir()', async function() {
         const dir = afio.openNode('/VirtualMacros/');
         const nodes = await afio.getNodesInDir(dir);
