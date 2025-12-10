@@ -153,7 +153,7 @@ if (!criticalEntry.details || criticalEntry.details.severity !== 'CRITICAL') {
 
 console.log('✅ PASS: Legacy logCritical forwards severity detail to GlobalErrorLogger');
 
-// Test 6: GlobalErrorLogger.logFileError wrapper
+// Test 7: GlobalErrorLogger.logFileError wrapper
 console.log('\nTest 7: GlobalErrorLogger.logFileError wrapper availability');
 global.window.GlobalErrorLogger.clear();
 
@@ -181,7 +181,7 @@ console.log('✅ PASS: GlobalErrorLogger.logFileError is available and records f
 console.log(`   - Error code: ${fileErrorEntry.details.errorCode}`);
 console.log(`   - Category: ${fileErrorEntry.details.category}`);
 
-// Test 7: Stack trace accuracy
+// Test 8: Stack trace accuracy
 console.log('\nTest 8: Stack trace accuracy');
 global.window.GlobalErrorLogger.clear();
 
