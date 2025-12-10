@@ -3,16 +3,140 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 */
 
 
-window.addEventListener("iMacrosRunMacro", function (evt) {
-    // console.log("iMacrosRunMacro event %O", evt);
-    connector.postMessage("run-macro", evt.detail, null);
-}, true);
-
-
-
-
 // Ensure backwards compatibility for old iMacros bookmarklets
-// embedded on web-pages
+// embedded on web-pages. This requires utilities (imns) and the
+// connector bridge to be available, but those scripts load later at
+// document_idle. We therefore wait for the dependencies instead of
+// failing immediately at document_start.
+
+function waitForDependenciesAndInit() {
+    // Retry up to 5 seconds (50 attempts * 100 ms) for dependency availability.
+    // These values can be overridden before this script runs to fine-tune timing.
+    const MAX_ATTEMPTS = typeof window.IMACROS_MAX_ATTEMPTS === 'number' ? window.IMACROS_MAX_ATTEMPTS : 50;
+    const RETRY_DELAY_MS = typeof window.IMACROS_RETRY_DELAY_MS === 'number' ? window.IMACROS_RETRY_DELAY_MS : 100;
+    let attempts = 0;
+    let initialized = false;
+
+    function hasDeps() {
+        return typeof connector !== 'undefined' && typeof imns !== 'undefined';
+    }
+
+    function initHandlers() {
+        if (initialized) return;
+        initialized = true;
+
+        // Handle macro execution requests posted by bookmarklets.
+        window.addEventListener("iMacrosRunMacro", function (evt) {
+            // console.log("iMacrosRunMacro event %O", evt);
+            connector.postMessage("run-macro", evt.detail, null);
+        }, true);
+
+        // translate old m=... or m64=... bookmarklets to e_m64 type
+        const processBookmarklets = function() {
+            try {
+                // evaluate XPath to find all anchor elements
+                // with attribute href="javascript:..."
+                var xpath = "//a[starts-with(@href, 'javascript:')]";
+                var result = document.evaluate(xpath, document, null,
+                                               XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
+                var node = null, nodes = new Array();
+                node = result.iterateNext();
+                while (node) {
+                    nodes.push(node);
+                    node = result.iterateNext();
+                }
+
+                var im_strre = "(?:[^\"\\\\]|\\\\[0btnvfr\"\'\\\\])+";
+                var re = new RegExp('^javascript\\:\\(function\\(\\) '+
+                                    '\\{(?:try\\{)?var (m(?:64)?) = "('+im_strre+')"'+
+                                    ', n = "('+im_strre+')";');
+                nodes.forEach(function(x) {
+                    var match = re.exec(x.href);
+                    if (match) {
+                        var source  = match[1] == "m" ?
+                            decodeURIComponent(unwrap(match[2])) :
+                            decodeURIComponent(atob(match[2]));
+                        var name = match[3];
+
+                        x.href = makeBookmarklet(name, source);
+                    }
+                });
+            } catch (e) {
+                console.error("[iMacros] bookmarklet handler failed:", e);
+            }
+        };
+
+        // catches bookmarklet get/post requests (form submit or image source)
+        // background script/iframe should place data into the temporary storage
+        const processRequestAttributes = function() {
+            try {
+                var dst = document.documentElement;
+                if (!dst) {
+                    return;
+                }
+
+                var getVal = dst.getAttribute("data-e_m64") || dst.getAttribute("data-empzmnbuitleadcesegaustcm_64") || "";
+                var postVal = dst.getAttribute("data-e_m") || dst.getAttribute("data-mgboikewtsucunot_64") || "";
+
+                var macro = null;
+                if (getVal !== "") {
+                    macro = {
+                        source: decodeURIComponent(atob(getVal)),
+                        name: "Get request"
+                    };
+                } else if (postVal !== "") {
+                    macro = {
+                        source: decodeURIComponent(atob(postVal)),
+                        name: "Post request"
+                    };
+                }
+
+                if (!macro) {
+                    return;
+                }
+
+                var evt = new CustomEvent("iMacrosRunMacro", { bubbles: true, cancelable: true, detail: macro });
+                window.dispatchEvent(evt);
+            } catch (e) {
+                console.error('[iMacros] Failed to process bookmarklet request attributes:', e);
+            }
+        };
+
+        const runDeferredWork = function() {
+            processBookmarklets();
+            processRequestAttributes();
+        };
+
+        if (document.readyState === 'complete') {
+            runDeferredWork();
+        } else {
+            window.addEventListener("load", runDeferredWork, true);
+        }
+    }
+
+    if (hasDeps()) {
+        initHandlers();
+        return;
+    }
+
+    const timer = setInterval(() => {
+        if (hasDeps()) {
+            clearInterval(timer);
+            initHandlers();
+            return;
+        }
+
+        attempts++;
+        if (attempts >= MAX_ATTEMPTS) {
+            clearInterval(timer);
+            console.warn('[iMacros] bookmarks_handler could not find required globals (connector/imns); bookmarklet support is disabled for this page.');
+        }
+    }, RETRY_DELAY_MS);
+}
+
+waitForDependenciesAndInit();
+
+
 
 // creates bookmarklet of new type 
 function makeBookmarklet(name, content) {
@@ -89,35 +213,3 @@ function unwrap(line) {
 }
 
 
-// translate old m=... or m64=... bookmarklets to e_m64 type
-window.addEventListener("load", function() {
-    try {                
-        // evaluate XPath to find all anchor elements
-        // with attribute href="javascript:..."
-        var xpath = "//a[starts-with(@href, 'javascript:')]";
-        var result = document.evaluate(xpath, document, null,
-                                       XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
-        var node = null, nodes = new Array();
-        while (node = result.iterateNext()) {
-            nodes.push(node);
-        }
-        
-        var im_strre = "(?:[^\"\\\\]|\\\\[0btnvfr\"\'\\\\])+";
-        var re = new RegExp('^javascript\\:\\(function\\(\\) '+
-                            '\\{(?:try\\{)?var (m(?:64)?) = "('+im_strre+')"'+
-                            ', n = "('+im_strre+')";');
-        nodes.forEach(function(x) {
-            var match = re.exec(x.href);
-            if (match) {
-                var source  = match[1] == "m" ?
-                    decodeURIComponent(unwrap(match[2])) :
-                    decodeURIComponent(atob(match[2]));
-                var name = match[3];
-                
-                x.href = makeBookmarklet(name, source);
-            }
-        });
-    } catch (e) {
-        console.error(e);
-    }
-});
