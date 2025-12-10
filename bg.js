@@ -1091,15 +1091,18 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 return;
             }
 
-            // Forward to Offscreen using reliable helper
-            sendMessageToOffscreen({
+            const baseMessage = {
                 target: 'offscreen',
-                command: 'FORWARD_MESSAGE',
-                topic: topic,
-                data: data,
                 tab_id: tab_id,
                 win_id: tab.windowId
-            }).then(response => {
+            };
+
+            const offscreenMessage = (topic === 'query-state')
+                ? Object.assign(baseMessage, { type: 'QUERY_STATE' })
+                : Object.assign(baseMessage, { command: 'FORWARD_MESSAGE', topic: topic, data: data });
+
+            // Forward to Offscreen using reliable helper
+            sendMessageToOffscreen(offscreenMessage).then(response => {
                 if (sendResponse) sendResponse(response);
             }).catch(e => {
                 // If offscreen doesn't respond or fails, we can't do much but log it

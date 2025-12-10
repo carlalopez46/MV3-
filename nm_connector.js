@@ -10,6 +10,13 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
  * @external chrome - Chrome Extension API
  */
 
+function canUseNativeMessaging() {
+    return typeof chrome !== 'undefined' &&
+        chrome.runtime &&
+        typeof chrome.runtime.connectNative === 'function' &&
+        typeof chrome.runtime.sendNativeMessage === 'function';
+}
+
 var nm_connector = {
     // Native module connection status
     isConnected: false,
@@ -365,8 +372,8 @@ var nm_connector = {
 
         try {
             // Check if connectNative is available (not available in Offscreen Document)
-            if (typeof chrome.runtime.connectNative !== 'function') {
-                console.warn("[iMacros] Native Messaging is not available in this context (Offscreen). File access features will be disabled.");
+            if (!canUseNativeMessaging()) {
+                console.info('[iMacros] Native Messaging is not available in this context (', typeof location !== 'undefined' ? location.pathname : 'unknown', '). nm_connector is disabled in this context.');
                 this.port = null;
                 return;
             }

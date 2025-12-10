@@ -143,7 +143,28 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     // Only handle messages targeting offscreen
     if (request.target !== 'offscreen') return;
 
-    console.log('[iMacros Offscreen] Received message:', request.command, request);
+    const msgLabel = request.type || request.command;
+    console.log('[iMacros Offscreen] Received message:', msgLabel, request);
+
+    // Handle quick state query from Service Worker or panel
+    if (request.type === 'QUERY_STATE') {
+        const winId = request.win_id;
+        const ctx = (typeof context !== 'undefined' && context) ? context[winId] : null;
+        const state = ctx ? {
+            isRecording: !!(ctx.recorder && ctx.recorder.isRecording),
+            isPlaying: !!(ctx.mplayer && ctx.mplayer.running),
+            currentMacro: ctx.current_macro_name || null
+        } : {
+            isRecording: false,
+            isPlaying: false,
+            currentMacro: null
+        };
+
+        if (sendResponse) {
+            sendResponse({ ok: true, state });
+        }
+        return true;
+    }
 
     // Handle panel creation completion from Service Worker
     if (request.command === 'panelCreated') {

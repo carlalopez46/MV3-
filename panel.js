@@ -3,6 +3,13 @@
 // 選択中のマクロ情報を保持する変数
 var selectedMacro = null;
 
+// パネルの状態をキャッシュ
+var panelState = {
+    isRecording: false,
+    isPlaying: false,
+    currentMacro: null
+};
+
 // パネルのウィンドウIDを保持
 var currentWindowId = null;
 
@@ -72,6 +79,27 @@ function sendCommand(command, payload = {}) {
                 console.error("[Panel] Failed to send message:", e);
                 resolve();
             }
+        });
+    });
+}
+
+function requestStateUpdate() {
+    return ensureWindowId().then(() => {
+        return new Promise((resolve) => {
+            chrome.runtime.sendMessage({
+                type: 'QUERY_STATE',
+                target: 'background',
+                win_id: currentWindowId
+            }, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.warn('[Panel] QUERY_STATE failed:', chrome.runtime.lastError.message);
+                    return resolve();
+                }
+                if (response && response.state) {
+                    updatePanelState(response.state);
+                }
+                resolve();
+            });
         });
     });
 }
@@ -234,6 +262,11 @@ function onSelectionChanged(node) {
 
 function updatePanelState(state) {
     console.log("[Panel] Update state:", state);
+    let stateName = state;
+    if (state && typeof state === 'object') {
+        panelState = state;
+        stateName = state.isRecording ? 'recording' : state.isPlaying ? 'playing' : 'idle';
+    }
     const setCollapsed = (id, collapsed) => {
         const el = document.getElementById(id);
         if (el) el.setAttribute("collapsed", collapsed ? "true" : "false");
@@ -243,12 +276,12 @@ function updatePanelState(state) {
         if (el) disabled ? el.setAttribute("disabled", "true") : el.removeAttribute("disabled");
     };
 
-    if (state === "playing") {
+    if (stateName === "playing") {
         setCollapsed("play-button", true);
         setCollapsed("pause-button", false);
         setDisabled("stop-replaying-button", false);
         setDisabled("record-button", true);
-    } else if (state === "recording") {
+    } else if (stateName === "recording") {
         setDisabled("stop-recording-button", false);
         setDisabled("play-button", true);
     } else { // idle
@@ -276,6 +309,9 @@ window.addEventListener("message", (event) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.target === 'panel' && message.type === 'PANEL_STATE_UPDATE') {
+        if (message.state) updatePanelState(message.state);
+    }
     if (message.type === "updatePanel") {
         updatePanelState(message.state);
     }
@@ -309,6 +345,8 @@ document.addEventListener("DOMContentLoaded", () => {
     addListener("loop-button", playLoop);
     addListener("settings-button", openSettings);
     addListener("edit-button", edit);
+
+    requestStateUpdate();
 
     const filesRadio = document.getElementById("radio-files-tree");
     const bookmarksRadio = document.getElementById("radio-bookmarks-tree");
