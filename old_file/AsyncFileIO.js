@@ -124,7 +124,7 @@ var afio = (function () {
     NodeObject.prototype.append = function(bit) {
         while (bit[0] == __psep())
             bit = bit.substring(1);
-        this._path += this._path[this._path.legnth-1] == __psep() ?
+        this._path += this._path[this._path.length-1] == __psep() ?
             bit : __psep()+bit;
     };
 
