@@ -852,7 +852,7 @@ var afio = (function () {
     };
 
     NodeObject.prototype.createDirectory = async function () {
-        return callFileIO('makeDirectory', {
+        await callFileIO('makeDirectory', {
             method: 'makeDirectory',
             node: this
         });
