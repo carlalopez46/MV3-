@@ -33,20 +33,21 @@ window.updatePanels = function () {
 
 
 
-// If bg_common.js failed to load earlier, attempt to import it to restore MV2 parity
-if (typeof registerSharedBackgroundHandlers !== 'function') {
-    try {
-        importScripts('bg_common.js');
-    } catch (e) {
-        console.error("Failed to import bg_common.js for offscreen handlers", e);
+// Attempt to register shared handlers that are already loaded via offscreen.html.
+// Avoid using importScripts here because the offscreen document runs in a window
+// context (not a worker), which caused "importScripts is not defined" and
+// duplicate script execution errors in MV3.
+(function registerSharedHandlers() {
+    const registerFn = window.registerSharedBackgroundHandlers;
+    if (typeof registerFn === "function") {
+        registerFn(window);
+        return;
     }
-}
 
-if (typeof registerSharedBackgroundHandlers === 'function') {
-    registerSharedBackgroundHandlers(window);
-} else {
+    // If the helpers are missing, log a clear error rather than attempting to
+    // re-import scripts that are already included in offscreen.html.
     console.error("registerSharedBackgroundHandlers is not available; shared background handlers not registered");
-}
+})();
 
 function edit(macro, overwrite, line) {
     console.log("[iMacros Offscreen] Opening editor for:", macro.name);
