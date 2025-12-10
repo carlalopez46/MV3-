@@ -10,8 +10,10 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // failing immediately at document_start.
 
 function waitForDependenciesAndInit() {
-    const MAX_ATTEMPTS = 50;
-    const RETRY_DELAY_MS = 100;
+    // Retry up to 5 seconds (50 attempts * 100 ms) for dependency availability.
+    // These values can be overridden before this script runs to fine-tune timing.
+    const MAX_ATTEMPTS = typeof window.IMACROS_MAX_ATTEMPTS === 'number' ? window.IMACROS_MAX_ATTEMPTS : 50;
+    const RETRY_DELAY_MS = typeof window.IMACROS_RETRY_DELAY_MS === 'number' ? window.IMACROS_RETRY_DELAY_MS : 100;
     let attempts = 0;
     let initialized = false;
 
@@ -38,8 +40,10 @@ function waitForDependenciesAndInit() {
                 var result = document.evaluate(xpath, document, null,
                                                XPathResult.ORDERED_NODE_ITERATOR_TYPE, null);
                 var node = null, nodes = new Array();
-                while (node = result.iterateNext()) {
+                node = result.iterateNext();
+                while (node) {
                     nodes.push(node);
+                    node = result.iterateNext();
                 }
 
                 var im_strre = "(?:[^\"\\\\]|\\\\[0btnvfr\"\'\\\\])+";
@@ -91,8 +95,7 @@ function waitForDependenciesAndInit() {
                     return;
                 }
 
-                var evt = document.createEvent("CustomEvent");
-                evt.initCustomEvent("iMacrosRunMacro", true, true, macro);
+                var evt = new CustomEvent("iMacrosRunMacro", { bubbles: true, cancelable: true, detail: macro });
                 window.dispatchEvent(evt);
             } catch (e) {
                 console.error('[iMacros] Failed to process bookmarklet request attributes:', e);
