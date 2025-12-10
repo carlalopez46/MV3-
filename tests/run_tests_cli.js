@@ -9,7 +9,7 @@
  *   node run_tests_cli.js [options]
  *
  * Options:
- *   --suite=<name>  Run specific test suite (fsaccess|afio|vars|macro|all)
+ *   --suite=<name>  Run specific test suite (fsaccess|afio|vars|macro|compat|all)
  *   --verbose       Show detailed output
  *   --watch         Watch for file changes and re-run tests
  */
@@ -59,6 +59,124 @@ function logWarning(text) {
 
 function logInfo(text) {
     console.log(colorize('ℹ ' + text, 'blue'));
+}
+
+/**
+ * Recursively scan the repository for MV2-only background page calls.
+ *
+ * We intentionally ignore backup/reference folders (old_file, docs, tests,
+ * vendor, samples, data folders) and focus on shippable JS/HTML assets.
+ */
+function scanForMV2BackgroundUsage(rootDir) {
+    const ignoredDirs = new Set([
+        'old_file', 'docs', 'tests', 'vendor', 'node_modules', '.git',
+        'samples', 'Datasources', 'Downloads', 'Macros', 'skin'
+    ]);
+    const allowedExt = new Set(['.js', '.html', '.htm']);
+    const allowedFiles = new Set(['mv3_compat.js']);
+    const disallowedPattern = /chrome\.(?:extension|runtime)\.getBackgroundPage\s*\(/;
+    const findings = [];
+
+    function walk(dir) {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            if (ignoredDirs.has(entry.name)) {
+                continue;
+            }
+
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                walk(fullPath);
+            } else if (entry.isFile()) {
+                if (allowedFiles.has(entry.name)) {
+                    continue;
+                }
+                const ext = path.extname(entry.name).toLowerCase();
+                if (!allowedExt.has(ext)) continue;
+
+                const relPath = path.relative(rootDir, fullPath);
+                const content = fs.readFileSync(fullPath, 'utf8');
+                const lines = content.split(/\r?\n/);
+                lines.forEach((line, idx) => {
+                    if (disallowedPattern.test(line)) {
+                        findings.push({
+                            file: relPath,
+                            line: idx + 1,
+                            code: line.trim()
+                        });
+                    }
+                });
+            }
+        }
+    }
+
+    walk(rootDir);
+    return findings;
+}
+
+/**
+ * Ensure manifest.json does not reference archived MV2 assets.
+ */
+function scanManifestForLegacyPaths(rootDir) {
+    const manifestPath = path.join(rootDir, 'manifest.json');
+    if (!fs.existsSync(manifestPath)) {
+        return [];
+    }
+
+    const manifestText = fs.readFileSync(manifestPath, 'utf8');
+    const issues = [];
+    if (manifestText.includes('old_file/')) {
+        issues.push({
+            file: path.relative(rootDir, manifestPath),
+            message: 'manifest.json references old_file/ assets'
+        });
+    }
+    return issues;
+}
+
+function runCompatibilityGuards(rootDir) {
+    logHeader('MV3 Compatibility Guards');
+
+    const mv2Findings = scanForMV2BackgroundUsage(rootDir);
+    const manifestIssues = scanManifestForLegacyPaths(rootDir);
+
+    const errors = [];
+    let passed = 0;
+    let failed = 0;
+
+    if (mv2Findings.length === 0) {
+        logSuccess('No chrome.*.getBackgroundPage calls detected in shipping assets');
+    } else {
+        mv2Findings.forEach(finding => {
+            logError(`MV2 background API found in ${finding.file}:${finding.line}`);
+            errors.push({
+                context: 'MV3CompatibilityGuard',
+                message: `${finding.file}:${finding.line} contains ${finding.code}`,
+                stack: ''
+            });
+        });
+        failed += mv2Findings.length;
+    }
+
+    if (manifestIssues.length === 0) {
+        logSuccess('manifest.json does not reference archived old_file assets');
+    } else {
+        manifestIssues.forEach(issue => {
+            logError(issue.message);
+            errors.push({
+                context: 'MV3CompatibilityGuard',
+                message: issue.message,
+                stack: ''
+            });
+        });
+        failed += manifestIssues.length;
+    }
+
+    if (failed === 0) {
+        passed = 1; // count guard as a single passed check
+    }
+
+    return { passed, failed, skipped: 0, errors };
 }
 
 // Parse command line arguments
@@ -487,6 +605,28 @@ function loadTestSuites() {
 async function runTests() {
     logHeader('iMacros MV3 Test Suite - CLI Runner');
 
+    const results = {
+        passed: 0,
+        failed: 0,
+        skipped: 0,
+        errors: []
+    };
+
+    // MV3 compatibility guardrail: detect MV2-only background usage
+    if (options.suite === 'all' || options.suite === 'compat') {
+        const compatResult = runCompatibilityGuards(path.resolve(__dirname, '..'));
+        results.passed += compatResult.passed;
+        results.failed += compatResult.failed;
+        results.skipped += compatResult.skipped || 0;
+        results.errors.push(...compatResult.errors);
+
+        // If only compat suite requested, short-circuit after guard
+        if (options.suite === 'compat') {
+            printSummary(results);
+            process.exit(results.failed > 0 ? 1 : 0);
+        }
+    }
+
     // Setup environment
     setupBrowserEnvironment();
 
@@ -511,13 +651,6 @@ async function runTests() {
         }
         return { results, errors };
     }
-
-    const results = {
-        passed: 0,
-        failed: 0,
-        skipped: 0,
-        errors: []
-    };
 
     try {
         // Run variable expansion tests
