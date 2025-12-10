@@ -262,9 +262,10 @@ function onSelectionChanged(node) {
 
 function updatePanelState(state) {
     console.log("[Panel] Update state:", state);
+    let stateName = state;
     if (state && typeof state === 'object') {
         panelState = state;
-        state = state.isRecording ? 'recording' : state.isPlaying ? 'playing' : 'idle';
+        stateName = state.isRecording ? 'recording' : state.isPlaying ? 'playing' : 'idle';
     }
     const setCollapsed = (id, collapsed) => {
         const el = document.getElementById(id);
@@ -275,12 +276,12 @@ function updatePanelState(state) {
         if (el) disabled ? el.setAttribute("disabled", "true") : el.removeAttribute("disabled");
     };
 
-    if (state === "playing") {
+    if (stateName === "playing") {
         setCollapsed("play-button", true);
         setCollapsed("pause-button", false);
         setDisabled("stop-replaying-button", false);
         setDisabled("record-button", true);
-    } else if (state === "recording") {
+    } else if (stateName === "recording") {
         setDisabled("stop-recording-button", false);
         setDisabled("play-button", true);
     } else { // idle
