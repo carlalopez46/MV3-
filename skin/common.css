@@ -63,14 +63,18 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
     cursor: default;
 }
 
+
 .box {
     display: -webkit-box;
+    display: flex;
 }
 
 .vbox {
     display: -webkit-box;
+    display: flex;
     -webkit-box-orient: vertical;
-   
+    flex-direction: column;
+
 }
 
 .vbox[hidden="true"] {
@@ -80,7 +84,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 .hbox {
     display: -webkit-box;
+    display: flex;
     -webkit-box-orient: horizontal;
+    flex-direction: row;
 }
 
 .hbox[hidden="true"] {
