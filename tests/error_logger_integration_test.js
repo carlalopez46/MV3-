@@ -132,8 +132,29 @@ console.log(`   - Total Infos: ${report3.totalInfos}`);
 console.log(`   - Total Warnings: ${report3.totalWarnings}`);
 console.log(`   - Total Errors: ${report3.totalErrors}`);
 
-// Test 6: GlobalErrorLogger.logFileError wrapper
-console.log('\nTest 6: GlobalErrorLogger.logFileError wrapper availability');
+// Test 6: Legacy logCritical passes through extra details
+console.log('\nTest 6: Legacy logCritical passes severity details');
+global.window.GlobalErrorLogger.clear();
+
+global.window.logCritical('Critical message', 'CriticalContext');
+
+const criticalReport = global.window.GlobalErrorLogger.getReport();
+const criticalEntry = criticalReport.errors[0];
+
+if (criticalReport.totalErrors !== 1) {
+    console.error(`❌ FAIL: Expected 1 critical error, got ${criticalReport.totalErrors}`);
+    process.exit(1);
+}
+
+if (!criticalEntry.details || criticalEntry.details.severity !== 'CRITICAL') {
+    console.error('❌ FAIL: logCritical did not forward severity detail');
+    process.exit(1);
+}
+
+console.log('✅ PASS: Legacy logCritical forwards severity detail to GlobalErrorLogger');
+
+// Test 7: GlobalErrorLogger.logFileError wrapper
+console.log('\nTest 7: GlobalErrorLogger.logFileError wrapper availability');
 global.window.GlobalErrorLogger.clear();
 
 if (typeof global.window.GlobalErrorLogger.logFileError !== 'function') {
@@ -160,8 +181,8 @@ console.log('✅ PASS: GlobalErrorLogger.logFileError is available and records f
 console.log(`   - Error code: ${fileErrorEntry.details.errorCode}`);
 console.log(`   - Category: ${fileErrorEntry.details.category}`);
 
-// Test 7: Stack trace accuracy
-console.log('\nTest 7: Stack trace accuracy');
+// Test 8: Stack trace accuracy
+console.log('\nTest 8: Stack trace accuracy');
 global.window.GlobalErrorLogger.clear();
 
 // Line 123: This should be captured

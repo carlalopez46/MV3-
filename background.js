@@ -906,6 +906,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
+    if (msg.type === 'QUERY_STATE') {
+        const targetWin = msg.win_id;
+        sendMessageToOffscreen({
+            target: 'offscreen',
+            type: 'QUERY_STATE',
+            win_id: targetWin
+        }).then((response) => {
+            sendResponse(response || { ok: false });
+        }).catch((error) => {
+            console.warn('[iMacros SW] Failed to retrieve state from Offscreen:', error);
+            sendResponse({ ok: false, error: error && error.message });
+        });
+        return true;
+    }
+
     // Forward panel.js messages to Offscreen Document
     // Panel.js sends messages with types: CALL_BG_FUNCTION, CALL_CONTEXT_METHOD, etc.
     // Also forward Content Script messages (which have 'topic' property)
