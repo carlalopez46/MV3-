@@ -851,6 +851,13 @@ var afio = (function () {
         return result.isReadable;
     };
 
+    NodeObject.prototype.createDirectory = async function () {
+        return callFileIO('makeDirectory', {
+            method: 'makeDirectory',
+            node: this
+        });
+    };
+
     NodeObject.prototype.append = function (bit) {
         // Virtual paths (starting with /) always use / as separator
         const sep = this._path.startsWith('/') ? '/' : __psep();

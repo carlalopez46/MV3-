@@ -122,9 +122,10 @@ var afio = (function () {
 
     // append part of the name
     NodeObject.prototype.append = function(bit) {
+        // Note: ensure we reference the correct `length` property to avoid runtime errors.
         while (bit[0] == __psep())
             bit = bit.substring(1);
-        this._path += this._path[this._path.legnth-1] == __psep() ?
+        this._path += this._path[this._path.length-1] == __psep() ?
             bit : __psep()+bit;
     };
 
