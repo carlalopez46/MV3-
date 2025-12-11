@@ -465,11 +465,75 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             return true;
         }
 
-        chrome.tabs.sendMessage(tab_id, message, (response) => {
-            if (chrome.runtime.lastError) {
-                // Tab may be closed or not accessible
-                console.warn('[iMacros SW] SEND_TO_TAB error:', chrome.runtime.lastError.message);
-                sendResponse({ error: chrome.runtime.lastError.message });
+        const CONTENT_SCRIPT_FILES = [
+            'utils.js',
+            'errorLogger.js',
+            'content_scripts/connector.js',
+            'content_scripts/recorder.js',
+            'content_scripts/player.js'
+        ];
+
+        const RESTRICTED_SCHEMES = ['chrome://', 'edge://', 'about:', 'file://', 'chrome-extension://'];
+
+        const injectContentScripts = async () => {
+            // Best-effort injection for cases where the content script was not injected (e.g., site access off)
+            try {
+                const tab = await chrome.tabs.get(tab_id).catch(() => null);
+                if (!tab || !tab.url) {
+                    return false;
+                }
+
+                if (RESTRICTED_SCHEMES.some((scheme) => tab.url.startsWith(scheme))) {
+                    console.warn('[iMacros SW] Skipping content script injection due to restricted scheme:', tab.url);
+                    return false;
+                }
+
+                try {
+                    await chrome.scripting.executeScript({
+                        target: { tabId: tab_id, allFrames: true },
+                        files: CONTENT_SCRIPT_FILES
+                    });
+                    return true;
+                } catch (err) {
+                    const msg = err && err.message ? err.message : err;
+                    console.warn('[iMacros SW] Failed to inject content scripts:', msg);
+                    return false;
+                }
+            } catch (e) {
+                console.warn('[iMacros SW] Exception during content script injection:', e);
+                return false;
+            }
+        };
+
+        const sendMessageToTab = () => {
+            chrome.tabs.sendMessage(tab_id, message, (response) => {
+                if (chrome.runtime.lastError) {
+                    // Tab may be closed or not accessible
+                    const errMsg = chrome.runtime.lastError.message;
+                    console.warn('[iMacros SW] SEND_TO_TAB error:', errMsg);
+                    sendResponse({ error: errMsg });
+                } else {
+                    sendResponse(response);
+                }
+            });
+        };
+
+        // First attempt to send. If there is no receiver, try injecting content scripts once.
+        chrome.tabs.sendMessage(tab_id, message, async (response) => {
+            const lastErr = chrome.runtime.lastError;
+            const lastErrMsg = lastErr && lastErr.message ? lastErr.message : '';
+            if (lastErrMsg && lastErrMsg.includes('Receiving end does not exist')) {
+                console.warn('[iMacros SW] No receiver in tab. Attempting to inject content scripts...');
+                const injected = await injectContentScripts();
+                if (injected) {
+                    sendMessageToTab();
+                } else {
+                    const errorMsg = lastErrMsg || 'No receiver in tab';
+                    sendResponse({ error: `${errorMsg}; content script injection failed or not allowed`, injected: false });
+                }
+            } else if (lastErrMsg) {
+                console.warn('[iMacros SW] SEND_TO_TAB error:', lastErrMsg);
+                sendResponse({ error: lastErrMsg });
             } else {
                 sendResponse(response);
             }
