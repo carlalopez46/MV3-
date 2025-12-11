@@ -1079,13 +1079,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 })();
 
 // Forward recorder messages to Offscreen Document
-['query-state', 'record-action', 'password-element-focused'].forEach(topic => {
-    communicator.registerHandler(topic, function (data, tab_id, sendResponse) {
-        if (!chrome.tabs) {
-            if (sendResponse) sendResponse({ state: 'idle', error: 'tabs API not available' });
-            return;
-        }
-        chrome.tabs.get(tab_id, function (tab) {
+// NOTE: Only register these handlers in Service Worker context (where chrome.tabs is available)
+// In Offscreen Document, these handlers would fail and cause race conditions
+if (typeof chrome.tabs !== 'undefined' && chrome.tabs.get) {
+    ['query-state', 'record-action', 'password-element-focused'].forEach(topic => {
+        communicator.registerHandler(topic, function (data, tab_id, sendResponse) {
+            chrome.tabs.get(tab_id, function (tab) {
             if (chrome.runtime.lastError || !tab) {
                 if (sendResponse) sendResponse({ state: 'idle', error: 'tab not found' });
                 return;
@@ -1111,9 +1110,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             });
         });
     });
-
-
-});
+}
 
 // Forward tab events to Offscreen Document
 if (chrome.tabs) {

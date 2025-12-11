@@ -79,17 +79,26 @@ MacroPlayer.prototype.compileExpressions = function () {
 
 
 // add listener for various events
+// NOTE: In Offscreen Document, chrome.tabs and chrome.webNavigation are NOT available.
+// Tab events are forwarded from Service Worker via offscreen_bg.js handlers.
 MacroPlayer.prototype.addListeners = function() {
     communicator.registerHandler("error-occurred",
                                  this._onScriptError, this.win_id);
-    chrome.tabs.onUpdated.addListener(this._onTabUpdated);
-    chrome.tabs.onActivated.addListener(this._onActivated);
+
+    // Only register direct listeners if running in Service Worker (not Offscreen)
+    // In Offscreen, events are forwarded via TAB_UPDATED/TAB_ACTIVATED messages
+    if (typeof chrome.tabs !== 'undefined' && chrome.tabs.onUpdated) {
+        chrome.tabs.onUpdated.addListener(this._onTabUpdated);
+        chrome.tabs.onActivated.addListener(this._onActivated);
+    }
 
     // use WebNavigation interface to trace download events
-
-    // chrome.webNavigation.onBeforeNavigate.addListener(this._onBeforeNavigate);
-    // chrome.webNavigation.onCompleted.addListener(this._onCompleted);
-    chrome.webNavigation.onErrorOccurred.addListener(this._onErrorOccured);
+    // Only available in Service Worker, not Offscreen Document
+    if (typeof chrome.webNavigation !== 'undefined' && chrome.webNavigation.onErrorOccurred) {
+        // chrome.webNavigation.onBeforeNavigate.addListener(this._onBeforeNavigate);
+        // chrome.webNavigation.onCompleted.addListener(this._onCompleted);
+        chrome.webNavigation.onErrorOccurred.addListener(this._onErrorOccured);
+    }
 
     // chrome.webNavigation.onCommitted.addListener(this._onCommitted);
     // chrome.webNavigation.onCreatedNavigationTarget.addListener(
@@ -154,11 +163,18 @@ MacroPlayer.prototype.addListeners = function() {
 
 MacroPlayer.prototype.removeListeners = function() {
     communicator.unregisterHandler("error-occurred", this._onScriptError);
-    chrome.tabs.onUpdated.removeListener(this._onTabUpdated);
-    chrome.tabs.onActivated.removeListener(this._onActivated);
+
+    // Only remove direct listeners if running in Service Worker (not Offscreen)
+    if (typeof chrome.tabs !== 'undefined' && chrome.tabs.onUpdated) {
+        chrome.tabs.onUpdated.removeListener(this._onTabUpdated);
+        chrome.tabs.onActivated.removeListener(this._onActivated);
+    }
+
     // chrome.webNavigation.onBeforeNavigate.removeListener(this._onBeforeNavigate);
     // chrome.webNavigation.onCompleted.removeListener(this._onCompleted);
-    chrome.webNavigation.onErrorOccurred.removeListener(this._onErrorOccured);
+    if (typeof chrome.webNavigation !== 'undefined' && chrome.webNavigation.onErrorOccurred) {
+        chrome.webNavigation.onErrorOccurred.removeListener(this._onErrorOccured);
+    }
 
     // chrome.webNavigation.onCommitted.removeListener(this._onCommitted);
     // chrome.webNavigation.onCreatedNavigationTarget.removeListener(
