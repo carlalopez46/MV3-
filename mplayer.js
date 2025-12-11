@@ -4365,7 +4365,7 @@ MacroPlayer.prototype.expandVariables = function(param, eval_id) {
         t = var_name.match(/^!file_downloaddir$/i);
         if (t) return mplayer.downloadDirFile;
 
-        t = var_name.match(/^!timeout/${var_name}/i);
+        t = var_name.match(/^!timeout$/i);
         if (t) return mplayer.timeout;
 
         t = var_name.match(/^!lastnode$/i);
