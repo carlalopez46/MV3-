@@ -171,6 +171,9 @@ function playLoop() {
         return;
     }
 
+    // UIを即時更新してストップボタンを有効化
+    updatePanelState({ isPlaying: true, isRecording: false, currentMacro: selectedMacro });
+
     sendCommand("playMacro", {
         file_path: filePath,
         macro_name: macroName,
