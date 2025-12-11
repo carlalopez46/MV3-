@@ -3181,6 +3181,7 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
             if (/^javascript:/.test(param)) {
                 this.next("URL");
             } else if (this.isInternalURL(param)) {
+                this.currentURL = param;
                 // Internal browser pages (e.g., chrome://extensions) do not expose
                 // reliable load events and routinely trigger timeouts. Skip the
                 // page-load wait to avoid false failures while still advancing
