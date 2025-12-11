@@ -368,7 +368,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
         if (!context[win_id]) {
             context.init(win_id).then(start).catch(err => {
-                sendResponse({ success: false, error: err.message });
+                sendResponse({ success: false, error: err.message || String(err) });
             });
         } else {
             start();
@@ -463,15 +463,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (request.command === 'pause') {
         const win_id = request.win_id;
         console.log('[Offscreen] Received pause command');
-        if (context[win_id] && context[win_id].mplayer) {
-            if (context[win_id].mplayer.paused) {
-                context[win_id].mplayer.unpause();
-            } else {
-                context[win_id].mplayer.pause();
-            }
-            sendResponse({ success: true });
+        const runPause = () => executeContextMethod(win_id, 'pause', sendResponse, []);
+
+        if (!context[win_id]) {
+            context.init(win_id).then(runPause).catch(err => {
+                sendResponse({ success: false, error: err.message || String(err) });
+            });
         } else {
-            sendResponse({ success: false, error: "Player not found" });
+            runPause();
         }
         return true;
     }
@@ -587,7 +586,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     context.init(win_id).then(() => {
                         executeContextMethod(win_id, method, sendResponse, request.args);
                     }).catch(err => {
-                        sendResponse({ success: false, error: `Failed to initialize context: ${err.message}` });
+                        sendResponse({ success: false, error: `Failed to initialize context: ${err.message || String(err)}` });
                     });
                     return true;
                 }
@@ -677,6 +676,30 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     } else {
                         sendResponse({ success: false, error: 'pause method not available' });
                     }
+                }
+            } else if (method === "unpause") {
+                console.log("[Offscreen] Unpausing player...");
+                const mplayer = context[win_id].mplayer;
+                if (!mplayer) {
+                    sendResponse({ success: false, error: 'mplayer not available for unpause' });
+                    return;
+                }
+
+                if (!mplayer.paused) {
+                    sendResponse({ success: false, error: 'mplayer is not paused' });
+                    return;
+                }
+
+                if (typeof mplayer.unpause === 'function') {
+                    try {
+                        mplayer.unpause();
+                        sendResponse({ success: true, resumed: true });
+                    } catch (e) {
+                        console.error('[Offscreen] Error unpausing mplayer:', e);
+                        sendResponse({ success: false, error: 'Error unpausing mplayer', details: String(e) });
+                    }
+                } else {
+                    sendResponse({ success: false, error: 'unpause method not available' });
                 }
             } else if (method === "mplayer.play") {
                 console.log("[Offscreen] Calling mplayer.play with:", args[0].name);
@@ -847,8 +870,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 }
                 break;
 
-            case 'pause':
-                var win_id = request.win_id;
+            case 'pause': {
+                const win_id = request.win_id;
                 if (!context[win_id]) {
                     context.init(win_id).then(() => {
                         executeContextMethod(win_id, 'pause', sendResponse, []);
@@ -859,19 +882,21 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 }
                 executeContextMethod(win_id, 'pause', sendResponse, []);
                 return true;
+            }
 
-            case 'unpause':
-                var win_id = request.win_id;
+            case 'unpause': {
+                const win_id = request.win_id;
                 if (!context[win_id]) {
                     context.init(win_id).then(() => {
-                        executeContextMethod(win_id, 'pause', sendResponse, []);
+                        executeContextMethod(win_id, 'unpause', sendResponse, []);
                     }).catch(err => {
                         sendResponse({ success: false, error: err.message || String(err) });
                     });
                     return true;
                 }
-                executeContextMethod(win_id, 'pause', sendResponse, []);
+                executeContextMethod(win_id, 'unpause', sendResponse, []);
                 return true;
+            }
 
             case 'notificationClicked':
                 var n_id = request.notificationId;

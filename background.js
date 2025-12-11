@@ -716,10 +716,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 win_id: win_id
             }).then(result => {
                 console.log("[iMacros SW] startRecording result:", result);
-                sendResponse({ success: true });
+                if (result === null) {
+                    sendResponse({ success: false, error: "Offscreen unavailable" });
+                    return;
+                }
+                if (result && typeof result.success !== 'undefined') {
+                    sendResponse(result);
+                } else {
+                    sendResponse({ success: true });
+                }
             }).catch(err => {
                 console.error("[iMacros SW] startRecording error:", err);
-                sendResponse({ success: false, error: err && err.message });
+                sendResponse({ success: false, error: (err && err.message) || String(err) });
             });
         });
 
