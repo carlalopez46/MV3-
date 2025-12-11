@@ -512,18 +512,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // First attempt to send. If there is no receiver, try injecting content scripts once.
         chrome.tabs.sendMessage(tab_id, message, async (response) => {
             const lastErr = chrome.runtime.lastError;
-            if (lastErr && lastErr.message && lastErr.message.includes('Receiving end does not exist')) {
+            const lastErrMsg = lastErr && lastErr.message ? lastErr.message : '';
+            if (lastErrMsg && lastErrMsg.includes('Receiving end does not exist')) {
                 console.warn('[iMacros SW] No receiver in tab. Attempting to inject content scripts...');
                 const injected = await injectContentScripts();
                 if (injected) {
                     sendMessageToTab();
                 } else {
-                    const errorMsg = lastErr && lastErr.message ? lastErr.message : 'No receiver in tab';
+                    const errorMsg = lastErrMsg || 'No receiver in tab';
                     sendResponse({ error: errorMsg, injected: false });
                 }
-            } else if (lastErr) {
-                console.warn('[iMacros SW] SEND_TO_TAB error:', lastErr.message);
-                sendResponse({ error: lastErr.message });
+            } else if (lastErrMsg) {
+                console.warn('[iMacros SW] SEND_TO_TAB error:', lastErrMsg);
+                sendResponse({ error: lastErrMsg });
             } else {
                 sendResponse(response);
             }
