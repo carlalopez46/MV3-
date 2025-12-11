@@ -13,6 +13,17 @@ var panelState = {
 // 情報パネルに表示した内容を保持（ヘルプ/編集ボタン用）
 let lastInfoArgs = null;
 
+function normalizeMacro(macro) {
+    if (!macro) return null;
+    const normalized = { ...macro };
+    normalized.id = macro.id || macro.file_id || macro.path || macro.name || null;
+    normalized.path = macro.path || macro.id || macro.file_id || null;
+    normalized.name = macro.text || macro.name || "";
+    normalized.text = normalized.name || macro.text;
+    normalized.type = macro.type || normalized.type;
+    return normalized;
+}
+
 // パネルのウィンドウIDを保持
 var currentWindowId = null;
 
@@ -116,8 +127,8 @@ function play() {
         return;
     }
 
-    const filePath = selectedMacro.id || selectedMacro.path || selectedMacro.name;
-    const macroName = selectedMacro.text || selectedMacro.name;
+    const filePath = selectedMacro.path || selectedMacro.id || selectedMacro.name;
+    const macroName = selectedMacro.name || selectedMacro.text;
     if (!filePath) {
         alert("Unable to play: no macro path found.");
         return;
@@ -167,10 +178,15 @@ function playLoop() {
         alert("Please select a macro first.");
         return;
     }
-    const max = document.getElementById("max-loop").value;
+    const loopInput = document.getElementById("max-loop");
+    const max = loopInput ? parseInt(loopInput.value, 10) : NaN;
+    if (!Number.isInteger(max) || max < 1) {
+        alert("Please enter a valid loop count (positive integer).");
+        return;
+    }
 
-    const filePath = selectedMacro.id || selectedMacro.path || selectedMacro.name;
-    const macroName = selectedMacro.text || selectedMacro.name;
+    const filePath = selectedMacro.path || selectedMacro.id || selectedMacro.name;
+    const macroName = selectedMacro.name || selectedMacro.text;
     if (!filePath) {
         alert("Unable to play: no macro path found.");
         return;
@@ -213,8 +229,8 @@ function openSettings() {
 function edit() {
     if (!selectedMacro) return;
     sendCommand("editMacro", {
-        file_path: selectedMacro.id,
-        macro_name: selectedMacro.text
+        file_path: selectedMacro.path || selectedMacro.id,
+        macro_name: selectedMacro.name || selectedMacro.text
     });
 }
 
@@ -245,8 +261,8 @@ function openErrorHelp() {
 
 function openInfoEdit() {
     if (!lastInfoArgs || !lastInfoArgs.macro) return;
-    const { macro } = lastInfoArgs;
-    const filePath = macro.id || macro.path || macro.name;
+    const macro = normalizeMacro(lastInfoArgs.macro);
+    const filePath = macro && (macro.path || macro.id || macro.name);
     if (!filePath) {
         console.error("[Panel] Cannot edit macro: no valid path found", macro);
         alert("Unable to open macro for editing.");
@@ -254,7 +270,7 @@ function openInfoEdit() {
     }
     sendCommand("editMacro", {
         file_path: filePath,
-        macro_name: macro.text || macro.name
+        macro_name: macro.name || macro.text
     });
 }
 
@@ -334,7 +350,7 @@ async function selectInitialTree() {
 
 function onSelectionChanged(node) {
     console.log("[Panel] Selection changed:", node);
-    selectedMacro = node;
+    selectedMacro = normalizeMacro(node);
 
     const disable = (ids) => ids.forEach(id => {
         const el = document.getElementById(id);
@@ -345,7 +361,7 @@ function onSelectionChanged(node) {
         if (el) el.removeAttribute("disabled");
     });
 
-    if (node && node.type === 'macro') {
+    if (selectedMacro && selectedMacro.type === 'macro') {
         enable(["play-button", "loop-button", "edit-button"]);
     } else {
         disable(["play-button", "loop-button", "edit-button"]);
@@ -404,12 +420,12 @@ function handlePanelShowInfo(args) {
     const infoArea = document.getElementById("info-area");
     if (!infoDiv || !infoArea) return;
 
-    lastInfoArgs = args;
+    lastInfoArgs = args.macro ? { ...args, macro: normalizeMacro(args.macro) } : args;
 
     const lines = [];
     if (args.message) lines.push(args.message);
     if (typeof args.errorCode !== "undefined") lines.push("Error code: " + args.errorCode);
-    if (args.macro && args.macro.name) lines.push("Macro: " + args.macro.name);
+    if (lastInfoArgs.macro && lastInfoArgs.macro.name) lines.push("Macro: " + lastInfoArgs.macro.name);
 
     infoArea.value = lines.join("\n");
     infoArea.scrollTop = infoArea.scrollHeight;
@@ -417,7 +433,7 @@ function handlePanelShowInfo(args) {
     // エラー詳細時のみ編集/ヘルプボタンを表示
     const infoEditBtn = document.getElementById("info-edit-button");
     const infoHelpBtn = document.getElementById("info-help-button");
-    const showActionButtons = !!args.macro;
+    const showActionButtons = !!lastInfoArgs.macro;
     if (infoEditBtn) infoEditBtn.hidden = !showActionButtons;
     if (infoHelpBtn) infoHelpBtn.hidden = !showActionButtons;
 
@@ -534,7 +550,13 @@ window.addEventListener("message", (event) => {
     if (event.origin !== window.location.origin || !event.data || typeof event.data !== "object") {
         return;
     }
-    if (!allowedSource || event.source !== allowedSource) {
+    // Reject if iframe not found or source doesn't match
+    if (!allowedSource) {
+        console.warn("[Panel] tree-iframe not found, ignoring message");
+        return;
+    }
+    if (event.source !== allowedSource) {
+        console.warn("[Panel] Message from unexpected source");
         return;
     }
     if (event.data.type === "iMacrosSelectionChanged") {

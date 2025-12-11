@@ -1173,11 +1173,21 @@ var dialogUtils = (function () {
 })();
 
 function getRedirectURL(id_or_kw) {
-    return "https://yokohamaticket.co.jp/";
+    const version = chrome.runtime.getManifest().version;
+    const prefix = `http://rd.imacros.net/redirect.aspx?type=CR&version=${version}`;
+    if (typeof id_or_kw === "number") {
+        return `${prefix}&helpid=${id_or_kw}`;
+    }
+    if (typeof id_or_kw === "string") {
+        return `${prefix}&helpid=102&kw=${id_or_kw}`;
+    }
+    return prefix;
 }
 
 function getRedirFromString(idString) {
-    return "https://yokohamaticket.co.jp/";
+    const version = chrome.runtime.getManifest().version;
+    const prefix = `http://rd.imacros.net/redirect.aspx?type=CR&version=${version}`;
+    return `${prefix}&helpid=${idString}`;
 }
 
 // returns true if fileName's extension is of a macro file (e.g. .iim or .IIM)
