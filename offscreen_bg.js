@@ -172,7 +172,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             } else if (ctx.mplayer && ctx.mplayer.playing) {
                 state = 'playing';
                 response.state = state;
-                response.currentMacro = ctx.current_macro_name || null;
+                response.currentMacro = ctx.mplayer.currentMacro || null;
             } else {
                 response.state = 'idle';
             }

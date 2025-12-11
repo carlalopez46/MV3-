@@ -14,6 +14,7 @@ of altering command semantics.
 
 function MacroPlayer(win_id) {
     this.win_id = win_id;
+    this.tab_id = null;
     this.vars = new Array();
     this.userVars = new Map();
     this.ports = new Object();
@@ -228,7 +229,7 @@ MacroPlayer.prototype.onNavigationErrorOccured = function(details) {
     if (details.tabId != this.tab_id)
         return;
 
-    // console.error("onNavigationErrorOccured: %O", details);
+    // console.error("onNavigationErrorOccurred: %O", details);
     if (this.playing) {
         // workaround for #223, see crbug.com/117043
         if (/net::ERR_ABORTED/.test(details.error)) {
@@ -239,7 +240,7 @@ MacroPlayer.prototype.onNavigationErrorOccured = function(details) {
         }
 
         this.handleError(new RuntimeError(
-            "Navigation error occured while loading url "+
+            "Navigation error occurred while loading url "+
                 details.url+", details: "+details.error, 733));
         this.stopTimer("loading");
         this.waitingForPageLoad = false;
@@ -509,7 +510,7 @@ MacroPlayer.prototype.retry = function(onerror, msg, caller_id, timeout) {
         }
             } else {
                 // set badge text
-                let text = Math.round(remains/1000);
+                let text = Math.round(remains/1000).toString();
                 while(text.length < 2)
                     text = "0"+text;
                 text += "s";
@@ -634,7 +635,7 @@ MacroPlayer.prototype.RegExpTable["add"] =
 
 MacroPlayer.prototype.ActionTable["add"] = function (cmd) {
     var param = imns.unwrap(this.expandVariables(cmd[2], "add2"));
-    var m = null;
+    var m = null, arr = null;
 
     if ( m = cmd[1].match(this.limits.varsRe) ) {
         var num = imns.s2i(m[1]);
@@ -644,7 +645,7 @@ MacroPlayer.prototype.ActionTable["add"] = function (cmd) {
         } else {
             this.vars[num] = this.getVar(num) + param;
         }
-    } else if ( arr = cmd[1].match(/^!extract$/i) ) {
+    } else if ( (arr = cmd[1].match(/^!extract$/i)) ) {
         this.addExtractData(param);
     } else if (/^!\S+$/.test(cmd[1])) {
         throw new BadParameter("Unsupported variable "+cmd[1]+
@@ -1553,7 +1554,7 @@ MacroPlayer.prototype.onDownloadCompleted = function(id) {
     var mplayer = this;
     dest_dir.exists().then(function(exists) {
         if (!exists)
-            throw new RuntimeError("Path "+folder+" does not exist", 732);
+            throw new RuntimeError("Path "+dl_obj.downloadFolder+" does not exist", 732);
 
         var file = afio.openNode(dl_obj.downloadFilename);
         dest_dir.append(file.leafName);
@@ -1697,14 +1698,15 @@ MacroPlayer.prototype.ActionTable["onlogin"] = function (cmd) {
         password: password
     }
     this.waitForAuthDialog = true;
-    chrome.webRequest.onAuthRequired.addListener(
-        this.onAuth,
-        {windowId: this.win_id, urls: ["<all_urls>"]},
-        ["blocking"]
-    );
     this.decrypt(password).then(decryptedString => {
-        this.loginData.password = decryptedString
-    }).then(() => this.next("ONLOGIN")).catch(e => this.handleError(e))
+        this.loginData.password = decryptedString;
+        chrome.webRequest.onAuthRequired.addListener(
+            this.onAuth,
+            {windowId: this.win_id, urls: ["<all_urls>"]},
+            ["blocking"]
+        );
+        this.next("ONLOGIN");
+    }).catch(e => this.handleError(e))
 };
 
 
@@ -1763,7 +1765,7 @@ MacroPlayer.prototype.ActionTable["prompt"] = function (cmd) {
                 } else if (typeof (retobj.varnum) != "undefined") {
                     mplayer.vars[imns.s2i(retobj.varnum)] = retobj.value;
                 }
-                mplayer.next("onPromptComplete");
+                mplayer.next("PROMPT");
                 return
             })
         } else {
@@ -1772,7 +1774,7 @@ MacroPlayer.prototype.ActionTable["prompt"] = function (cmd) {
                 "iMacros Prompt Dialog",
                 { type: "alert", text: x.text });
             return p.then(function (result) {
-                mplayer.next("onPromptComplete");
+                mplayer.next("PROMPT");
                 return
             })
 
@@ -1784,12 +1786,12 @@ MacroPlayer.prototype.ActionTable["prompt"] = function (cmd) {
 };
 
 MacroPlayer.prototype.onPromptComplete = function(data) {
-    if (typeof(data.varname) != "undefined") {
+    if (data && typeof(data.varname) != "undefined") {
         this.setUserVar(data.varname, data.value);
-    } else if (typeof(data.varnum) != "undefined") {
+    } else if (data && typeof(data.varnum) != "undefined") {
         this.vars[imns.s2i(data.varnum)] = data.value;
     }
-    this.next("onPromptComplete");
+    this.next("PROMPT");
 };
 
 
@@ -2368,13 +2370,13 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
         break;
     case "!timeout_tag": case "!timeout_step":
         var x = imns.s2i(param);
-        if (isNaN(x) || x < 0)
+        if (isNaN(x) || x <= 0)
             throw new BadParameter("!TIMEOUT_TAG must be positive integer");
         this.timeout_tag = x;
         break;
     case "!timeout_download":
         var x = imns.s2i(param);
-        if (isNaN(x) || x < 0)
+        if (isNaN(x) || x <= 0)
             throw new BadParameter("!TIMEOUT_DOWNLOAD must be positive integer");
         this.timeout_download = x;
         break;
@@ -3325,7 +3327,7 @@ MacroPlayer.prototype.play = function(macro, limits, callback) {
         var panel = context[this.win_id].panelWindow;
         if (panel && !panel.closed) {
             panel.showLines(this.source);
-            panel.setStatLine("Replaying "+self.currentMacro, "info");
+            panel.setStatLine("Replaying "+this.currentMacro, "info");
         }
         // start replaying
         this.globalTimer.start();
@@ -3923,7 +3925,7 @@ MacroPlayer.prototype.convertLimits = function(limits) {
 
     let convert = x => x == "unlimited" ? Number.MAX_SAFE_INTEGER : x
     let obj = {}
-    for (key in limits) {
+    for (var key in limits) {
         obj[key] = convert(limits[key])
     }
     obj.varsRe = limits.maxVariables == "unlimited" || limits.maxVariables >= 10 ?
@@ -4038,6 +4040,9 @@ MacroPlayer.prototype.getColumnData = function (col) {
 
     if (!line)
         line = 1;
+
+    if (line > this.dataSource.length)
+        throw new RuntimeError("Row number "+line+" exceeds available rows "+this.dataSource.length, 754);
 
     var max_columns = this.dataSourceColumns || this.dataSource[line-1].length;
     if (col > max_columns)
@@ -4176,7 +4181,12 @@ MacroPlayer.prototype.expandVariables = function(param, eval_id) {
         } else if ( t = var_name.match(/^!loop$/i) ) {
             return mplayer.currentLoop;
         } else if ( t = var_name.match(/^!clipboard$/i) ) {
-            return imns.Clipboard.getString() || "";
+            var clipValue = imns.Clipboard.getString();
+            if (clipValue && typeof clipValue.then === "function") {
+                clipValue.catch(() => {});
+                return "";
+            }
+            return clipValue || "";
         }  else if ( t = var_name.match(/^!timeout(?:_page)?$/i) ) {
             return mplayer.timeout.toString();
         } else if ( t = var_name.match(/^!timeout_(?:tag|step)$/i) ) {
@@ -4209,10 +4219,10 @@ MacroPlayer.prototype.expandVariables = function(param, eval_id) {
     if (match = eval_re.exec(param)) {
         var escape = function (s) {
             var x = s.toString();
-            return x.replace(/"/g, "\\\\\"").
-                replace(/'/g, "\\\\\'").
-                replace(/\n/g, "\\\\n").
-                replace(/\r/g, "\\\\r");
+            return x.replace(/"/g, "\\\"").
+                replace(/'/g, "\\'").
+                replace(/\n/g, "\\n").
+                replace(/\r/g, "\\r");
         };
         var js_str = match[1].replace(/\{\{(\S+?)\}\}/g, function(m, s) {
             return escape(handleVariable(m, s))
