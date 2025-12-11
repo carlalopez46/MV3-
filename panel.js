@@ -183,7 +183,23 @@ function playLoop() {
         file_path: filePath,
         macro_name: macroName,
         loop: max
-    });
+    })
+        .then((response) => {
+            if (!response || response.success === false) {
+                console.warn("[Panel] Loop playback failed to start", response);
+                const el = ensureStatusLineElement();
+                el.textContent = "Failed to start loop playback.";
+                el.style.color = "#b00020";
+                updatePanelState("idle");
+            }
+        })
+        .catch((error) => {
+            console.error("[Panel] Loop playback command failed", error);
+            const el = ensureStatusLineElement();
+            el.textContent = "Failed to start loop playback.";
+            el.style.color = "#b00020";
+            updatePanelState("idle");
+        });
 }
 
 function openSettings() {
