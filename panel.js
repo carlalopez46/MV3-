@@ -352,7 +352,9 @@ function handlePanelSetStatLine(data) {
 
 function handlePanelShowLines(data) {
     const source = (data && data.source) || "";
-    const macroName = data && data.currentMacro ? data.currentMacro : "";
+    const macroName = (data && data.currentMacro && typeof data.currentMacro === "string")
+        ? data.currentMacro
+        : "";
     if (!source && !macroName) {
         const container = document.getElementById("panel-macro-container");
         if (container) container.remove();
