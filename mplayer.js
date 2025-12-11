@@ -411,6 +411,10 @@ MacroPlayer.prototype.removeListeners = function() {
     // chrome.webRequest.onSendHeaders.removeListener(this._onSendHeaders);
 };
 
+// Hoisted regexes to avoid recreating them on every isInternalURL invocation.
+var INTERNAL_URL_PATTERN = /^(?:(?:chrome|edge|brave|opera|vivaldi)(?:-(?:extension|untrusted))?|devtools|chrome-search):\/\//i;
+var ABOUT_URL_PATTERN = /^about:/i;
+
 /**
  * Checks if a URL targets browser-internal or extension pages that may not
  * emit reliable load events, so page-load waits should be skipped.
@@ -426,10 +430,7 @@ MacroPlayer.prototype.isInternalURL = function(url) {
     // Internal schemes include browser chrome pages, extension schemes, their
     // untrusted variants, and Chromium devtools or chrome-search helpers that
     // likewise skip reliable load events.
-    var internalPattern = /^(?:(?:chrome|edge|brave|opera|vivaldi)(?:-(?:extension|untrusted))?|devtools|chrome-search):\/\//i;
-    var aboutPattern = /^about:/i;
-
-    return internalPattern.test(url) || aboutPattern.test(url);
+    return INTERNAL_URL_PATTERN.test(url) || ABOUT_URL_PATTERN.test(url);
 };
 
 
