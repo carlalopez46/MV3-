@@ -1,5 +1,9 @@
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
+
+MV2 background/offscreen bridge: preserves original responsibilities for
+panel ↔ engine routing while delegating MV3-restricted APIs to the service
+worker via explicit messaging.
 */
 
 //
@@ -150,18 +154,32 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (request.type === 'QUERY_STATE') {
         const winId = request.win_id;
         const ctx = (typeof context !== 'undefined' && context) ? context[winId] : null;
-        const state = ctx ? {
-            isRecording: !!(ctx.recorder && ctx.recorder.isRecording),
-            isPlaying: !!(ctx.mplayer && ctx.mplayer.running),
-            currentMacro: ctx.current_macro_name || null
-        } : {
-            isRecording: false,
-            isPlaying: false,
-            currentMacro: null
-        };
+
+        let state = 'idle';
+        const response = { state };
+
+        if (ctx) {
+            if (ctx.recorder && ctx.recorder.recording) {
+                state = 'recording';
+                const recordMode = Storage.getChar("record-mode") || 'conventional';
+                response.state = state;
+                response.args = {
+                    favorId: Storage.getBool("recording-prefer-id"),
+                    cssSelectors: Storage.getBool("recording-prefer-css-selectors"),
+                    recordMode: recordMode
+                };
+                response.frameNumber = ctx.recorder.currentFrameNumber;
+            } else if (ctx.mplayer && ctx.mplayer.playing) {
+                state = 'playing';
+                response.state = state;
+                response.currentMacro = ctx.mplayer.currentMacro || null;
+            } else {
+                response.state = 'idle';
+            }
+        }
 
         if (sendResponse) {
-            sendResponse({ ok: true, state });
+            sendResponse(response);
         }
         return true;
     }
