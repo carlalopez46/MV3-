@@ -58,7 +58,14 @@ function hasTabsAPI() {
 
 function mpQueryTabs(mplayer, queryInfo, callback) {
     if (hasTabsAPI()) {
-        chrome.tabs.query(queryInfo, tabs => callback(tabs || []));
+        chrome.tabs.query(queryInfo, tabs => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_QUERY error:", chrome.runtime.lastError);
+                callback([]);
+            } else {
+                callback(tabs || []);
+            }
+        });
     } else {
         chrome.runtime.sendMessage({
             command: "TAB_QUERY",
@@ -80,7 +87,14 @@ function mpQueryTabs(mplayer, queryInfo, callback) {
 
 function mpGetTab(mplayer, tabId, callback) {
     if (hasTabsAPI()) {
-        chrome.tabs.get(tabId, tab => callback(tab));
+        chrome.tabs.get(tabId, tab => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_GET error:", chrome.runtime.lastError);
+                callback(null);
+            } else {
+                callback(tab);
+            }
+        });
     } else {
         chrome.runtime.sendMessage({
             command: "TAB_GET",
@@ -102,7 +116,14 @@ function mpGetTab(mplayer, tabId, callback) {
 
 function mpUpdateTab(mplayer, tabId, updateProperties, callback) {
     if (hasTabsAPI()) {
-        chrome.tabs.update(tabId, updateProperties, tab => callback && callback(tab));
+        chrome.tabs.update(tabId, updateProperties, tab => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_UPDATE error:", chrome.runtime.lastError);
+                callback && callback(null);
+            } else {
+                callback && callback(tab);
+            }
+        });
     } else {
         chrome.runtime.sendMessage({
             command: "TAB_UPDATE",
@@ -110,10 +131,15 @@ function mpUpdateTab(mplayer, tabId, updateProperties, callback) {
             updateProperties,
             win_id: mplayer.win_id
         }, response => {
-            if (response && response.error) {
-                console.error("[MacroPlayer] TAB_UPDATE error:", response.error);
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_UPDATE error:", chrome.runtime.lastError);
+                callback && callback(null);
+            } else if (!response || response.error) {
+                console.error("[MacroPlayer] TAB_UPDATE error:", response && response.error);
+                callback && callback(null);
+            } else {
+                callback && callback(response.tab);
             }
-            callback && callback(response && response.tab);
         });
     }
 }
@@ -121,14 +147,21 @@ function mpUpdateTab(mplayer, tabId, updateProperties, callback) {
 function mpRemoveTabs(mplayer, tabIds, callback) {
     const ids = Array.isArray(tabIds) ? tabIds : [tabIds];
     if (hasTabsAPI()) {
-        chrome.tabs.remove(ids, () => callback && callback());
+        chrome.tabs.remove(ids, () => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_REMOVE error:", chrome.runtime.lastError);
+            }
+            callback && callback();
+        });
     } else {
         chrome.runtime.sendMessage({
             command: "TAB_REMOVE",
             tab_ids: ids,
             win_id: mplayer.win_id
         }, response => {
-            if (response && response.error) {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_REMOVE error:", chrome.runtime.lastError);
+            } else if (response && response.error) {
                 console.error("[MacroPlayer] TAB_REMOVE error:", response.error);
             }
             callback && callback();
@@ -138,17 +171,29 @@ function mpRemoveTabs(mplayer, tabIds, callback) {
 
 function mpCreateTab(mplayer, createProperties, callback) {
     if (hasTabsAPI()) {
-        chrome.tabs.create(createProperties, tab => callback && callback(tab));
+        chrome.tabs.create(createProperties, tab => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_CREATE error:", chrome.runtime.lastError);
+                callback && callback(null);
+            } else {
+                callback && callback(tab);
+            }
+        });
     } else {
         chrome.runtime.sendMessage({
             command: "TAB_CREATE",
             createProperties,
             win_id: mplayer.win_id
         }, response => {
-            if (response && response.error) {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_CREATE error:", chrome.runtime.lastError);
+                callback && callback(null);
+            } else if (response && response.error) {
                 console.error("[MacroPlayer] TAB_CREATE error:", response.error);
+                callback && callback(null);
+            } else {
+                callback && callback(response && response.tab);
             }
-            callback && callback(response && response.tab);
         });
     }
 }
@@ -156,7 +201,11 @@ function mpCreateTab(mplayer, createProperties, callback) {
 function mpGetActiveTab(mplayer, callback, errorCallback) {
     if (hasTabsAPI()) {
         chrome.tabs.query({active: true, windowId: mplayer.win_id}, tabs => {
-            callback(tabs && tabs[0]);
+            if (chrome.runtime.lastError) {
+                errorCallback && errorCallback(chrome.runtime.lastError);
+            } else {
+                callback(tabs && tabs[0]);
+            }
         });
     } else {
         chrome.runtime.sendMessage({
@@ -175,6 +224,7 @@ function mpGetActiveTab(mplayer, callback, errorCallback) {
 }
 
 function getPanelId(win_id) {
+    if (typeof context === "undefined" || context === null) return undefined;
     const ctx = context && context[win_id];
     return ctx && (ctx.panelId || ctx.panelWindowId);
 }
@@ -3084,7 +3134,8 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
         if (chrome.scripting && chrome.scripting.executeScript) {
             chrome.scripting.executeScript({
                 target: { tabId: this.tab_id },
-                func: (code) => { eval(code); },
+                // Intentional global-scope execution of trusted macro JavaScript.
+                func: (code) => { return (0, eval)(code); },
                 args: [scriptCode]
             }, () => { this.next("URL"); });
         } else {
@@ -3114,7 +3165,7 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
         if (hasTabsAPI()) {
             chrome.tabs.update(this.tab_id, {url: param}, onUpdated);
         } else {
-            mpUpdateTab(this, this.tab_id, { url: param }, () => onUpdated());
+            mpUpdateTab(this, this.tab_id, { url: param }, tab => onUpdated(tab));
         }
     }
 };
@@ -3137,9 +3188,9 @@ MacroPlayer.prototype.ActionTable["tab"] = function (cmd) {
         //close all tabs except current
         mpQueryTabs(
             this,
-            {windowId: this.win_id},
+            {windowId: this.win_id, active: false},
             tabs => {
-                let ids = tabs.filter(tab => !tab.active).map(tab => tab.id)
+                let ids = tabs.map(tab => tab.id)
                 this.startTabIndex = 0
                 mpRemoveTabs(
                     this, ids, () => this.next("TAB CLOSEALLOTHERS")
@@ -3151,9 +3202,9 @@ MacroPlayer.prototype.ActionTable["tab"] = function (cmd) {
                 let args = {
                     url: "about:blank",
                     windowId: this.win_id,
-                    index: tab ? tab.index+1 : undefined,
                     active: false
                 }
+                if (tab) args.index = tab.index + 1
                 mpCreateTab(this, args, t => this.next("TAB OPEN"))
             })
         })
