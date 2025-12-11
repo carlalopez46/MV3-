@@ -146,9 +146,14 @@ function record() {
 
 function stop() {
     console.log("[Panel] Stop button clicked");
-    sendCommand("stop").then(() => {
-        updatePanelState("idle");
-    });
+    sendCommand("stop")
+        .then(() => {
+            updatePanelState("idle");
+        })
+        .catch(() => {
+            // Even if stop fails, reset the UI so the user can retry
+            updatePanelState("idle");
+        });
 }
 
 function pause() {
@@ -233,7 +238,7 @@ function openInfoEdit() {
     }
     sendCommand("editMacro", {
         file_path: filePath,
-        macro_name: macro.name || macro.text
+        macro_name: macro.text || macro.name
     });
 }
 
