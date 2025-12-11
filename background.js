@@ -465,24 +465,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             return true;
         }
 
+        const CONTENT_SCRIPT_FILES = [
+            'utils.js',
+            'errorLogger.js',
+            'content_scripts/connector.js',
+            'content_scripts/recorder.js',
+            'content_scripts/player.js'
+        ];
+
+        const RESTRICTED_SCHEMES = ['chrome://', 'edge://', 'about:', 'file://', 'chrome-extension://'];
+
         const injectContentScripts = async () => {
             // Best-effort injection for cases where the content script was not injected (e.g., site access off)
             try {
                 const tab = await chrome.tabs.get(tab_id).catch(() => null);
-                if (!tab || !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('edge://') || tab.url.startsWith('about:')) {
+                if (!tab || !tab.url || RESTRICTED_SCHEMES.some((scheme) => tab.url.startsWith(scheme))) {
                     return false;
                 }
 
                 try {
                     await chrome.scripting.executeScript({
                         target: { tabId: tab_id, allFrames: true },
-                        files: [
-                            'utils.js',
-                            'errorLogger.js',
-                            'content_scripts/connector.js',
-                            'content_scripts/recorder.js',
-                            'content_scripts/player.js'
-                        ]
+                        files: CONTENT_SCRIPT_FILES
                     });
                     return true;
                 } catch (err) {
@@ -520,7 +524,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     sendMessageToTab();
                 } else {
                     const errorMsg = lastErrMsg || 'No receiver in tab';
-                    sendResponse({ error: errorMsg, injected: false });
+                    sendResponse({ error: `${errorMsg}; content script injection failed or not allowed`, injected: false });
                 }
             } else if (lastErrMsg) {
                 console.warn('[iMacros SW] SEND_TO_TAB error:', lastErrMsg);
