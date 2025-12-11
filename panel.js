@@ -116,13 +116,20 @@ function play() {
         return;
     }
 
+    const filePath = selectedMacro.id || selectedMacro.path || selectedMacro.name;
+    const macroName = selectedMacro.text || selectedMacro.name;
+    if (!filePath) {
+        alert("Unable to play: no macro path found.");
+        return;
+    }
+
     // UIを即時更新してストップボタンを有効化
     updatePanelState({ isPlaying: true, isRecording: false, currentMacro: selectedMacro });
 
     // パネル側ではファイルを読まず、パスだけを送る
     sendCommand("playMacro", {
-        file_path: selectedMacro.id, // ファイルパスまたはID
-        macro_name: selectedMacro.text
+        file_path: filePath, // ファイルパスまたはID
+        macro_name: macroName
     });
 }
 
@@ -139,8 +146,9 @@ function record() {
 
 function stop() {
     console.log("[Panel] Stop button clicked");
-    sendCommand("stop");
-    updatePanelState("idle");
+    sendCommand("stop").then(() => {
+        updatePanelState("idle");
+    });
 }
 
 function pause() {
@@ -156,9 +164,16 @@ function playLoop() {
     }
     const max = document.getElementById("max-loop").value;
 
+    const filePath = selectedMacro.id || selectedMacro.path || selectedMacro.name;
+    const macroName = selectedMacro.text || selectedMacro.name;
+    if (!filePath) {
+        alert("Unable to play: no macro path found.");
+        return;
+    }
+
     sendCommand("playMacro", {
-        file_path: selectedMacro.id,
-        macro_name: selectedMacro.text,
+        file_path: filePath,
+        macro_name: macroName,
         loop: max
     });
 }
@@ -182,7 +197,7 @@ function edit() {
 function openHelp() {
     // 旧版と同様にリダイレクトURLを利用
     try {
-        link(getRedirectURL('iMacros_for_Chrome'));
+        window.open(getRedirectURL('iMacros_for_Chrome'));
     } catch (e) {
         console.error('[Panel] Failed to open help link', e);
         const el = ensureStatusLineElement();
@@ -194,7 +209,7 @@ function openHelp() {
 
 function openErrorHelp() {
     try {
-        link(getRedirFromString("error"));
+        window.open(getRedirFromString("error"));
     } catch (e) {
         console.error('[Panel] Failed to open error help', e);
         const el = ensureStatusLineElement();
@@ -207,8 +222,14 @@ function openErrorHelp() {
 function openInfoEdit() {
     if (!lastInfoArgs || !lastInfoArgs.macro) return;
     const { macro } = lastInfoArgs;
+    const filePath = macro.id || macro.path || macro.name;
+    if (!filePath) {
+        console.error("[Panel] Cannot edit macro: no valid path found", macro);
+        alert("Unable to open macro for editing.");
+        return;
+    }
     sendCommand("editMacro", {
-        file_path: macro.id || macro.path || macro.name,
+        file_path: filePath,
         macro_name: macro.name || macro.text
     });
 }
@@ -489,7 +510,7 @@ window.addEventListener("message", (event) => {
     if (event.origin !== window.location.origin || !event.data || typeof event.data !== "object") {
         return;
     }
-    if (allowedSource && event.source !== allowedSource) {
+    if (!allowedSource || event.source !== allowedSource) {
         return;
     }
     if (event.data.type === "iMacrosSelectionChanged") {
