@@ -863,10 +863,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 handleActionClicked(request.tab);
                 break;
 
-            case 'playMacro':
-                playMacro(request.macro, request.win_id);
-                break;
-
             case 'notificationClicked':
                 var n_id = request.notificationId;
                 var w_id = parseInt(n_id);
