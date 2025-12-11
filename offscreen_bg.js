@@ -649,16 +649,28 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             } else if (method === "pause") {
                 console.log("[Offscreen] Pausing/Unpausing player...");
                 const mplayer = context[win_id].mplayer;
-                if (mplayer && typeof mplayer.pause === 'function') {
-                    if (mplayer.paused && typeof mplayer.unpause === 'function') {
+                if (!mplayer) {
+                    sendResponse({ success: false, error: 'mplayer not available for pause' });
+                    return;
+                }
+
+                const pausedState = mplayer.paused;
+                console.log('[Offscreen] Current paused state:', pausedState);
+
+                if (pausedState) {
+                    if (typeof mplayer.unpause === 'function') {
                         mplayer.unpause();
                         sendResponse({ success: true, resumed: true });
                     } else {
-                        mplayer.pause();
-                        sendResponse({ success: true, resumed: false });
+                        sendResponse({ success: false, error: 'unpause method not available' });
                     }
                 } else {
-                    sendResponse({ success: false, error: 'mplayer not available for pause' });
+                    if (typeof mplayer.pause === 'function') {
+                        mplayer.pause();
+                        sendResponse({ success: true, resumed: false });
+                    } else {
+                        sendResponse({ success: false, error: 'pause method not available' });
+                    }
                 }
             } else if (method === "mplayer.play") {
                 console.log("[Offscreen] Calling mplayer.play with:", args[0].name);
