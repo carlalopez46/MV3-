@@ -24,6 +24,15 @@ function normalizeMacro(macro) {
     return normalized;
 }
 
+function getMacroPathAndName(macro) {
+    const normalized = normalizeMacro(macro);
+    return {
+        macro: normalized,
+        filePath: normalized ? (normalized.path || normalized.id) : null,
+        macroName: normalized ? (normalized.name || normalized.text || "") : ""
+    };
+}
+
 // パネルのウィンドウIDを保持
 var currentWindowId = null;
 
@@ -127,15 +136,14 @@ function play() {
         return;
     }
 
-    const filePath = selectedMacro.path || selectedMacro.id || selectedMacro.name;
-    const macroName = selectedMacro.name || selectedMacro.text;
+    const { filePath, macroName, macro } = getMacroPathAndName(selectedMacro);
     if (!filePath) {
         alert("Unable to play: no macro path found.");
         return;
     }
 
     // UIを即時更新してストップボタンを有効化
-    updatePanelState({ isPlaying: true, isRecording: false, currentMacro: selectedMacro });
+    updatePanelState({ isPlaying: true, isRecording: false, currentMacro: macro });
 
     // パネル側ではファイルを読まず、パスだけを送る
     sendCommand("playMacro", {
@@ -185,15 +193,14 @@ function playLoop() {
         return;
     }
 
-    const filePath = selectedMacro.path || selectedMacro.id || selectedMacro.name;
-    const macroName = selectedMacro.name || selectedMacro.text;
+    const { filePath, macroName, macro } = getMacroPathAndName(selectedMacro);
     if (!filePath) {
         alert("Unable to play: no macro path found.");
         return;
     }
 
     // UIを即時更新してストップボタンを有効化
-    updatePanelState({ isPlaying: true, isRecording: false, currentMacro: selectedMacro });
+    updatePanelState({ isPlaying: true, isRecording: false, currentMacro: macro });
 
     sendCommand("playMacro", {
         file_path: filePath,
@@ -228,9 +235,15 @@ function openSettings() {
 
 function edit() {
     if (!selectedMacro) return;
+    const { filePath, macroName } = getMacroPathAndName(selectedMacro);
+    if (!filePath) {
+        console.error("[Panel] Cannot edit macro: no valid path found", selectedMacro);
+        alert("Unable to open macro for editing.");
+        return;
+    }
     sendCommand("editMacro", {
-        file_path: selectedMacro.path || selectedMacro.id,
-        macro_name: selectedMacro.name || selectedMacro.text
+        file_path: filePath,
+        macro_name: macroName
     });
 }
 
@@ -261,8 +274,7 @@ function openErrorHelp() {
 
 function openInfoEdit() {
     if (!lastInfoArgs || !lastInfoArgs.macro) return;
-    const macro = normalizeMacro(lastInfoArgs.macro);
-    const filePath = macro && (macro.path || macro.id || macro.name);
+    const { macro, filePath, macroName } = getMacroPathAndName(lastInfoArgs.macro);
     if (!filePath) {
         console.error("[Panel] Cannot edit macro: no valid path found", macro);
         alert("Unable to open macro for editing.");
@@ -270,7 +282,7 @@ function openInfoEdit() {
     }
     sendCommand("editMacro", {
         file_path: filePath,
-        macro_name: macro.name || macro.text
+        macro_name: macroName
     });
 }
 
