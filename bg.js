@@ -1085,28 +1085,29 @@ if (typeof chrome.tabs !== 'undefined' && chrome.tabs.get) {
     ['query-state', 'record-action', 'password-element-focused'].forEach(topic => {
         communicator.registerHandler(topic, function (data, tab_id, sendResponse) {
             chrome.tabs.get(tab_id, function (tab) {
-            if (chrome.runtime.lastError || !tab) {
-                if (sendResponse) sendResponse({ state: 'idle', error: 'tab not found' });
-                return;
-            }
+                if (chrome.runtime.lastError || !tab) {
+                    if (sendResponse) sendResponse({ state: 'idle', error: 'tab not found' });
+                    return;
+                }
 
-            const baseMessage = {
-                target: 'offscreen',
-                tab_id: tab_id,
-                win_id: tab.windowId
-            };
+                const baseMessage = {
+                    target: 'offscreen',
+                    tab_id: tab_id,
+                    win_id: tab.windowId
+                };
 
-            const offscreenMessage = (topic === 'query-state')
-                ? Object.assign(baseMessage, { type: 'QUERY_STATE' })
-                : Object.assign(baseMessage, { command: 'FORWARD_MESSAGE', topic: topic, data: data });
+                const offscreenMessage = (topic === 'query-state')
+                    ? Object.assign(baseMessage, { type: 'QUERY_STATE' })
+                    : Object.assign(baseMessage, { command: 'FORWARD_MESSAGE', topic: topic, data: data });
 
-            // Forward to Offscreen using reliable helper
-            sendMessageToOffscreen(offscreenMessage).then(response => {
-                if (sendResponse) sendResponse(response);
-            }).catch(e => {
-                // If offscreen doesn't respond or fails, we can't do much but log it
-                // console.warn("Forwarding message to offscreen failed:", e);
-                if (sendResponse) sendResponse({ success: false, error: e.message });
+                // Forward to Offscreen using reliable helper
+                sendMessageToOffscreen(offscreenMessage).then(response => {
+                    if (sendResponse) sendResponse(response);
+                }).catch(e => {
+                    // If offscreen doesn't respond or fails, we can't do much but log it
+                    // console.warn("Forwarding message to offscreen failed:", e);
+                    if (sendResponse) sendResponse({ success: false, error: e.message });
+                });
             });
         });
     });

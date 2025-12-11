@@ -479,7 +479,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             // Best-effort injection for cases where the content script was not injected (e.g., site access off)
             try {
                 const tab = await chrome.tabs.get(tab_id).catch(() => null);
-                if (!tab || !tab.url || RESTRICTED_SCHEMES.some((scheme) => tab.url.startsWith(scheme))) {
+                if (!tab || !tab.url) {
+                    return false;
+                }
+
+                if (RESTRICTED_SCHEMES.some((scheme) => tab.url.startsWith(scheme))) {
+                    console.warn('[iMacros SW] Skipping content script injection due to restricted scheme:', tab.url);
                     return false;
                 }
 
