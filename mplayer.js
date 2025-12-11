@@ -411,6 +411,28 @@ MacroPlayer.prototype.removeListeners = function() {
     // chrome.webRequest.onSendHeaders.removeListener(this._onSendHeaders);
 };
 
+// Hoisted regexes to avoid recreating them on every isInternalURL invocation.
+var INTERNAL_URL_PATTERN = /^(?:(?:chrome|edge|brave|opera|vivaldi)(?:-(?:extension|untrusted))?|devtools|chrome-search):\/\//i;
+var ABOUT_URL_PATTERN = /^about:/i;
+
+/**
+ * Checks if a URL targets browser-internal or extension pages that may not
+ * emit reliable load events, so page-load waits should be skipped.
+ *
+ * @param {string} url - URL to evaluate.
+ * @returns {boolean} True when the URL uses a browser-internal or extension
+ *   scheme (chrome, edge, brave, opera, vivaldi variants), Chrome devtools or
+ *   chrome-search helpers, or an about: URL.
+ */
+MacroPlayer.prototype.isInternalURL = function(url) {
+    if (!url || typeof url !== "string") return false;
+
+    // Internal schemes include browser chrome pages, extension schemes, their
+    // untrusted variants, and Chromium devtools or chrome-search helpers that
+    // likewise skip reliable load events.
+    return INTERNAL_URL_PATTERN.test(url) || ABOUT_URL_PATTERN.test(url);
+};
+
 
 // MacroPlayer.prototype.onBeforeNavigate = function(details) {
 //     if (details.tabId != this.tab_id)
@@ -602,6 +624,14 @@ MacroPlayer.prototype.onTabUpdated = function(tab_id, obj, tab) {
     if (tab.url == "about:blank") // ignore about:blank urls
         return;
     this.currentURL = tab.url;
+    if (this.isInternalURL(tab.url)) {
+        if (this.waitingForPageLoad) {
+            this.waitingForPageLoad = false;
+            this.stopTimer("loading");
+            this.next("onTabUpdated, internal URL");
+        }
+        return;
+    }
     if (obj.status == "loading" && !this.timers.has("loading")) {
         this.waitingForPageLoad = true;
         const mplayer = this;
@@ -3157,6 +3187,16 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
         const onUpdated = () => {
             if (/^javascript:/.test(param)) {
                 this.next("URL");
+            } else if (this.isInternalURL(param)) {
+                this.currentURL = param;
+                // Internal browser pages (e.g., chrome://extensions) do not expose
+                // reliable load events and routinely trigger timeouts. Skip the
+                // page-load wait to avoid false failures while still advancing
+                // the macro flow.
+                this.waitingForPageLoad = false;
+                this.stopTimer("loading");
+                console.warn(`[MacroPlayer] Skipping page load wait for internal URL: ${param}`);
+                this.next("URL (internal)");
             } else {
                 this.waitingForPageLoad = true;
 
