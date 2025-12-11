@@ -406,7 +406,10 @@ function handlePanelSetLoopValue(data) {
 function handlePanelHighlightLine(data) {
     if (!data || typeof data.line === "undefined") return;
     const el = ensureStatusLineElement();
-    const base = (el.textContent || "").replace(/ \(Line \d+\)$/, "");
+    const base = (el.textContent || "")
+        // remove any previously appended line suffixes before adding the latest
+        .replace(/ \(Line \d+\)/g, "")
+        .trim();
     const suffix = ` (Line ${data.line})`;
     if (base.indexOf(suffix) === -1) {
         el.textContent = `${base || ""}${base ? " " : ""}${suffix}`.trim();
