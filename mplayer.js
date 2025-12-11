@@ -423,7 +423,9 @@ MacroPlayer.prototype.isInternalURL = function(url) {
     if (!url || typeof url !== "string") return false;
 
     var internalPattern = /^(chrome|edge|brave|opera|vivaldi)(-extension)?:\/\//i;
-    return internalPattern.test(url) || url.toLowerCase().startsWith("about:");
+    var aboutPattern = /^about:/i;
+
+    return internalPattern.test(url) || aboutPattern.test(url);
 };
 
 
