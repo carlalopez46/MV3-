@@ -364,14 +364,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         const win_id = request.win_id;
         console.log('[Offscreen] Received startRecording for window:', win_id);
 
-        const start = () => {
-            if (context[win_id] && context[win_id].recorder) {
-                context[win_id].recorder.start();
-                sendResponse({ success: true });
-            } else {
-                sendResponse({ success: false, error: "Recorder not found" });
-            }
-        };
+        const start = () => executeContextMethod(win_id, 'recorder.start', sendResponse, []);
 
         if (!context[win_id]) {
             context.init(win_id).then(start).catch(err => {
@@ -856,17 +849,29 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
             case 'pause':
                 var win_id = request.win_id;
-                if (context[win_id] && context[win_id].mplayer) {
-                    context[win_id].mplayer.pause();
+                if (!context[win_id]) {
+                    context.init(win_id).then(() => {
+                        executeContextMethod(win_id, 'pause', sendResponse, []);
+                    }).catch(err => {
+                        sendResponse({ success: false, error: err.message || String(err) });
+                    });
+                    return true;
                 }
-                break;
+                executeContextMethod(win_id, 'pause', sendResponse, []);
+                return true;
 
             case 'unpause':
                 var win_id = request.win_id;
-                if (context[win_id] && context[win_id].mplayer) {
-                    context[win_id].mplayer.unpause();
+                if (!context[win_id]) {
+                    context.init(win_id).then(() => {
+                        executeContextMethod(win_id, 'pause', sendResponse, []);
+                    }).catch(err => {
+                        sendResponse({ success: false, error: err.message || String(err) });
+                    });
+                    return true;
                 }
-                break;
+                executeContextMethod(win_id, 'pause', sendResponse, []);
+                return true;
 
             case 'notificationClicked':
                 var n_id = request.notificationId;
