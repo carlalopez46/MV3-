@@ -299,6 +299,120 @@ function updatePanelState(state) {
     }
 }
 
+function toggleInfoVisibility(showInfo) {
+    const logo = document.getElementById("logo-and-links");
+    const infoDiv = document.getElementById("info-div");
+    if (logo) logo.hidden = !!showInfo;
+    if (infoDiv) infoDiv.hidden = !showInfo;
+}
+
+function handlePanelShowInfo(args) {
+    if (!args) return;
+    const infoDiv = document.getElementById("info-div");
+    const infoArea = document.getElementById("info-area");
+    if (!infoDiv || !infoArea) return;
+
+    const lines = [];
+    if (args.message) lines.push(args.message);
+    if (typeof args.errorCode !== "undefined") lines.push("Error code: " + args.errorCode);
+    if (args.macro && args.macro.name) lines.push("Macro: " + args.macro.name);
+
+    infoArea.value = lines.join("\n");
+    infoArea.scrollTop = infoArea.scrollHeight;
+    toggleInfoVisibility(true);
+}
+
+function ensureStatusLineElement() {
+    let el = document.getElementById("panel-status-container");
+    if (!el) {
+        el = document.createElement("div");
+        el.id = "panel-status-container";
+        el.style.fontSize = "11px";
+        el.style.padding = "2px 4px";
+        el.style.borderBottom = "1px solid #ddd";
+        el.style.whiteSpace = "pre-wrap";
+        const container = document.getElementById("panel-content") || document.body;
+        container.insertBefore(el, container.firstChild);
+    }
+    return el;
+}
+
+function handlePanelSetStatLine(data) {
+    if (!data) return;
+    const el = ensureStatusLineElement();
+    el.textContent = data.text || "";
+    if (data.level === "error") {
+        el.style.color = "#b00020";
+    } else if (data.level === "warning") {
+        el.style.color = "#ff6a00";
+    } else {
+        el.style.color = "#222";
+    }
+}
+
+function handlePanelShowLines(data) {
+    const source = (data && data.source) || "";
+    const macroName = data && data.currentMacro ? data.currentMacro : "";
+    if (!source && !macroName) {
+        const container = document.getElementById("panel-macro-container");
+        if (container) container.remove();
+        return;
+    }
+
+    let container = document.getElementById("panel-macro-container");
+    if (!container) {
+        container = document.createElement("div");
+        container.id = "panel-macro-container";
+        container.style.flex = "1";
+        container.style.overflow = "auto";
+        container.style.fontFamily = "monospace";
+        container.style.fontSize = "11px";
+        container.style.borderTop = "1px solid #ddd";
+        const parent = document.getElementById("panel-content") || document.body;
+        parent.appendChild(container);
+    }
+
+    let titleEl = document.getElementById("panel-macro-title");
+    if (!titleEl) {
+        titleEl = document.createElement("div");
+        titleEl.id = "panel-macro-title";
+        titleEl.style.fontWeight = "bold";
+        titleEl.style.padding = "2px 4px";
+        container.appendChild(titleEl);
+    }
+    titleEl.textContent = macroName ? `Macro: ${macroName}` : "Macro source";
+
+    let pre = document.getElementById("panel-macro-lines");
+    if (!pre) {
+        pre = document.createElement("pre");
+        pre.id = "panel-macro-lines";
+        pre.style.margin = "0";
+        pre.style.padding = "4px";
+        pre.style.whiteSpace = "pre";
+        pre.style.tabSize = "4";
+        container.appendChild(pre);
+    }
+    pre.textContent = source;
+}
+
+function handlePanelSetLoopValue(data) {
+    if (!data) return;
+    const input = document.getElementById("max-loop");
+    if (input && typeof data.value !== "undefined") {
+        input.value = data.value;
+    }
+}
+
+function handlePanelHighlightLine(data) {
+    if (!data || typeof data.line === "undefined") return;
+    const el = ensureStatusLineElement();
+    const base = el.textContent || "";
+    const suffix = ` (Line ${data.line})`;
+    if (base.indexOf(suffix) === -1) {
+        el.textContent = `${base || ""}${base ? " " : ""}${suffix}`.trim();
+    }
+}
+
 // --- 初期化とイベントリスナー ---
 
 window.addEventListener("message", (event) => {
@@ -323,6 +437,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: true });
         return true;
     }
+
+    if (message.type === "PANEL_SHOW_INFO") {
+        handlePanelShowInfo(message.data && message.data.args);
+        sendResponse && sendResponse({ success: true });
+        return true;
+    }
+
+    if (message.type === "PANEL_SHOW_LINES") {
+        handlePanelShowLines(message.data);
+        sendResponse && sendResponse({ success: true });
+        return true;
+    }
+
+    if (message.type === "PANEL_SET_STAT_LINE") {
+        handlePanelSetStatLine(message.data);
+        sendResponse && sendResponse({ success: true });
+        return true;
+    }
+
+    if (message.type === "PANEL_SET_LOOP_VALUE") {
+        handlePanelSetLoopValue(message.data);
+        sendResponse && sendResponse({ success: true });
+        return true;
+    }
+
+    if (message.type === "PANEL_HIGHLIGHT_LINE") {
+        handlePanelHighlightLine(message.data);
+        sendResponse && sendResponse({ success: true });
+        return true;
+    }
 });
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -345,6 +489,11 @@ document.addEventListener("DOMContentLoaded", () => {
     addListener("loop-button", playLoop);
     addListener("settings-button", openSettings);
     addListener("edit-button", edit);
+
+    const infoClose = document.getElementById("info-close-button");
+    if (infoClose) {
+        infoClose.addEventListener("click", () => toggleInfoVisibility(false));
+    }
 
     requestStateUpdate();
 
