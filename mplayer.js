@@ -226,7 +226,7 @@ function mpGetActiveTab(mplayer, callback, errorCallback) {
 
 function getPanelId(win_id) {
     if (typeof context === "undefined" || context === null) return undefined;
-    const ctx = context && context[win_id];
+    const ctx = context[win_id];
     return ctx && (ctx.panelId || ctx.panelWindowId);
 }
 
