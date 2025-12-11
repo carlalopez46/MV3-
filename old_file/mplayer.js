@@ -4133,8 +4133,8 @@ MacroPlayer.prototype.expandVariables = function(param, eval_id) {
 
     // check for "eval" command
     var eval_re = new RegExp("^eval\\s*\\((.*)\\)$", "i");
-    var match = null;
-    if (match = eval_re.exec(param)) {
+    var match = eval_re.exec(param);
+    if (match) {
         var escape = function (s) {
             var x = s.toString();
             return x.replace(/"/g, "\\\\\"").
