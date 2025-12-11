@@ -10,6 +10,9 @@ var panelState = {
     currentMacro: null
 };
 
+// 情報パネルに表示した内容を保持（ヘルプ/編集ボタン用）
+let lastInfoArgs = null;
+
 // パネルのウィンドウIDを保持
 var currentWindowId = null;
 
@@ -113,6 +116,9 @@ function play() {
         return;
     }
 
+    // UIを即時更新してストップボタンを有効化
+    updatePanelState({ isPlaying: true, isRecording: false, currentMacro: selectedMacro });
+
     // パネル側ではファイルを読まず、パスだけを送る
     sendCommand("playMacro", {
         file_path: selectedMacro.id, // ファイルパスまたはID
@@ -122,12 +128,15 @@ function play() {
 
 function record() {
     console.log("[Panel] Record button clicked");
+    // UIを即時更新してストップボタンを有効化
+    updatePanelState({ isRecording: true, isPlaying: false, currentMacro: selectedMacro });
     sendCommand("startRecording");
 }
 
 function stop() {
     console.log("[Panel] Stop button clicked");
     sendCommand("stop");
+    updatePanelState("idle");
 }
 
 function pause() {
@@ -163,6 +172,32 @@ function edit() {
     sendCommand("editMacro", {
         file_path: selectedMacro.id,
         macro_name: selectedMacro.text
+    });
+}
+
+function openHelp() {
+    // 旧版と同様にリダイレクトURLを利用
+    try {
+        link(getRedirectURL('iMacros_for_Chrome'));
+    } catch (e) {
+        console.error('[Panel] Failed to open help link', e);
+    }
+}
+
+function openErrorHelp() {
+    try {
+        link(getRedirFromString("error"));
+    } catch (e) {
+        console.error('[Panel] Failed to open error help', e);
+    }
+}
+
+function openInfoEdit() {
+    if (!lastInfoArgs || !lastInfoArgs.macro) return;
+    const { macro } = lastInfoArgs;
+    sendCommand("editMacro", {
+        file_path: macro.id || macro.path || macro.name,
+        macro_name: macro.name || macro.text
     });
 }
 
@@ -312,6 +347,8 @@ function handlePanelShowInfo(args) {
     const infoArea = document.getElementById("info-area");
     if (!infoDiv || !infoArea) return;
 
+    lastInfoArgs = args;
+
     const lines = [];
     if (args.message) lines.push(args.message);
     if (typeof args.errorCode !== "undefined") lines.push("Error code: " + args.errorCode);
@@ -319,6 +356,14 @@ function handlePanelShowInfo(args) {
 
     infoArea.value = lines.join("\n");
     infoArea.scrollTop = infoArea.scrollHeight;
+
+    // エラー詳細時のみ編集/ヘルプボタンを表示
+    const infoEditBtn = document.getElementById("info-edit-button");
+    const infoHelpBtn = document.getElementById("info-help-button");
+    const showActionButtons = !!args.macro;
+    if (infoEditBtn) infoEditBtn.hidden = !showActionButtons;
+    if (infoHelpBtn) infoHelpBtn.hidden = !showActionButtons;
+
     toggleInfoVisibility(true);
 }
 
@@ -425,6 +470,9 @@ window.addEventListener("message", (event) => {
     if (event.data.type === "iMacrosSelectionChanged") {
         onSelectionChanged(event.data.node);
     }
+    if (event.data.type === "playMacro") {
+        play();
+    }
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -494,8 +542,13 @@ document.addEventListener("DOMContentLoaded", () => {
     addListener("loop-button", playLoop);
     addListener("settings-button", openSettings);
     addListener("edit-button", edit);
-
-    addListener("info-close-button", () => toggleInfoVisibility(false));
+    addListener("help-button", openHelp);
+    addListener("info-help-button", openErrorHelp);
+    addListener("info-edit-button", openInfoEdit);
+    addListener("info-close-button", () => {
+        lastInfoArgs = null;
+        toggleInfoVisibility(false);
+    });
 
     requestStateUpdate();
 
