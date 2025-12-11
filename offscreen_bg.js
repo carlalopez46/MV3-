@@ -607,17 +607,20 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
 
         function executeContextMethod(win_id, method, sendResponse, args) {
-            if (!context[win_id]) {
-                sendResponse({ success: false, error: `Context not found for window ${win_id}` });
-                return;
-            }
-
             if (method === "recorder.start") {
                 console.log("[Offscreen] Starting recorder...");
-                const rec = context[win_id].recorder || new Recorder(win_id);
-                context[win_id].recorder = rec;
-                rec.start();
-                sendResponse({ success: true });
+                const rec = context[win_id].recorder;
+                if (!rec) {
+                    sendResponse({ success: false, error: `Recorder not initialized for window ${win_id}` });
+                    return;
+                }
+                try {
+                    rec.start();
+                    sendResponse({ success: true });
+                } catch (e) {
+                    console.error('[Offscreen] Error starting recorder:', e);
+                    sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+                }
             } else if (method === "stop") {
                 console.log("[Offscreen] Stopping...");
                 let stoppedPlayer = false;
@@ -659,15 +662,25 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
                 if (pausedState) {
                     if (typeof mplayer.unpause === 'function') {
-                        mplayer.unpause();
-                        sendResponse({ success: true, resumed: true });
+                        try {
+                            mplayer.unpause();
+                            sendResponse({ success: true, resumed: true });
+                        } catch (e) {
+                            console.error('[Offscreen] Error unpausing mplayer:', e);
+                            sendResponse({ success: false, error: 'Error unpausing mplayer', details: String(e) });
+                        }
                     } else {
                         sendResponse({ success: false, error: 'unpause method not available' });
                     }
                 } else {
                     if (typeof mplayer.pause === 'function') {
-                        mplayer.pause();
-                        sendResponse({ success: true, resumed: false });
+                        try {
+                            mplayer.pause();
+                            sendResponse({ success: true, resumed: false });
+                        } catch (e) {
+                            console.error('[Offscreen] Error pausing mplayer:', e);
+                            sendResponse({ success: false, error: 'Error pausing mplayer', details: String(e) });
+                        }
                     } else {
                         sendResponse({ success: false, error: 'pause method not available' });
                     }
