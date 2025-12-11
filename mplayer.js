@@ -76,7 +76,7 @@ function mpQueryTabs(mplayer, queryInfo, callback) {
                 console.error("[MacroPlayer] TAB_QUERY error:", chrome.runtime.lastError);
                 callback([]);
             } else if (!response || response.error) {
-                console.warn("[MacroPlayer] TAB_QUERY failed:", response && response.error);
+                console.error("[MacroPlayer] TAB_QUERY failed:", response && response.error);
                 callback([]);
             } else {
                 callback(response.tabs || []);
@@ -105,7 +105,7 @@ function mpGetTab(mplayer, tabId, callback) {
                 console.error("[MacroPlayer] TAB_GET error:", chrome.runtime.lastError);
                 callback(null);
             } else if (!response || response.error) {
-                console.warn("[MacroPlayer] TAB_GET failed:", response && response.error);
+                console.error("[MacroPlayer] TAB_GET failed:", response && response.error);
                 callback(null);
             } else {
                 callback(response.tab || null);
@@ -192,7 +192,7 @@ function mpCreateTab(mplayer, createProperties, callback) {
                 console.error("[MacroPlayer] TAB_CREATE error:", response.error);
                 callback && callback(null);
             } else {
-                callback && callback(response && response.tab);
+                callback && callback(response ? response.tab : null);
             }
         });
     }
@@ -204,7 +204,8 @@ function mpGetActiveTab(mplayer, callback, errorCallback) {
             if (chrome.runtime.lastError) {
                 errorCallback && errorCallback(chrome.runtime.lastError);
             } else {
-                callback(tabs && tabs[0]);
+                const tab = tabs && tabs[0];
+                callback(tab || null);
             }
         });
     } else {
@@ -217,7 +218,7 @@ function mpGetActiveTab(mplayer, callback, errorCallback) {
             } else if (!response || response.error) {
                 errorCallback && errorCallback(response && response.error);
             } else {
-                callback(response.tab);
+                callback(response.tab || null);
             }
         });
     }

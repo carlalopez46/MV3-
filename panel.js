@@ -490,10 +490,7 @@ document.addEventListener("DOMContentLoaded", () => {
     addListener("settings-button", openSettings);
     addListener("edit-button", edit);
 
-    const infoClose = document.getElementById("info-close-button");
-    if (infoClose) {
-        infoClose.addEventListener("click", () => toggleInfoVisibility(false));
-    }
+    addListener("info-close-button", () => toggleInfoVisibility(false));
 
     requestStateUpdate();
 
