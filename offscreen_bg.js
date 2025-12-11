@@ -1691,19 +1691,6 @@ globalScope.edit = function (macro, overwrite, line) {
 })();
 
 
-function addTab(url, win_id) {
-    var args = { url: url };
-    if (win_id)
-        args.windowId = parseInt(win_id);
-
-    chrome.tabs.create(args, function (tab) {
-        if (chrome.runtime.lastError) {
-            console.error("Error creating tab:", chrome.runtime.lastError);
-        }
-    });
-}
-
-
 function showNotification(win_id, args) {
     var opt = {
         type: "basic",
