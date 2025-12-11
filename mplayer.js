@@ -417,12 +417,16 @@ MacroPlayer.prototype.removeListeners = function() {
  *
  * @param {string} url - URL to evaluate.
  * @returns {boolean} True when the URL uses a browser-internal or extension
- *   scheme (chrome, edge, brave, opera, vivaldi variants) or an about: URL.
+ *   scheme (chrome, edge, brave, opera, vivaldi variants), Chrome devtools or
+ *   chrome-search helpers, or an about: URL.
  */
 MacroPlayer.prototype.isInternalURL = function(url) {
     if (!url || typeof url !== "string") return false;
 
-    var internalPattern = /^(chrome|edge|brave|opera|vivaldi)(-extension)?:\/\//i;
+    // Internal schemes include browser chrome pages, extension schemes, and
+    // Chromium devtools or chrome-search helpers that likewise skip reliable
+    // load events.
+    var internalPattern = /^(?:(?:chrome|edge|brave|opera|vivaldi)(?:-extension)?|devtools|chrome-search):\/\//i;
     var aboutPattern = /^about:/i;
 
     return internalPattern.test(url) || aboutPattern.test(url);
