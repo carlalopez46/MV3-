@@ -111,7 +111,7 @@ function requestStateUpdate() {
 
 function play() {
     console.log("[Panel] Play button clicked");
-    if (!selectedMacro) {
+    if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
         return;
     }
@@ -128,6 +128,10 @@ function play() {
 
 function record() {
     console.log("[Panel] Record button clicked");
+    if (!selectedMacro || selectedMacro.type !== "macro") {
+        alert("Please select a macro first.");
+        return;
+    }
     // UIを即時更新してストップボタンを有効化
     updatePanelState({ isRecording: true, isPlaying: false, currentMacro: selectedMacro });
     sendCommand("startRecording");
@@ -146,7 +150,7 @@ function pause() {
 
 function playLoop() {
     console.log("[Panel] Loop button clicked");
-    if (!selectedMacro) {
+    if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
         return;
     }
@@ -181,6 +185,10 @@ function openHelp() {
         link(getRedirectURL('iMacros_for_Chrome'));
     } catch (e) {
         console.error('[Panel] Failed to open help link', e);
+        const el = ensureStatusLineElement();
+        el.textContent = "Unable to open help page.";
+        el.style.color = "#b00020";
+        alert("Unable to open help page.");
     }
 }
 
@@ -189,6 +197,10 @@ function openErrorHelp() {
         link(getRedirFromString("error"));
     } catch (e) {
         console.error('[Panel] Failed to open error help', e);
+        const el = ensureStatusLineElement();
+        el.textContent = "Unable to open error help page.";
+        el.style.color = "#b00020";
+        alert("Unable to open error help page.");
     }
 }
 
@@ -367,6 +379,11 @@ function handlePanelShowInfo(args) {
     toggleInfoVisibility(true);
 }
 
+function closeInfoPanel() {
+    lastInfoArgs = null;
+    toggleInfoVisibility(false);
+}
+
 function ensureStatusLineElement() {
     let el = document.getElementById("panel-status-container");
     if (!el) {
@@ -467,6 +484,14 @@ function handlePanelHighlightLine(data) {
 
 window.addEventListener("message", (event) => {
     // fileView.js (iframe) からの通知を受け取る
+    const treeFrame = document.getElementById("tree-iframe");
+    const allowedSource = treeFrame ? treeFrame.contentWindow : null;
+    if (event.origin !== window.location.origin || !event.data || typeof event.data !== "object") {
+        return;
+    }
+    if (allowedSource && event.source !== allowedSource) {
+        return;
+    }
     if (event.data.type === "iMacrosSelectionChanged") {
         onSelectionChanged(event.data.node);
     }
@@ -545,10 +570,7 @@ document.addEventListener("DOMContentLoaded", () => {
     addListener("help-button", openHelp);
     addListener("info-help-button", openErrorHelp);
     addListener("info-edit-button", openInfoEdit);
-    addListener("info-close-button", () => {
-        lastInfoArgs = null;
-        toggleInfoVisibility(false);
-    });
+    addListener("info-close-button", closeInfoPanel);
 
     requestStateUpdate();
 
