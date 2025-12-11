@@ -716,11 +716,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 win_id: win_id
             }).then(result => {
                 console.log("[iMacros SW] startRecording result:", result);
+                sendResponse({ success: true });
             }).catch(err => {
                 console.error("[iMacros SW] startRecording error:", err);
+                sendResponse({ success: false, error: err && err.message });
             });
-
-            sendResponse({ success: true });
         });
 
         return true;
@@ -745,11 +745,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 win_id: win_id
             }).then(result => {
                 console.log("[iMacros SW] stop result:", result);
+                sendResponse({ success: true });
             }).catch(err => {
                 console.error("[iMacros SW] stop error:", err);
+                sendResponse({ success: false, error: err && err.message });
             });
+        });
 
-            sendResponse({ success: true });
+        return true;
+    }
+
+    // --- 一時停止 (pause) ---
+    if (msg.command === "pause") {
+        console.log("[iMacros SW] Route: pause -> Offscreen");
+
+        resolveTargetWindowId(msg.win_id, sender).then(win_id => {
+            if (!win_id) {
+                console.error("[iMacros SW] Cannot determine win_id for pause");
+                sendResponse({ error: "Cannot determine window ID" });
+                return;
+            }
+
+            console.log("[iMacros SW] Resolved win_id for pause:", win_id);
+
+            sendMessageToOffscreen({
+                command: "CALL_CONTEXT_METHOD",
+                method: "pause",
+                win_id: win_id
+            }).then(result => {
+                console.log("[iMacros SW] pause result:", result);
+                sendResponse({ success: true });
+            }).catch(err => {
+                console.error("[iMacros SW] pause error:", err);
+                sendResponse({ success: false, error: err && err.message });
+            });
         });
 
         return true;
@@ -874,11 +903,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 method: "playFile",
                 win_id: win_id,
                 args: [msg.file_path, msg.loop || 1]
+            }).then(result => {
+                console.log("[iMacros SW] playFile result:", result);
+                sendResponse({ success: true });
             }).catch(err => {
                 console.error("[iMacros SW] playFile error:", err);
+                sendResponse({ success: false, error: err && err.message });
             });
-
-            sendResponse({ success: true });
         });
 
         return true;

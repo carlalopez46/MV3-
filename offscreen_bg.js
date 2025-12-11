@@ -607,9 +607,16 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
 
         function executeContextMethod(win_id, method, sendResponse, args) {
+            if (!context[win_id]) {
+                sendResponse({ success: false, error: `Context not found for window ${win_id}` });
+                return;
+            }
+
             if (method === "recorder.start") {
                 console.log("[Offscreen] Starting recorder...");
-                context[win_id].recorder.start();
+                const rec = context[win_id].recorder || new Recorder(win_id);
+                context[win_id].recorder = rec;
+                rec.start();
                 sendResponse({ success: true });
             } else if (method === "stop") {
                 console.log("[Offscreen] Stopping...");
@@ -639,6 +646,20 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 }
 
                 sendResponse({ success: true, stoppedPlayer, stoppedRecorder });
+            } else if (method === "pause") {
+                console.log("[Offscreen] Pausing/Unpausing player...");
+                const mplayer = context[win_id].mplayer;
+                if (mplayer && typeof mplayer.pause === 'function') {
+                    if (mplayer.paused && typeof mplayer.unpause === 'function') {
+                        mplayer.unpause();
+                        sendResponse({ success: true, resumed: true });
+                    } else {
+                        mplayer.pause();
+                        sendResponse({ success: true, resumed: false });
+                    }
+                } else {
+                    sendResponse({ success: false, error: 'mplayer not available for pause' });
+                }
             } else if (method === "mplayer.play") {
                 console.log("[Offscreen] Calling mplayer.play with:", args[0].name);
                 const mplayer = context[win_id].mplayer;
