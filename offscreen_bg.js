@@ -867,24 +867,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 playMacro(request.macro, request.win_id);
                 break;
 
-            case 'record':
-                var win_id = request.win_id;
-                if (context[win_id]) {
-                    context[win_id].recorder.start();
-                }
-                break;
-
-            case 'stop':
-                var win_id = request.win_id;
-                if (context[win_id]) {
-                    if (context[win_id].mplayer.playing) {
-                        context[win_id].mplayer.stop();
-                    } else if (context[win_id].recorder.recording) {
-                        context[win_id].recorder.stop();
-                    }
-                }
-                break;
-
             case 'notificationClicked':
                 var n_id = request.notificationId;
                 var w_id = parseInt(n_id);
