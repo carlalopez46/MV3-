@@ -449,19 +449,19 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             // Fallback: Check ALL contexts for any active player/recorder and stop them
             // This handles cases where window IDs might be mismatched
             console.warn('[Offscreen] Stop target window not found. Scanning all contexts...');
-            let anyStopped = false;
+            const stoppedDetails = [];
             for (let id in context) {
                 if (context.hasOwnProperty(id) && context[id]) {
                     const { stoppedPlayer, stoppedRecorder } = stopContext(context[id], id);
                     if (stoppedPlayer || stoppedRecorder) {
-                        anyStopped = true;
+                        stoppedDetails.push({ id, stoppedPlayer, stoppedRecorder });
                     }
                 }
             }
-            if (anyStopped) {
-                sendResponse({ success: true, message: "Stopped active processes in other windows" });
+            if (stoppedDetails.length > 0) {
+                sendResponse({ success: true, message: "Stopped active processes in other windows", details: stoppedDetails });
             } else {
-                sendResponse({ success: true, message: "No active processes found to stop" });
+                sendResponse({ success: false, message: "No active processes found to stop" });
             }
         }
         return true;
@@ -916,7 +916,7 @@ function handleActionClicked(tab) {
                                 macro.file_id = node.path;
                                 console.log('[iMacros MV3] Saving #Current.iim to Files tab at:', node.path);
 
-                                afio.writeTextFile(node, recorded_macro).then(function () {
+                                afio.writeTextFile(node).then(function () {
                                     console.log('[iMacros MV3] #Current.iim saved successfully');
                                     edit(macro, true);
                                 }).catch(function (err) {
