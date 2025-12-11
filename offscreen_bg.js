@@ -393,7 +393,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 // we need to access it. Ah, executeContextMethod is defined below in the same scope.
                 executeContextMethod(win_id, 'playFile', sendResponse, [filePath, loop]);
             }).catch(err => {
-                sendResponse({ success: false, error: err.message });
+                sendResponse({ success: false, error: err.message || String(err) });
             });
         } else {
             executeContextMethod(win_id, 'playFile', sendResponse, [filePath, loop]);
@@ -471,6 +471,21 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             });
         } else {
             runPause();
+        }
+        return true;
+    }
+
+    if (request.command === 'unpause') {
+        const win_id = request.win_id;
+        console.log('[Offscreen] Received unpause command');
+        const runUnpause = () => executeContextMethod(win_id, 'unpause', sendResponse, []);
+
+        if (!context[win_id]) {
+            context.init(win_id).then(runUnpause).catch(err => {
+                sendResponse({ success: false, error: err.message || String(err) });
+            });
+        } else {
+            runUnpause();
         }
         return true;
     }
@@ -869,34 +884,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     }
                 }
                 break;
-
-            case 'pause': {
-                const win_id = request.win_id;
-                if (!context[win_id]) {
-                    context.init(win_id).then(() => {
-                        executeContextMethod(win_id, 'pause', sendResponse, []);
-                    }).catch(err => {
-                        sendResponse({ success: false, error: err.message || String(err) });
-                    });
-                    return true;
-                }
-                executeContextMethod(win_id, 'pause', sendResponse, []);
-                return true;
-            }
-
-            case 'unpause': {
-                const win_id = request.win_id;
-                if (!context[win_id]) {
-                    context.init(win_id).then(() => {
-                        executeContextMethod(win_id, 'unpause', sendResponse, []);
-                    }).catch(err => {
-                        sendResponse({ success: false, error: err.message || String(err) });
-                    });
-                    return true;
-                }
-                executeContextMethod(win_id, 'unpause', sendResponse, []);
-                return true;
-            }
 
             case 'notificationClicked':
                 var n_id = request.notificationId;

@@ -753,10 +753,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 win_id: win_id
             }).then(result => {
                 console.log("[iMacros SW] stop result:", result);
-                sendResponse({ success: true });
+                if (result === null) {
+                    sendResponse({ success: false, error: "Offscreen unavailable" });
+                    return;
+                }
+                if (result && typeof result.success !== 'undefined') {
+                    sendResponse(result);
+                } else {
+                    sendResponse({ success: true });
+                }
             }).catch(err => {
                 console.error("[iMacros SW] stop error:", err);
-                sendResponse({ success: false, error: err && err.message });
+                sendResponse({ success: false, error: (err && err.message) || String(err) });
             });
         });
 
@@ -782,10 +790,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 win_id: win_id
             }).then(result => {
                 console.log("[iMacros SW] pause result:", result);
-                sendResponse({ success: true });
+                if (result === null) {
+                    sendResponse({ success: false, error: "Offscreen unavailable" });
+                    return;
+                }
+                if (result && typeof result.success !== 'undefined') {
+                    sendResponse(result);
+                } else {
+                    sendResponse({ success: true });
+                }
             }).catch(err => {
                 console.error("[iMacros SW] pause error:", err);
-                sendResponse({ success: false, error: err && err.message });
+                sendResponse({ success: false, error: (err && err.message) || String(err) });
             });
         });
 
@@ -913,10 +929,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 args: [msg.file_path, msg.loop || 1]
             }).then(result => {
                 console.log("[iMacros SW] playFile result:", result);
-                sendResponse({ success: true });
+                if (result === null) {
+                    sendResponse({ success: false, error: "Offscreen unavailable" });
+                    return;
+                }
+                if (result && typeof result.success !== 'undefined') {
+                    sendResponse(result);
+                } else {
+                    sendResponse({ success: true });
+                }
             }).catch(err => {
                 console.error("[iMacros SW] playFile error:", err);
-                sendResponse({ success: false, error: err && err.message });
+                sendResponse({ success: false, error: (err && err.message) || String(err) });
             });
         });
 
