@@ -465,41 +465,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             return true;
         }
 
-        const injectContentScripts = () => new Promise((resolve) => {
+        const injectContentScripts = async () => {
             // Best-effort injection for cases where the content script was not injected (e.g., site access off)
             try {
-                chrome.tabs.get(tab_id, (tab) => {
-                    if (chrome.runtime.lastError || !tab || !tab.url || tab.url.startsWith('chrome://')) {
-                        resolve(false);
-                        return;
-                    }
+                const tab = await chrome.tabs.get(tab_id).catch(() => null);
+                if (!tab || !tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('edge://') || tab.url.startsWith('about:')) {
+                    return false;
+                }
 
-                    chrome.scripting.executeScript(
-                        {
-                            target: { tabId: tab_id, allFrames: true },
-                            files: [
-                                'utils.js',
-                                'errorLogger.js',
-                                'content_scripts/connector.js',
-                                'content_scripts/recorder.js',
-                                'content_scripts/player.js'
-                            ]
-                        },
-                        () => {
-                            if (chrome.runtime.lastError) {
-                                console.warn('[iMacros SW] Failed to inject content scripts:', chrome.runtime.lastError.message);
-                                resolve(false);
-                            } else {
-                                resolve(true);
-                            }
-                        }
-                    );
-                });
+                try {
+                    await chrome.scripting.executeScript({
+                        target: { tabId: tab_id, allFrames: true },
+                        files: [
+                            'utils.js',
+                            'errorLogger.js',
+                            'content_scripts/connector.js',
+                            'content_scripts/recorder.js',
+                            'content_scripts/player.js'
+                        ]
+                    });
+                    return true;
+                } catch (err) {
+                    const msg = err && err.message ? err.message : err;
+                    console.warn('[iMacros SW] Failed to inject content scripts:', msg);
+                    return false;
+                }
             } catch (e) {
                 console.warn('[iMacros SW] Exception during content script injection:', e);
-                resolve(false);
+                return false;
             }
-        });
+        };
 
         const sendMessageToTab = () => {
             chrome.tabs.sendMessage(tab_id, message, (response) => {
@@ -516,17 +511,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         // First attempt to send. If there is no receiver, try injecting content scripts once.
         chrome.tabs.sendMessage(tab_id, message, async (response) => {
-            if (chrome.runtime.lastError && chrome.runtime.lastError.message && chrome.runtime.lastError.message.includes('Receiving end does not exist')) {
+            const lastErr = chrome.runtime.lastError;
+            if (lastErr && lastErr.message && lastErr.message.includes('Receiving end does not exist')) {
                 console.warn('[iMacros SW] No receiver in tab. Attempting to inject content scripts...');
                 const injected = await injectContentScripts();
                 if (injected) {
                     sendMessageToTab();
                 } else {
-                    sendResponse({ error: chrome.runtime.lastError.message, injected: false });
+                    const errorMsg = lastErr && lastErr.message ? lastErr.message : 'No receiver in tab';
+                    sendResponse({ error: errorMsg, injected: false });
                 }
-            } else if (chrome.runtime.lastError) {
-                console.warn('[iMacros SW] SEND_TO_TAB error:', chrome.runtime.lastError.message);
-                sendResponse({ error: chrome.runtime.lastError.message });
+            } else if (lastErr) {
+                console.warn('[iMacros SW] SEND_TO_TAB error:', lastErr.message);
+                sendResponse({ error: lastErr.message });
             } else {
                 sendResponse(response);
             }
