@@ -412,18 +412,26 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         const win_id = request.win_id;
         console.log('[Offscreen] Received stop command for window:', win_id);
 
-        // Function to stop a specific context
+        // Function to stop a specific context (even if state flags got out of sync)
         const stopContext = (ctx, id) => {
             let stopped = false;
-            if (ctx.mplayer && ctx.mplayer.playing) {
+            if (ctx.mplayer) {
                 console.log(`[Offscreen] Stopping mplayer for window ${id}`);
-                ctx.mplayer.stop();
-                stopped = true;
+                try {
+                    ctx.mplayer.stop();
+                    stopped = true;
+                } catch (err) {
+                    console.error(`[Offscreen] Failed to stop mplayer for window ${id}:`, err);
+                }
             }
-            if (ctx.recorder && ctx.recorder.recording) {
+            if (ctx.recorder) {
                 console.log(`[Offscreen] Stopping recorder for window ${id}`);
-                ctx.recorder.stop();
-                stopped = true;
+                try {
+                    ctx.recorder.stop();
+                    stopped = true;
+                } catch (err) {
+                    console.error(`[Offscreen] Failed to stop recorder for window ${id}:`, err);
+                }
             }
             return stopped;
         };
@@ -431,6 +439,18 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         if (context[win_id]) {
             // Try to stop specific window
             executeContextMethod(win_id, 'stop', sendResponse, []);
+            // Also try to stop any other active contexts to avoid stray playbacks
+            let otherStopped = false;
+            for (let id in context) {
+                if (context.hasOwnProperty(id) && id != win_id && context[id]) {
+                    if (stopContext(context[id], id)) {
+                        otherStopped = true;
+                    }
+                }
+            }
+            if (otherStopped) {
+                console.warn('[Offscreen] Additional contexts were still active and have been stopped.');
+            }
         } else {
             // Fallback: Check ALL contexts for any active player/recorder and stop them
             // This handles cases where window IDs might be mismatched
@@ -598,9 +618,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 sendResponse({ success: true });
             } else if (method === "stop") {
                 console.log("[Offscreen] Stopping...");
-                if (context[win_id].mplayer.playing) context[win_id].mplayer.stop();
-                if (context[win_id].recorder.recording) context[win_id].recorder.stop();
-                sendResponse({ success: true });
+                const stoppedPlayer = context[win_id].mplayer ? (() => { try { context[win_id].mplayer.stop(); return true; } catch (e) { console.error('[Offscreen] Error stopping mplayer:', e); return false; } })() : false;
+                const stoppedRecorder = context[win_id].recorder ? (() => { try { context[win_id].recorder.stop(); return true; } catch (e) { console.error('[Offscreen] Error stopping recorder:', e); return false; } })() : false;
+                sendResponse({ success: true, stoppedPlayer, stoppedRecorder });
             } else if (method === "mplayer.play") {
                 console.log("[Offscreen] Calling mplayer.play with:", args[0].name);
                 const mplayer = context[win_id].mplayer;
