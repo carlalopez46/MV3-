@@ -423,10 +423,10 @@ MacroPlayer.prototype.removeListeners = function() {
 MacroPlayer.prototype.isInternalURL = function(url) {
     if (!url || typeof url !== "string") return false;
 
-    // Internal schemes include browser chrome pages, extension schemes, and
-    // Chromium devtools or chrome-search helpers that likewise skip reliable
-    // load events.
-    var internalPattern = /^(?:(?:chrome|edge|brave|opera|vivaldi)(?:-extension)?|devtools|chrome-search):\/\//i;
+    // Internal schemes include browser chrome pages, extension schemes, their
+    // untrusted variants, and Chromium devtools or chrome-search helpers that
+    // likewise skip reliable load events.
+    var internalPattern = /^(?:(?:chrome|edge|brave|opera|vivaldi)(?:-(?:extension|untrusted))?|devtools|chrome-search):\/\//i;
     var aboutPattern = /^about:/i;
 
     return internalPattern.test(url) || aboutPattern.test(url);
