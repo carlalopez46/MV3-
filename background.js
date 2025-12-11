@@ -923,8 +923,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // Forward panel.js messages to Offscreen Document
     // Panel.js sends messages with types: CALL_BG_FUNCTION, CALL_CONTEXT_METHOD, etc.
-    // Also forward Content Script messages (which have 'topic' property)
-    if ((msg.type && (
+    // NOTE: Content Script messages with 'topic' property are handled by communicator
+    // handlers registered in bg.js - do NOT forward them here to avoid race conditions
+    if (msg.type && (
         msg.type === 'CALL_BG_FUNCTION' ||
         msg.type === 'CALL_CONTEXT_METHOD' ||
         msg.type === 'SAVE_MACRO' ||
@@ -932,7 +933,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         msg.type === 'CHECK_MPLAYER_PAUSED' ||
         msg.type === 'PANEL_LOADED' ||
         msg.type === 'PANEL_CLOSING'
-    )) || msg.topic) { // Forward messages with 'topic' (from Content Scripts)
+    )) {
         // Inject window ID so Offscreen handlers can filter correctly
         if (sender && sender.tab && sender.tab.windowId) {
             msg.win_id = sender.tab.windowId;
