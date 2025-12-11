@@ -10,6 +10,30 @@ var panelState = {
     currentMacro: null
 };
 
+// 情報パネルに表示した内容を保持（ヘルプ/編集ボタン用）
+let lastInfoArgs = null;
+
+function normalizeMacro(macro) {
+    if (!macro) return null;
+    const normalized = { ...macro };
+    // Prefer explicit identifiers and paths; avoid falling back to display names for IDs
+    normalized.id = macro.id || macro.file_id || null;
+    normalized.path = macro.path || (typeof macro.id === "string" ? macro.id : null);
+    normalized.name = macro.text || macro.name || "";
+    normalized.text = normalized.name || macro.text;
+    normalized.type = macro.type || normalized.type;
+    return normalized;
+}
+
+function getMacroPathAndName(macro) {
+    const normalized = normalizeMacro(macro);
+    return {
+        macro: normalized,
+        filePath: normalized ? (normalized.path || normalized.id) : null,
+        macroName: normalized ? (normalized.name || normalized.text || "") : ""
+    };
+}
+
 // パネルのウィンドウIDを保持
 var currentWindowId = null;
 
@@ -108,26 +132,48 @@ function requestStateUpdate() {
 
 function play() {
     console.log("[Panel] Play button clicked");
-    if (!selectedMacro) {
+    if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
         return;
     }
 
+    const { filePath, macroName, macro } = getMacroPathAndName(selectedMacro);
+    if (!filePath) {
+        alert("Unable to play: no macro path found.");
+        return;
+    }
+
+    // UIを即時更新してストップボタンを有効化
+    updatePanelState({ isPlaying: true, isRecording: false, currentMacro: macro });
+
     // パネル側ではファイルを読まず、パスだけを送る
     sendCommand("playMacro", {
-        file_path: selectedMacro.id, // ファイルパスまたはID
-        macro_name: selectedMacro.text
+        file_path: filePath, // ファイルパスまたはID
+        macro_name: macroName
     });
 }
 
 function record() {
     console.log("[Panel] Record button clicked");
+    if (!selectedMacro || selectedMacro.type !== "macro") {
+        alert("Please select a macro first.");
+        return;
+    }
+    // UIを即時更新してストップボタンを有効化
+    updatePanelState({ isRecording: true, isPlaying: false, currentMacro: selectedMacro });
     sendCommand("startRecording");
 }
 
 function stop() {
     console.log("[Panel] Stop button clicked");
-    sendCommand("stop");
+    sendCommand("stop")
+        .then(() => {
+            updatePanelState("idle");
+        })
+        .catch(() => {
+            // Even if stop fails, reset the UI so the user can retry
+            updatePanelState("idle");
+        });
 }
 
 function pause() {
@@ -137,17 +183,47 @@ function pause() {
 
 function playLoop() {
     console.log("[Panel] Loop button clicked");
-    if (!selectedMacro) {
+    if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
         return;
     }
-    const max = document.getElementById("max-loop").value;
+    const loopInput = document.getElementById("max-loop");
+    const max = loopInput ? parseInt(loopInput.value, 10) : NaN;
+    if (!Number.isInteger(max) || max < 1) {
+        alert("Please enter a valid loop count (positive integer).");
+        return;
+    }
+
+    const { filePath, macroName, macro } = getMacroPathAndName(selectedMacro);
+    if (!filePath) {
+        alert("Unable to play: no macro path found.");
+        return;
+    }
+
+    // UIを即時更新してストップボタンを有効化
+    updatePanelState({ isPlaying: true, isRecording: false, currentMacro: macro });
 
     sendCommand("playMacro", {
-        file_path: selectedMacro.id,
-        macro_name: selectedMacro.text,
+        file_path: filePath,
+        macro_name: macroName,
         loop: max
-    });
+    })
+        .then((response) => {
+            if (!response || response.success === false) {
+                console.warn("[Panel] Loop playback failed to start", response);
+                const el = ensureStatusLineElement();
+                el.textContent = "Failed to start loop playback.";
+                el.style.color = "#b00020";
+                updatePanelState("idle");
+            }
+        })
+        .catch((error) => {
+            console.error("[Panel] Loop playback command failed", error);
+            const el = ensureStatusLineElement();
+            el.textContent = "Failed to start loop playback.";
+            el.style.color = "#b00020";
+            updatePanelState("idle");
+        });
 }
 
 function openSettings() {
@@ -160,9 +236,52 @@ function openSettings() {
 
 function edit() {
     if (!selectedMacro) return;
+    const { filePath, macroName } = getMacroPathAndName(selectedMacro);
+    if (!filePath) {
+        console.error("[Panel] Cannot edit macro: no valid path found", selectedMacro);
+        alert("Unable to open macro for editing.");
+        return;
+    }
     sendCommand("editMacro", {
-        file_path: selectedMacro.id,
-        macro_name: selectedMacro.text
+        file_path: filePath,
+        macro_name: macroName
+    });
+}
+
+function openHelp() {
+    // 旧版と同様にリダイレクトURLを利用
+    try {
+        window.open(getRedirectURL('iMacros_for_Chrome'));
+    } catch (e) {
+        console.error('[Panel] Failed to open help link', e);
+        const el = ensureStatusLineElement();
+        el.textContent = "Unable to open help page.";
+        el.style.color = "#b00020";
+    }
+}
+
+function openErrorHelp() {
+    try {
+        window.open(getRedirFromString("error"));
+    } catch (e) {
+        console.error('[Panel] Failed to open error help', e);
+        const el = ensureStatusLineElement();
+        el.textContent = "Unable to open error help page.";
+        el.style.color = "#b00020";
+    }
+}
+
+function openInfoEdit() {
+    if (!lastInfoArgs || !lastInfoArgs.macro) return;
+    const { macro, filePath, macroName } = getMacroPathAndName(lastInfoArgs.macro);
+    if (!filePath) {
+        console.error("[Panel] Cannot edit macro: no valid path found", macro);
+        alert("Unable to open macro for editing.");
+        return;
+    }
+    sendCommand("editMacro", {
+        file_path: filePath,
+        macro_name: macroName
     });
 }
 
@@ -242,7 +361,7 @@ async function selectInitialTree() {
 
 function onSelectionChanged(node) {
     console.log("[Panel] Selection changed:", node);
-    selectedMacro = node;
+    selectedMacro = normalizeMacro(node);
 
     const disable = (ids) => ids.forEach(id => {
         const el = document.getElementById(id);
@@ -253,7 +372,7 @@ function onSelectionChanged(node) {
         if (el) el.removeAttribute("disabled");
     });
 
-    if (node && node.type === 'macro') {
+    if (selectedMacro && selectedMacro.type === 'macro') {
         enable(["play-button", "loop-button", "edit-button"]);
     } else {
         disable(["play-button", "loop-button", "edit-button"]);
@@ -312,14 +431,29 @@ function handlePanelShowInfo(args) {
     const infoArea = document.getElementById("info-area");
     if (!infoDiv || !infoArea) return;
 
+    lastInfoArgs = args.macro ? { ...args, macro: normalizeMacro(args.macro) } : args;
+
     const lines = [];
     if (args.message) lines.push(args.message);
     if (typeof args.errorCode !== "undefined") lines.push("Error code: " + args.errorCode);
-    if (args.macro && args.macro.name) lines.push("Macro: " + args.macro.name);
+    if (lastInfoArgs.macro && lastInfoArgs.macro.name) lines.push("Macro: " + lastInfoArgs.macro.name);
 
     infoArea.value = lines.join("\n");
     infoArea.scrollTop = infoArea.scrollHeight;
+
+    // エラー詳細時のみ編集/ヘルプボタンを表示
+    const infoEditBtn = document.getElementById("info-edit-button");
+    const infoHelpBtn = document.getElementById("info-help-button");
+    const showActionButtons = !!lastInfoArgs.macro;
+    if (infoEditBtn) infoEditBtn.hidden = !showActionButtons;
+    if (infoHelpBtn) infoHelpBtn.hidden = !showActionButtons;
+
     toggleInfoVisibility(true);
+}
+
+function closeInfoPanel() {
+    lastInfoArgs = null;
+    toggleInfoVisibility(false);
 }
 
 function ensureStatusLineElement() {
@@ -422,8 +556,25 @@ function handlePanelHighlightLine(data) {
 
 window.addEventListener("message", (event) => {
     // fileView.js (iframe) からの通知を受け取る
+    const treeFrame = document.getElementById("tree-iframe");
+    const allowedSource = treeFrame ? treeFrame.contentWindow : null;
+    if (event.origin !== window.location.origin || !event.data || typeof event.data !== "object") {
+        return;
+    }
+    // Reject if iframe not found or source doesn't match
+    if (!allowedSource) {
+        console.warn("[Panel] tree-iframe not ready yet, ignoring message from", event.origin);
+        return;
+    }
+    if (event.source !== allowedSource) {
+        console.warn("[Panel] Message from unexpected source");
+        return;
+    }
     if (event.data.type === "iMacrosSelectionChanged") {
         onSelectionChanged(event.data.node);
+    }
+    if (event.data.type === "playMacro") {
+        play();
     }
 });
 
@@ -494,8 +645,10 @@ document.addEventListener("DOMContentLoaded", () => {
     addListener("loop-button", playLoop);
     addListener("settings-button", openSettings);
     addListener("edit-button", edit);
-
-    addListener("info-close-button", () => toggleInfoVisibility(false));
+    addListener("help-button", openHelp);
+    addListener("info-help-button", openErrorHelp);
+    addListener("info-edit-button", openInfoEdit);
+    addListener("info-close-button", closeInfoPanel);
 
     requestStateUpdate();
 
