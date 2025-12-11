@@ -411,11 +411,19 @@ MacroPlayer.prototype.removeListeners = function() {
     // chrome.webRequest.onSendHeaders.removeListener(this._onSendHeaders);
 };
 
+/**
+ * Checks if a URL targets browser-internal or extension pages that may not
+ * emit reliable load events, so page-load waits should be skipped.
+ *
+ * @param {string} url - URL to evaluate.
+ * @returns {boolean} True when the URL uses a browser-internal or extension
+ *   scheme (chrome, edge, brave, opera, vivaldi variants) or an about: URL.
+ */
 MacroPlayer.prototype.isInternalURL = function(url) {
     if (!url || typeof url !== "string") return false;
 
-    return /^(chrome|edge|brave|opera|vivaldi):\/\//.test(url) ||
-        url.startsWith("chrome-extension://");
+    var internalPattern = /^(chrome|edge|brave|opera|vivaldi)(-extension)?:\/\//i;
+    return internalPattern.test(url) || url.toLowerCase().startsWith("about:");
 };
 
 
