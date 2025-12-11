@@ -1172,8 +1172,24 @@ var dialogUtils = (function () {
     };
 })();
 
+let cachedManifestVersion = null;
+
+function getSafeManifestVersion() {
+    if (cachedManifestVersion) return cachedManifestVersion;
+    try {
+        if (!chrome || !chrome.runtime || typeof chrome.runtime.getManifest !== "function") {
+            throw new Error("chrome.runtime.getManifest not available");
+        }
+        cachedManifestVersion = chrome.runtime.getManifest().version || "unknown";
+    } catch (e) {
+        console.error("[iMacros] Failed to read manifest version for redirect", e);
+        cachedManifestVersion = "unknown";
+    }
+    return cachedManifestVersion;
+}
+
 function getRedirectURL(id_or_kw) {
-    const version = chrome.runtime.getManifest().version;
+    const version = getSafeManifestVersion();
     const prefix = `http://rd.imacros.net/redirect.aspx?type=CR&version=${version}`;
     if (typeof id_or_kw === "number") {
         return `${prefix}&helpid=${id_or_kw}`;
@@ -1185,7 +1201,7 @@ function getRedirectURL(id_or_kw) {
 }
 
 function getRedirFromString(idString) {
-    const version = chrome.runtime.getManifest().version;
+    const version = getSafeManifestVersion();
     const prefix = `http://rd.imacros.net/redirect.aspx?type=CR&version=${version}`;
     return `${prefix}&helpid=${idString}`;
 }

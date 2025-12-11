@@ -16,8 +16,9 @@ let lastInfoArgs = null;
 function normalizeMacro(macro) {
     if (!macro) return null;
     const normalized = { ...macro };
-    normalized.id = macro.id || macro.file_id || macro.path || macro.name || null;
-    normalized.path = macro.path || macro.id || macro.file_id || null;
+    // Prefer explicit identifiers and paths; avoid falling back to display names for IDs
+    normalized.id = macro.id || macro.file_id || null;
+    normalized.path = macro.path || (typeof macro.id === "string" ? macro.id : null);
     normalized.name = macro.text || macro.name || "";
     normalized.text = normalized.name || macro.text;
     normalized.type = macro.type || normalized.type;
@@ -256,7 +257,6 @@ function openHelp() {
         const el = ensureStatusLineElement();
         el.textContent = "Unable to open help page.";
         el.style.color = "#b00020";
-        alert("Unable to open help page.");
     }
 }
 
@@ -268,7 +268,6 @@ function openErrorHelp() {
         const el = ensureStatusLineElement();
         el.textContent = "Unable to open error help page.";
         el.style.color = "#b00020";
-        alert("Unable to open error help page.");
     }
 }
 
@@ -564,7 +563,7 @@ window.addEventListener("message", (event) => {
     }
     // Reject if iframe not found or source doesn't match
     if (!allowedSource) {
-        console.warn("[Panel] tree-iframe not found, ignoring message");
+        console.warn("[Panel] tree-iframe not ready yet, ignoring message from", event.origin);
         return;
     }
     if (event.source !== allowedSource) {
