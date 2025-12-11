@@ -363,8 +363,8 @@ MacroPlayer.prototype.onBeforeSendHeaders = function(details) {
 MacroPlayer.prototype.onTabActivated = function(activeInfo) {
     if (activeInfo.windowId == this.win_id) {
         // console.log("onTabActivated, tabId="+activeInfo.tabId);
-        (this.eventMode? attach_debugger(activeInfo.tabId) : Promise.resolve())
-            .then(() => (this.tab_id = activeInfo.tabId))
+        this.tab_id = activeInfo.tabId;
+        if (this.eventMode) attach_debugger(activeInfo.tabId);
     }
 };
 
@@ -1184,7 +1184,8 @@ MacroPlayer.prototype.ActionTable["events"] = function (cmd) {
                     throw new BadParameter("(x,y)[,(x,y)] as POINTS value", 3);
             let point_re = /\(\s*(\d+(?:\.\d+)?)\s*\,\s*(\d+(?:\.\d+)?)\s*\)/g
             let points = []
-            while(m = point_re.exec(value)) {
+            let m;
+            while((m = point_re.exec(value))) {
                 points.push({x: parseFloat(m[1]), y: parseFloat(m[2])});
             }
             return {points: points, targetRect: resp.targetRect}
@@ -1641,6 +1642,12 @@ MacroPlayer.prototype.onDownloadChanged = function(changeInfo) {
 MacroPlayer.prototype.saveTarget = function(url) {
     var self = this;
     chrome.downloads.download({url: url}, function(dl_id) {
+        if (chrome.runtime.lastError) {
+            self.handleError(new RuntimeError(
+                "Download failed: "+chrome.runtime.lastError.message
+            ));
+            return;
+        }
         // NOTE: The download object will be set inside
         // onDownloadCreated handler
         // console.log("download id=%d", dl_id);
@@ -2082,18 +2089,17 @@ MacroPlayer.prototype.doSplitCycle = function(canvas, ctx, moves, type, callback
 MacroPlayer.prototype.splitPage = function(dmns, type, callback) {
     let overlap = 200; // minimum overlap, to avoid sticky headers.
     let split = function(w, x, xs) {
-        if (w == 0) {
-            return xs
-        } else {
-            if(w - x > 0) {
-                let n = Math.ceil(w / (x-overlap));
-                let delta = Math.ceil(w/n);
-                xs = new Array(n).fill(delta);
-            } else {
-                xs.push(w)
-            }            
+        if (w <= 0) {
             return xs
         }
+        const step = Math.max(1, x - overlap);
+        let remaining = w;
+        while (remaining > 0) {
+            const chunk = Math.min(remaining, x);
+            xs.push(chunk);
+            remaining -= step;
+        }
+        return xs
     }
     // steps to perform in x-direction
     let xs = split(dmns.doc_w, dmns.win_w, [])
@@ -2981,7 +2987,7 @@ MacroPlayer.prototype.ActionTable["tab"] = function (cmd) {
         let n = imns.s2i(this.expandVariables(cmd[2], "tab2"))
         if (isNaN(n))
             throw new BadParameter("T=<number>", 1)
-        let tab_num = n+this.startTabIndex-1
+        let tab_num = n-1
         chrome.tabs.query({windowId: this.win_id}, tabs => {
             if (tab_num < 0 || tab_num > tabs.length-1) {
                 this.handleError(
@@ -3576,7 +3582,8 @@ MacroPlayer.prototype.saveStopwatchResults = function() {
     s += newline;
     for (let r of this.stopwatchResults) {
         let timestamp = imns.formatDate("dd/mm/yyyy,hh:nn:ss", r.timestamp);
-        s += timestamp+","+r.id+","+r.elapsedTime.toFixed(3).toString();
+        s += "\""+timestamp+"\","+"\""+r.id+"\","+
+            "\""+r.elapsedTime.toFixed(3).toString()+"\"";
         s += newline;
         this.lastPerformance.push(
             {
@@ -4150,73 +4157,362 @@ MacroPlayer.prototype.expandVariables = function(param, eval_id) {
     // substitute {{vars}}
     var mplayer = this;
     var handleVariable = function (match_str, var_name) {
-        var t = null;
-        if ( t = var_name.match(mplayer.limits.varsRe) ) {
-            return mplayer.getVar(t[1]);
-        } else if ( t = var_name.match(/^!extract$/i) ) {
-            return mplayer.getExtractData();
-        } else if ( t = var_name.match(/^!urlcurrent$/i) ) {
-            return mplayer.currentURL;
-        } else if ( t = var_name.match(/^!col(\d+)$/i) ) {
-            return mplayer.getColumnData(imns.s2i(t[1]));
-        } else if ( t = var_name.match(/^!datasource_line$/i) ) {
-            return mplayer.dataSourceLine || mplayer.currentLoop;
-        } else if ( t = var_name.match(/^!datasource_columns$/i) ) {
-            return mplayer.dataSourceColumns;
-        } else if ( t = var_name.match(/^!datasource_delimiter$/i) ) {
-            return mplayer.dataSourceDelimiter;
-        } else if ( t = var_name.match(/^!datasource$/i) ) {
-            return mplayer.dataSourceFile;
-        } else if ( t = var_name.match(/^!folder_datasource$/i) ) {
-            return mplayer.dataSourceFolder ?
-                mplayer.dataSourceFolder.path : "__undefined__";
-        } else if ( t = var_name.match(/^!folder_download$/i) ) {
-            return mplayer.defDownloadFolder ?
-                mplayer.defDownloadFolder.path : "__undefined__";
-        } else if ( t = var_name.match(/^!folder_macros$/i) ) {
-            return mplayer.macrosFolder ?
-                mplayer.macrosFolder.path : "__undefined__";
-        } else if ( t = var_name.match(/^!now:(\S+)$/i) ) {
-            return imns.formatDate(t[1]);
-        } else if ( t = var_name.match(/^!loop$/i) ) {
-            return mplayer.currentLoop;
-        } else if ( t = var_name.match(/^!clipboard$/i) ) {
-            var clipValue = imns.Clipboard.getString();
-            if (clipValue && typeof clipValue.then === "function") {
-                clipValue.catch(() => {});
-                return "";
-            }
-            return clipValue || "";
-        }  else if ( t = var_name.match(/^!timeout(?:_page)?$/i) ) {
-            return mplayer.timeout.toString();
-        } else if ( t = var_name.match(/^!timeout_(?:tag|step)$/i) ) {
-            return mplayer.timeout_tag.toString();
-        } else if ( t = var_name.match(/^!timeout_download$/i) ) {
-            return mplayer.timeout_download.toString();
-        } else if ( t = var_name.match(/^!downloaded_file_name$/i) ) {
-            return mplayer.downloadedFilename;
-        } else if ( t = var_name.match(/^!downloaded_size$/i) ) {
-            return mplayer.downloadedSize;
-        } else if ( t = var_name.match(/^!stopwatchtime$/i) ) {
-            // convert to d+\.d{3} format
+        var t = var_name.match(mplayer.limits.varsRe);
+        if (t) return mplayer.getVar(t[1]);
+
+        t = var_name.match(/^!extract$/i);
+        if (t) return mplayer.getExtractData();
+
+        t = var_name.match(/^!urlcurrent$/i);
+        if (t) return mplayer.currentURL;
+
+        t = var_name.match(/^!col(\d+)$/i);
+        if (t) return mplayer.getColumnData(imns.s2i(t[1]));
+
+        t = var_name.match(/^!datasource_line$/i);
+        if (t) return mplayer.dataSourceLine || mplayer.currentLoop;
+
+        t = var_name.match(/^!datasource_columns$/i);
+        if (t) return mplayer.dataSourceColumns;
+
+        t = var_name.match(/^!datasource_delimiter$/i);
+        if (t) return mplayer.dataSourceDelimiter;
+
+        t = var_name.match(/^!datasource$/i);
+        if (t) return mplayer.dataSourceFile;
+
+        t = var_name.match(/^!folder_datasource$/i);
+        if (t) return mplayer.dataSourceFolder;
+
+        t = var_name.match(/^!folder_macros$/i);
+        if (t) return mplayer.macrosFolder;
+
+        t = var_name.match(/^!folder_downloads$/i);
+        if (t) return mplayer.defDownloadFolder;
+
+        t = var_name.match(/^!folder_plug\-ins$/i);
+        if (t) return mplayer.pluginFolder;
+
+        t = var_name.match(/^!folder_userprofile$/i);
+        if (t) return mplayer.userProfileFolder;
+
+        t = var_name.match(/^!folder_desktop$/i);
+        if (t) return mplayer.desktopFolder;
+
+        t = var_name.match(/^!encryption$/i);
+        if (t) return mplayer.encryptionType;
+
+        t = var_name.match(/^!imacrosversion$/i);
+        if (t) return mplayer.imacrosVersion;
+
+        t = var_name.match(/^!timeout_fill$/i);
+        if (t) return mplayer.timeoutFill;
+
+        t = var_name.match(/^!timeout_macro$/i);
+        if (t) return mplayer.timeoutMacro;
+
+        t = var_name.match(/^!timeout_download$/i);
+        if (t) return mplayer.timeoutDownload;
+
+        t = var_name.match(/^!timeout_tag$/i);
+        if (t) return mplayer.timeout;
+
+        t = var_name.match(/^!replayspeed$/i);
+        if (t) return mplayer.replayspeed;
+
+        t = var_name.match(/^!loop$/i);
+        if (t) return mplayer.currentLoop;
+
+        t = var_name.match(/^!clipboard$/i);
+        if (t) return imns.Clipboard.getString() || "";
+
+        t = var_name.match(/^!extract_step$/i);
+        if (t) return mplayer.currentExtractStep;
+
+        t = var_name.match(/^!errorignore$/i);
+        if (t) return mplayer.errorIgnore ? "yes" : "no";
+
+        t = var_name.match(/^!file_macros$/i);
+        if (t) return mplayer.macrosFile;
+
+        t = var_name.match(/^!file_log$/i);
+        if (t) return mplayer.logFile;
+
+        t = var_name.match(/^!file_stopwatch$/i);
+        if (t) return mplayer.stopwatchFile;
+
+        t = var_name.match(/^!record_current_line$/i);
+        if (t) return mplayer.recordCurrentLine;
+
+        t = var_name.match(/^!record_current_macro$/i);
+        if (t) return mplayer.recordCurrentMacro;
+
+        t = var_name.match(/^!record_current_position$/i);
+        if (t) return mplayer.recordCurrentPosition;
+
+        t = var_name.match(/^!record_current_window$/i);
+        if (t) return mplayer.recordCurrentWindow;
+
+        t = var_name.match(/^!last_command$/i);
+        if (t) return mplayer.lastCommand;
+
+        t = var_name.match(/^!last_command_param$/i);
+        if (t) return mplayer.lastParam;
+
+        t = var_name.match(/^!last_command_target$/i);
+        if (t) return mplayer.lastTarget;
+
+        t = var_name.match(/^!last_command_content$/i);
+        if (t) return mplayer.lastContent;
+
+        t = var_name.match(/^!last_command_type$/i);
+        if (t) return mplayer.lastCommandType;
+
+        t = var_name.match(/^!last_command_time$/i);
+        if (t) return mplayer.lastCommandTime;
+
+        t = var_name.match(/^!ondownload_dialog$/i);
+        if (t) return mplayer.onDownloadDialog;
+
+        t = var_name.match(/^!ondownloadsaveas$/i);
+        if (t) return mplayer.onDownloadSaveAs;
+
+        t = var_name.match(/^!ondownloadoverwrite$/i);
+        if (t) return mplayer.onDownloadOverwrite;
+
+        t = var_name.match(/^!ondownloadfolder$/i);
+        if (t) return mplayer.onDownloadFolder;
+
+        t = var_name.match(/^!ondownloadifexists$/i);
+        if (t) return mplayer.onDownloadIfExists;
+
+        t = var_name.match(/^!downloadcomplete$/i);
+        if (t) return mplayer.downloadComplete;
+
+        t = var_name.match(/^!ondialog$/i);
+        if (t) return mplayer.onDialog;
+
+        t = var_name.match(/^!ondialog_button$/i);
+        if (t) return mplayer.onDialogButton;
+
+        t = var_name.match(/^!ondialog_entry$/i);
+        if (t) return mplayer.onDialogEntry;
+
+        t = var_name.match(/^!ondialog_result$/i);
+        if (t) return mplayer.onDialogResult;
+
+        t = var_name.match(/^!statusmessagetimeout$/i);
+        if (t) return mplayer.statusMessageTimeout;
+
+        t = var_name.match(/^!statusmessagebackcolor$/i);
+        if (t) return mplayer.statusMessageBackColor;
+
+        t = var_name.match(/^!statusmessageforecolor$/i);
+        if (t) return mplayer.statusMessageForeColor;
+
+        t = var_name.match(/^!statusmessagecentered$/i);
+        if (t) return mplayer.statusMessageCentered;
+
+        t = var_name.match(/^!statusmessagefontsize$/i);
+        if (t) return mplayer.statusMessageFontSize;
+
+        t = var_name.match(/^!statusmessagefontfamily$/i);
+        if (t) return mplayer.statusMessageFontFamily;
+
+        t = var_name.match(/^!statusmessagefontstyle$/i);
+        if (t) return mplayer.statusMessageFontStyle;
+
+        t = var_name.match(/^!statusmessagefontweight$/i);
+        if (t) return mplayer.statusMessageFontWeight;
+
+        t = var_name.match(/^!timeout_page$/i);
+        if (t) return mplayer.timeoutPage;
+
+        t = var_name.match(/^!timeout_dialog$/i);
+        if (t) return mplayer.timeoutDialog;
+
+        t = var_name.match(/^!playbuttonstatus$/i);
+        if (t) return mplayer.playButtonStatus;
+
+        t = var_name.match(/^!opt_browser$/i);
+        if (t) return mplayer.playOptions.browser;
+
+        t = var_name.match(/^!opt_domtimeout$/i);
+        if (t) return mplayer.playOptions.domTimeout;
+
+        t = var_name.match(/^!opt_maxreplayspeed$/i);
+        if (t) return mplayer.playOptions.maxReplaySpeed;
+
+        t = var_name.match(/^!lastscrape$/i);
+        if (t) return JSON.stringify(mplayer.lastScrape);
+
+        t = var_name.match(/^!file_downloaddir$/i);
+        if (t) return mplayer.downloadDirFile;
+
+        t = var_name.match(/^!timeout/${var_name}/i);
+        if (t) return mplayer.timeout;
+
+        t = var_name.match(/^!lastnode$/i);
+        if (t) return mplayer.lastNode;
+
+        t = var_name.match(/^!status$/i);
+        if (t) return mplayer.status;
+
+        t = var_name.match(/^!promptonerror$/i);
+        if (t) return mplayer.promptOnError;
+
+        t = var_name.match(/^!last_file_saveas_filename$/i);
+        if (t) return mplayer.lastFileSaveAsFilename;
+
+        t = var_name.match(/^!last_file_saveas_directory$/i);
+        if (t) return mplayer.lastFileSaveAsDirectory;
+
+        t = var_name.match(/^!last_file_open_filename$/i);
+        if (t) return mplayer.lastFileOpenFilename;
+
+        t = var_name.match(/^!last_file_open_directory$/i);
+        if (t) return mplayer.lastFileOpenDirectory;
+
+        t = var_name.match(/^!savelogins$/i);
+        if (t) return mplayer.savelogins;
+
+        t = var_name.match(/^!useragent$/i);
+        if (t) return mplayer.userAgent;
+
+        t = var_name.match(/^!downloadcompletebytes$/i);
+        if (t) return mplayer.downloadCompleteBytes;
+
+        t = var_name.match(/^!downloadcompletetime$/i);
+        if (t) return mplayer.downloadCompleteTime;
+
+        t = var_name.match(/^!downloadcompleteurl$/i);
+        if (t) return mplayer.downloadCompleteURL;
+
+        t = var_name.match(/^!downloadcompletestatus$/i);
+        if (t) return mplayer.downloadCompleteStatus;
+
+        t = var_name.match(/^!playbuttonstate$/i);
+        if (t) return mplayer.playButtonState;
+
+        t = var_name.match(/^!filefolderrelation$/i);
+        if (t) return mplayer.fileFolderRelation;
+
+        t = var_name.match(/^!onfiledialog$/i);
+        if (t) return mplayer.onFileDialog;
+
+        t = var_name.match(/^!playerautoload$/i);
+        if (t) return mplayer.playerAutoload;
+
+        t = var_name.match(/^!playbefore$/i);
+        if (t) return mplayer.playBefore;
+
+        t = var_name.match(/^!playafter$/i);
+        if (t) return mplayer.playAfter;
+
+        t = var_name.match(/^!playnext$/i);
+        if (t) return mplayer.playNext;
+
+        t = var_name.match(/^!echo$/i);
+        if (t) return mplayer.echo;
+
+        t = var_name.match(/^!save_mobile_log$/i);
+        if (t) return mplayer.saveMobileLog;
+
+        t = var_name.match(/^!mobilemode$/i);
+        if (t) return mplayer.mobileMode;
+
+        t = var_name.match(/^!replay_bundle$/i);
+        if (t) return mplayer.replayBundle;
+
+        t = var_name.match(/^!copy_paste$/i);
+        if (t) return mplayer.copyPaste;
+
+        t = var_name.match(/^!loop_csv_template$/i);
+        if (t) return mplayer.loopCsvTemplate;
+
+        t = var_name.match(/^!logfilemode$/i);
+        if (t) return mplayer.logFileMode;
+
+        t = var_name.match(/^!statusmessage$/i);
+        if (t) return mplayer.statusMessage;
+
+        t = var_name.match(/^!tagfast$/i);
+        if (t) return mplayer.tagFast;
+
+        t = var_name.match(/^!extractadd$/i);
+        if (t) return mplayer.extractAdd;
+
+        t = var_name.match(/^!datarow$/i);
+        if (t) return mplayer.dataRow;
+
+        t = var_name.match(/^!datasource_mode$/i);
+        if (t) return mplayer.dataSourceMode;
+
+        t = var_name.match(/^!filedownloaddir$/i);
+        if (t) return mplayer.downloadDirFile;
+
+        t = var_name.match(/^!flash_screen#/i);
+        if (t) return mplayer.flashScreen;
+
+        t = var_name.match(/^!ocr_extractor$/i);
+        if (t) return mplayer.ocrExtractor;
+
+        t = var_name.match(/^!ocr_language$/i);
+        if (t) return mplayer.ocrLanguage;
+
+        t = var_name.match(/^!ocr_copies$/i);
+        if (t) return mplayer.ocrCopies;
+
+        t = var_name.match(/^!ocr_currencies$/i);
+        if (t) return mplayer.ocrCurrencies;
+
+        t = var_name.match(/^!ocr_currency$/i);
+        if (t) return mplayer.ocrCurrency;
+
+        t = var_name.match(/^!ocr_max_price$/i);
+        if (t) return mplayer.ocrMaxPrice;
+
+        t = var_name.match(/^!ocr_mindate$/i);
+        if (t) return mplayer.ocrMinDate;
+
+        t = var_name.match(/^!ocr_maxdate$/i);
+        if (t) return mplayer.ocrMaxDate;
+
+        t = var_name.match(/^!ocr_sort$/i);
+        if (t) return mplayer.ocrSort;
+
+        t = var_name.match(/^!ocr_position$/i);
+        if (t) return mplayer.ocrPosition;
+
+        t = var_name.match(/^!ocr_mode$/i);
+        if (t) return mplayer.ocrMode;
+
+        t = var_name.match(/^!stopwatchvalue$/i);
+        if (t) return mplayer.stopWatchValue;
+
+        t = var_name.match(/^!stopwatchtime$/i);
+        if (t) {
             var value = mplayer.lastWatchValue.toFixed(3);
             return value;
-        } else if ( t = var_name.match(/^!imagex$/i) ) {
-            return mplayer.imageX;
-        } else if ( t = var_name.match(/^!imagey$/i) ) {
-            return mplayer.imageY;
-        } else if ( t = var_name.match(/^!\S+$/) ) {
-            throw new BadParameter("Unsupported variable "+var_name);
-        } else {                // a user-defined variable
-            return mplayer.getUserVar(var_name);
         }
+
+        t = var_name.match(/^!imagex$/i);
+        if (t) return mplayer.imageX;
+
+        t = var_name.match(/^!imagey$/i);
+        if (t) return mplayer.imageY;
+
+        t = var_name.match(/^!\S+$/);
+        if (t) throw new BadParameter("Unsupported variable "+var_name);
+
+        return mplayer.getUserVar(var_name);
     };
 
 
     // check for "eval" command
     var eval_re = new RegExp("^eval\\s*\\((.*)\\)$", "i");
-    var match = null;
-    if (match = eval_re.exec(param)) {
+    const match = eval_re.exec(param);
+    if (match) {
         var escape = function (s) {
             var x = s.toString();
             return x.replace(/"/g, "\\\"").
