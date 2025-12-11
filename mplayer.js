@@ -51,6 +51,215 @@ function MacroPlayer(win_id) {
     this._onDownloadChanged = this.onDownloadChanged.bind(this);
 }
 
+// Helpers to work across Service Worker / Offscreen contexts
+function hasTabsAPI() {
+    return (typeof chrome !== "undefined" && chrome && chrome.tabs && typeof chrome.tabs.query === "function");
+}
+
+function mpQueryTabs(mplayer, queryInfo, callback) {
+    if (hasTabsAPI()) {
+        chrome.tabs.query(queryInfo, tabs => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_QUERY error:", chrome.runtime.lastError);
+                callback([]);
+            } else {
+                callback(tabs || []);
+            }
+        });
+    } else {
+        chrome.runtime.sendMessage({
+            command: "TAB_QUERY",
+            queryInfo,
+            win_id: mplayer.win_id
+        }, response => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_QUERY error:", chrome.runtime.lastError);
+                callback([]);
+            } else if (!response || response.error) {
+                console.error("[MacroPlayer] TAB_QUERY failed:", response && response.error);
+                callback([]);
+            } else {
+                callback(response.tabs || []);
+            }
+        });
+    }
+}
+
+function mpGetTab(mplayer, tabId, callback) {
+    if (hasTabsAPI()) {
+        chrome.tabs.get(tabId, tab => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_GET error:", chrome.runtime.lastError);
+                callback(null);
+            } else {
+                callback(tab);
+            }
+        });
+    } else {
+        chrome.runtime.sendMessage({
+            command: "TAB_GET",
+            tab_id: tabId,
+            win_id: mplayer.win_id
+        }, response => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_GET error:", chrome.runtime.lastError);
+                callback(null);
+            } else if (!response || response.error) {
+                console.error("[MacroPlayer] TAB_GET failed:", response && response.error);
+                callback(null);
+            } else {
+                callback(response.tab || null);
+            }
+        });
+    }
+}
+
+function mpUpdateTab(mplayer, tabId, updateProperties, callback) {
+    if (hasTabsAPI()) {
+        chrome.tabs.update(tabId, updateProperties, tab => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_UPDATE error:", chrome.runtime.lastError);
+                callback && callback(null);
+            } else {
+                callback && callback(tab);
+            }
+        });
+    } else {
+        chrome.runtime.sendMessage({
+            command: "TAB_UPDATE",
+            tab_id: tabId,
+            updateProperties,
+            win_id: mplayer.win_id
+        }, response => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_UPDATE error:", chrome.runtime.lastError);
+                callback && callback(null);
+            } else if (!response || response.error) {
+                console.error("[MacroPlayer] TAB_UPDATE error:", response && response.error);
+                callback && callback(null);
+            } else {
+                callback && callback(response.tab);
+            }
+        });
+    }
+}
+
+function mpRemoveTabs(mplayer, tabIds, callback) {
+    const ids = Array.isArray(tabIds) ? tabIds : [tabIds];
+    if (hasTabsAPI()) {
+        chrome.tabs.remove(ids, () => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_REMOVE error:", chrome.runtime.lastError);
+            }
+            callback && callback();
+        });
+    } else {
+        chrome.runtime.sendMessage({
+            command: "TAB_REMOVE",
+            tab_ids: ids,
+            win_id: mplayer.win_id
+        }, response => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_REMOVE error:", chrome.runtime.lastError);
+            } else if (response && response.error) {
+                console.error("[MacroPlayer] TAB_REMOVE error:", response.error);
+            }
+            callback && callback();
+        });
+    }
+}
+
+function mpCreateTab(mplayer, createProperties, callback) {
+    if (hasTabsAPI()) {
+        chrome.tabs.create(createProperties, tab => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_CREATE error:", chrome.runtime.lastError);
+                callback && callback(null);
+            } else {
+                callback && callback(tab);
+            }
+        });
+    } else {
+        chrome.runtime.sendMessage({
+            command: "TAB_CREATE",
+            createProperties,
+            win_id: mplayer.win_id
+        }, response => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] TAB_CREATE error:", chrome.runtime.lastError);
+                callback && callback(null);
+            } else if (response && response.error) {
+                console.error("[MacroPlayer] TAB_CREATE error:", response.error);
+                callback && callback(null);
+            } else {
+                callback && callback(response ? response.tab : null);
+            }
+        });
+    }
+}
+
+function mpGetActiveTab(mplayer, callback, errorCallback) {
+    if (hasTabsAPI()) {
+        chrome.tabs.query({active: true, windowId: mplayer.win_id}, tabs => {
+            if (chrome.runtime.lastError) {
+                errorCallback && errorCallback(chrome.runtime.lastError);
+            } else {
+                const tab = tabs && tabs[0];
+                callback(tab || null);
+            }
+        });
+    } else {
+        chrome.runtime.sendMessage({
+            command: "GET_ACTIVE_TAB",
+            win_id: mplayer.win_id
+        }, response => {
+            if (chrome.runtime.lastError) {
+                errorCallback && errorCallback(chrome.runtime.lastError);
+            } else if (!response || response.error) {
+                errorCallback && errorCallback(response && response.error);
+            } else {
+                callback(response.tab || null);
+            }
+        });
+    }
+}
+
+function getPanelId(win_id) {
+    if (typeof context === "undefined" || context === null) return undefined;
+    const ctx = context[win_id];
+    return ctx && (ctx.panelId || ctx.panelWindowId);
+}
+
+function notifyPanel(win_id, type, data) {
+    const panelId = getPanelId(win_id);
+    if (!panelId || !chrome.runtime || !chrome.runtime.sendMessage) return;
+    try {
+        chrome.runtime.sendMessage({
+            type,
+            panelWindowId: panelId,
+            data
+        }, () => {});
+    } catch (e) {
+        console.warn("[MacroPlayer] Failed to notify panel", type, e);
+    }
+}
+
+function notifyPanelStatLine(win_id, text, level) {
+    notifyPanel(win_id, "PANEL_SET_STAT_LINE", { text, level });
+}
+
+function notifyPanelShowLines(win_id, source, macroName) {
+    notifyPanel(win_id, "PANEL_SHOW_LINES", { source, currentMacro: macroName });
+}
+
+function notifyPanelLoop(win_id, value) {
+    notifyPanel(win_id, "PANEL_SET_LOOP_VALUE", { value });
+}
+
+function notifyPanelHighlight(win_id, line) {
+    notifyPanel(win_id, "PANEL_HIGHLIGHT_LINE", { line });
+}
+
 
 // A table to hold the code for processing a command
 MacroPlayer.prototype.ActionTable = new Object();
@@ -460,12 +669,9 @@ MacroPlayer.prototype.startTimer = function(type, timeout, msg, callback) {
             typeof(callback) == "function" && callback();
         }
         // change panel/badge text
-        var panel = context[mplayer.win_id].panelWindow;
-        if (panel && !panel.closed) {
-            panel.setStatLine(msg+elapsedTime.toFixed(1)+
-                              "("+Math.round(timeout)+")s",
-                              "warning");
-        }
+        notifyPanelStatLine(mplayer.win_id,
+                            msg+elapsedTime.toFixed(1)+"("+Math.round(timeout)+")s",
+                            "warning");
 
         badge.set(mplayer.win_id, {
             status: "loading",
@@ -536,12 +742,9 @@ MacroPlayer.prototype.retry = function(onerror, msg, caller_id, timeout) {
                 });
 
                 // set panel text
-                let panel = context[this.win_id].panelWindow;
-                if (panel && !panel.closed) {
-                    panel.setStatLine(msg+(remains/1000).toFixed(1)+
-                                      "("+Math.round(_timeout/1000)+")s",
-                                      "warning");
-                }
+                notifyPanelStatLine(this.win_id,
+                    msg+(remains/1000).toFixed(1)+"("+Math.round(_timeout/1000)+")s",
+                    "warning");
             }
         }, 500);
     }
@@ -685,12 +888,10 @@ MacroPlayer.prototype.ActionTable["back"] = function (cmd) {
     if (this.noContentPage("BACK"))
         return;
 
-    chrome.tabs.get(this.tab_id, function(tab) {
-        if (/^(?:https?|file)/.test(tab.url))
-            communicator.postMessage("back-command", {}, tab.id,
-                                     function() {},
-                                     {number: 0});
-    });
+    if (/^(?:https?|file)/.test(this.currentURL || ""))
+        communicator.postMessage("back-command", {}, this.tab_id,
+                                 function() {},
+                                 {number: 0});
     // mplayer.next() will be called on load-complete event
 };
 
@@ -1919,12 +2120,10 @@ MacroPlayer.prototype.ActionTable["refresh"] = function (cmd) {
     if (this.noContentPage("REFRESH"))
         return;
 
-    chrome.tabs.get(this.tab_id, function(tab) {
-        if (/^(?:https?|file)/.test(tab.url))
-            communicator.postMessage("refresh-command", {}, tab.id,
-                                     function() {},
-                                     {number: 0});
-    });
+    if (/^(?:https?|file)/.test(this.currentURL || ""))
+        communicator.postMessage("refresh-command", {}, this.tab_id,
+                                 function () {},
+                                 {number: 0});
     // mplayer.next() will be called on load-complete event
 };
 
@@ -2292,9 +2491,7 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
             if (isNaN(loop))
                 throw new BadParameter("!LOOP must be integer");
             this.currentLoop = this.checkFreewareLimits("loops", loop)
-            var panel = context[this.win_id].panelWindow;
-            if (panel && !panel.closed)
-                panel.setLoopValue(this.currentLoop);
+            notifyPanelLoop(this.win_id, this.currentLoop);
         }
         break;
     case "!extract":
@@ -2935,30 +3132,52 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
     if (jsRegex.test(param)) {
         let matches = jsRegex.exec(param);
         let scriptCode = matches[1];
-        chrome.tabs.executeScript(this.tab_id, { code: scriptCode }, () => { this.next("URL"); });
-    } else {
-        chrome.tabs.update(
-            this.tab_id, {url: param},
-            () => {
-                if (/^javascript:/.test(param)) {
-                    // somewhat ugly hack for javascript: urls
-                    this.next("URL");
-                } else {
-                    this.waitingForPageLoad = true;
-
-                    if (!this.timers.has("loading"))
-                        this.startTimer(
-                            "loading", this.timeout, "Loading ", () => {
-                                this.waitingForPageLoad = false;
-                                this.handleError(new RuntimeError(
-                                    "Page loading timeout"+
-                                        ", URL: "+this.currentURL, 602
-                                ));
-                            }
-                        )
+        if (chrome.scripting && chrome.scripting.executeScript) {
+            chrome.scripting.executeScript({
+                target: { tabId: this.tab_id },
+                // Intentional global-scope execution of trusted macro JavaScript.
+                func: (code) => { return (0, eval)(code); },
+                args: [scriptCode]
+            }, () => {
+                if (chrome.runtime.lastError) {
+                    console.error("[MacroPlayer] scripting.executeScript error:", chrome.runtime.lastError);
+                    this.handleError(new RuntimeError(
+                        chrome.runtime.lastError.message || "javascript: execution failed",
+                        999
+                    ));
+                    return;
                 }
+                this.next("URL");
+            });
+        } else {
+            console.warn("[MacroPlayer] scripting.executeScript unavailable; skipping javascript: URL");
+            this.next("URL");
+        }
+    } else {
+        const onUpdated = () => {
+            if (/^javascript:/.test(param)) {
+                this.next("URL");
+            } else {
+                this.waitingForPageLoad = true;
+
+                if (!this.timers.has("loading"))
+                    this.startTimer(
+                        "loading", this.timeout, "Loading ", () => {
+                            this.waitingForPageLoad = false;
+                            this.handleError(new RuntimeError(
+                                "Page loading timeout"+
+                                    ", URL: "+this.currentURL, 602
+                            ));
+                        }
+                    )
             }
-        );
+        };
+
+        if (hasTabsAPI()) {
+            chrome.tabs.update(this.tab_id, {url: param}, onUpdated);
+        } else {
+            mpUpdateTab(this, this.tab_id, { url: param }, tab => onUpdated(tab));
+        }
     }
 };
 
@@ -2973,30 +3192,31 @@ MacroPlayer.prototype.RegExpTable["tab"] = "^(t\\s*=\\s*(\\S+)|"+
 MacroPlayer.prototype.ActionTable["tab"] = function (cmd) {
     communicator.postMessage("tab-command", {}, this.tab_id, () => {})
     if (/^close$/i.test(cmd[1])) { // close current tab
-        this.detachDebugger().then(() => chrome.tabs.remove(
-            this.tab_id, () => this.next("TAB CLOSE")
+        this.detachDebugger().then(() => mpRemoveTabs(
+            this, this.tab_id, () => this.next("TAB CLOSE")
         ))
     } else if (/^closeallothers$/i.test(cmd[1])) {
         //close all tabs except current
-        chrome.tabs.query(
+        mpQueryTabs(
+            this,
             {windowId: this.win_id, active: false},
             tabs => {
-                let ids = tabs.filter(tab => !tab.active).map(tab => tab.id)
+                let ids = tabs.map(tab => tab.id)
                 this.startTabIndex = 0
-                chrome.tabs.remove(
-                    ids, () => this.next("TAB CLOSEALLOTHERS")
+                mpRemoveTabs(
+                    this, ids, () => this.next("TAB CLOSEALLOTHERS")
                 )
             })
     } else if (/open/i.test(cmd[1])) {
         this.detachDebugger().then(() => {
-            chrome.tabs.get(this.tab_id, tab => {
+            mpGetTab(this, this.tab_id, tab => {
                 let args = {
                     url: "about:blank",
                     windowId: this.win_id,
-                    index: tab.index+1,
                     active: false
                 }
-                chrome.tabs.create(args, t => this.next("TAB OPEN"))
+                if (tab) args.index = tab.index + 1
+                mpCreateTab(this, args, t => this.next("TAB OPEN"))
             })
         })
     } else if (/^t\s*=/i.test(cmd[1])) {
@@ -3004,14 +3224,14 @@ MacroPlayer.prototype.ActionTable["tab"] = function (cmd) {
         if (isNaN(n))
             throw new BadParameter("T=<number>", 1)
         let tab_num = n-1
-        chrome.tabs.query({windowId: this.win_id}, tabs => {
+        mpQueryTabs(this, {windowId: this.win_id}, tabs => {
             if (tab_num < 0 || tab_num > tabs.length-1) {
                 this.handleError(
                     new RuntimeError("Tab number "+n+" does not exist", 771)
                 )
             } else {
-                this.detachDebugger().then(() => chrome.tabs.update(
-                    tabs[tab_num].id, {active: true},
+                this.detachDebugger().then(() => mpUpdateTab(
+                    this, tabs[tab_num].id, {active: true},
                     t => this.next("TAB T=")
                 ))
             }
@@ -3064,11 +3284,8 @@ MacroPlayer.prototype.ActionTable["wait"] = function (cmd) {
                 text: text
             });
 
-            var panel = context[mplayer.win_id].panelWindow;
-            if (panel && !panel.closed) {
-                panel.setStatLine("Waiting "+passed.toFixed(1)+
-                                  "("+total.toFixed(1)+")s", "info");
-            }
+            notifyPanelStatLine(mplayer.win_id,
+                "Waiting "+passed.toFixed(1)+"("+total.toFixed(1)+")s", "info");
         } else {
             clearInterval(mplayer.waitInterval);
             delete mplayer.waitInterval;
@@ -3198,10 +3415,17 @@ MacroPlayer.prototype.reset = function() {
     this.waitForAuthDialog = false;
 
     return new Promise((resolve, reject) => {
-        chrome.tabs.query({active: true, windowId: this.win_id}, tabs => {
-            this.startTabIndex = tabs[0].index;
-            this.currentURL = tabs[0].url;
-            this.tab_id = tabs[0].id;
+        const finalize = (tab) => {
+            if (tab) {
+                this.startTabIndex = tab.index || 0;
+                this.currentURL = tab.url || "";
+                this.tab_id = tab.id || null;
+            } else {
+                this.startTabIndex = 0;
+                this.currentURL = "";
+                this.tab_id = null;
+            }
+
             // test for afio
             afio.isInstalled().then(installed => {
                 if ((this.afioIsInstalled = installed)) {
@@ -3213,11 +3437,14 @@ MacroPlayer.prototype.reset = function() {
                         this.defDownloadFolder = downnode
                     })
                 }
-            }).then(resolve).catch(reject) // the only reason for that clumsy
-                                           // statement is that
-                                           // chrome.tabs.query expects a
-                                           // callback
-        })});
+            }).then(resolve).catch(reject);
+        };
+
+        mpGetActiveTab(this, finalize, (err) => {
+            console.warn("[MacroPlayer] Failed to get active tab:", err);
+            finalize(null);
+        });
+    });
 };
 
 
@@ -3346,11 +3573,8 @@ MacroPlayer.prototype.play = function(macro, limits, callback) {
         this.action_stack = this.actions.slice();
         this.action_stack.reverse();
         context.updateState(this.win_id,"playing");
-        var panel = context[this.win_id].panelWindow;
-        if (panel && !panel.closed) {
-            panel.showLines(this.source);
-            panel.setStatLine("Replaying "+this.currentMacro, "info");
-        }
+        notifyPanelShowLines(this.win_id, this.source, this.currentMacro);
+        notifyPanelStatLine(this.win_id, "Replaying "+this.currentMacro, "info");
         // start replaying
         this.globalTimer.start();
         this.playNextAction("start");
@@ -3418,9 +3642,7 @@ MacroPlayer.prototype.exec = function(action) {
         });
 
         // highlight action
-        var panel = context[this.win_id].panelWindow;
-        if (panel && !panel.closed)
-            panel.highlightLine(action.line);
+        notifyPanelHighlight(this.win_id, action.line);
     }
 
     this._ActionTable[action.name](action.args);
@@ -3450,9 +3672,8 @@ MacroPlayer.prototype.playNextAction = function(caller_id) {
     if (!this.playing)
         return;
 
-    var panel = context[this.win_id].panelWindow;
-    if (panel && !panel.closed && !this.retryInterval) {
-        panel.setStatLine("Replaying "+this.currentMacro, "info");
+    if (!this.retryInterval) {
+        notifyPanelStatLine(this.win_id, "Replaying "+this.currentMacro, "info");
     }
 
     // call "each run" initialization routine
@@ -3510,9 +3731,7 @@ MacroPlayer.prototype.playNextAction = function(caller_id) {
             if (this.currentLoop < this.times) {
                 this.firstLoop = false;
                 this.currentLoop++;
-                var panel = context[this.win_id].panelWindow;
-                if (panel && !panel.closed)
-                    panel.setLoopValue(this.currentLoop);
+                notifyPanelLoop(this.win_id, this.currentLoop);
                 this.action_stack = this.actions.slice();
                 this.action_stack.reverse();
                 this.next("new loop");
@@ -3875,13 +4094,9 @@ MacroPlayer.prototype.stop = function() {    // Stop playing
     badge.clearText(this.win_id);
 
     // reset panel
-    var panel = context[this.win_id].panelWindow;
-    if (panel && !panel.closed)
-        panel.setLoopValue(1);
-
-    // show macro tree
-    if (panel && !panel.closed)
-        panel.showMacroTree();
+    notifyPanelLoop(this.win_id, 1);
+    notifyPanelShowLines(this.win_id, null, null);
+    notifyPanel(this.win_id, "UPDATE_PANEL_VIEWS", {});
 
     if (this.client_id) {
         var extra = {
