@@ -916,7 +916,7 @@ function handleActionClicked(tab) {
                                 macro.file_id = node.path;
                                 console.log('[iMacros MV3] Saving #Current.iim to Files tab at:', node.path);
 
-                                afio.writeTextFile(node).then(function () {
+                                afio.writeTextFile(node, recorded_macro).then(function () {
                                     console.log('[iMacros MV3] #Current.iim saved successfully');
                                     edit(macro, true);
                                 }).catch(function (err) {
