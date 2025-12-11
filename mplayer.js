@@ -3138,7 +3138,17 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
                 // Intentional global-scope execution of trusted macro JavaScript.
                 func: (code) => { return (0, eval)(code); },
                 args: [scriptCode]
-            }, () => { this.next("URL"); });
+            }, () => {
+                if (chrome.runtime.lastError) {
+                    console.error("[MacroPlayer] scripting.executeScript error:", chrome.runtime.lastError);
+                    this.handleError(new RuntimeError(
+                        chrome.runtime.lastError.message || "javascript: execution failed",
+                        999
+                    ));
+                    return;
+                }
+                this.next("URL");
+            });
         } else {
             console.warn("[MacroPlayer] scripting.executeScript unavailable; skipping javascript: URL");
             this.next("URL");
