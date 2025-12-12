@@ -77,6 +77,11 @@ function persistEditorLaunchData(editorData) {
             return;
         }
 
+        if (editorData === null || typeof editorData !== 'object' || Array.isArray(editorData)) {
+            reject(new Error('Editor launch payload must be an object'));
+            return;
+        }
+
         const sessionStorage = chrome.storage.session;
         const localStorage = chrome.storage.local;
         const primaryStorage = sessionStorage || localStorage;
