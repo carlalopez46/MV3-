@@ -70,6 +70,46 @@ async function createOffscreen() {
 chrome.runtime.onStartup.addListener(createOffscreen);
 chrome.runtime.onInstalled.addListener(createOffscreen);
 
+function persistEditorLaunchData(editorData) {
+    return new Promise((resolve, reject) => {
+        if (!chrome.storage) {
+            reject(new Error('chrome.storage not available for editor launch'));
+            return;
+        }
+
+        const sessionStorage = chrome.storage.session;
+        const localStorage = chrome.storage.local;
+        const primaryStorage = sessionStorage || localStorage;
+        const fallbackStorage = primaryStorage === sessionStorage ? localStorage : null;
+
+        if (!primaryStorage) {
+            reject(new Error('No storage backend available for editor launch'));
+            return;
+        }
+
+        const persistToStorage = (targetStorage, onFailure) => {
+            targetStorage.set(editorData, () => {
+                if (chrome.runtime.lastError) {
+                    onFailure(chrome.runtime.lastError);
+                    return;
+                }
+                resolve();
+            });
+        };
+
+        persistToStorage(primaryStorage, (primaryError) => {
+            if (fallbackStorage) {
+                console.warn('[iMacros SW] Session storage failed, falling back to local storage:', primaryError);
+                persistToStorage(fallbackStorage, (fallbackError) => {
+                    reject(new Error(fallbackError && fallbackError.message ? fallbackError.message : String(fallbackError)));
+                });
+            } else {
+                reject(new Error(primaryError && primaryError.message ? primaryError.message : String(primaryError)));
+            }
+        });
+    });
+}
+
 // Forward action click to Offscreen
 chrome.action.onClicked.addListener(async (tab) => {
     await createOffscreen();
@@ -302,20 +342,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // Handle editor window creation request from Offscreen Document
     if (msg.command === "openEditorWindow") {
-        chrome.windows.create({
-            url: "editor/editor.html",
-            type: "popup",
-            width: 640,
-            height: 480
-        }, (win) => {
-            if (chrome.runtime.lastError) {
-                console.error('[iMacros SW] Failed to create editor window:', chrome.runtime.lastError);
-                sendResponse({ success: false, error: chrome.runtime.lastError.message });
-            } else {
-                console.log('[iMacros SW] Editor window created:', win.id);
-                sendResponse({ success: true, windowId: win.id });
-            }
+        const editorData = msg.editorData;
+
+        const persistPromise = editorData ? persistEditorLaunchData(editorData) : Promise.resolve();
+
+        persistPromise.then(() => {
+            chrome.windows.create({
+                url: "editor/editor.html",
+                type: "popup",
+                width: 640,
+                height: 480
+            }, (win) => {
+                if (chrome.runtime.lastError) {
+                    console.error('[iMacros SW] Failed to create editor window:', chrome.runtime.lastError);
+                    sendResponse({ success: false, error: chrome.runtime.lastError.message });
+                } else {
+                    console.log('[iMacros SW] Editor window created:', win.id);
+                    sendResponse({ success: true, windowId: win.id });
+                }
+            });
+        }).catch((error) => {
+            console.error('[iMacros SW] Failed to persist editor data:', error);
+            sendResponse({ success: false, error: error && error.message ? error.message : String(error) });
         });
+
         return true;
     }
 

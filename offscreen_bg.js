@@ -1419,19 +1419,8 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 globalScope.edit = function (macro, overwrite, line) {
     console.log("[iMacros Offscreen] Requesting Service Worker to open editor for:", macro.name);
 
-    // Check if chrome.storage is available
-    if (typeof chrome === 'undefined' || !chrome.storage) {
-        console.error("[iMacros Offscreen] chrome.storage not available");
-        return;
-    }
-
-    const sessionStorage = chrome.storage.session;
-    const localStorage = chrome.storage.local;
-    const primaryStorage = sessionStorage || localStorage;
-    const fallbackStorage = primaryStorage === sessionStorage ? localStorage : null;
-
-    if (!primaryStorage) {
-        console.error("[iMacros Offscreen] No storage backend available for editor launch");
+    if (!chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
+        console.error("[iMacros Offscreen] chrome.runtime messaging not available");
         return;
     }
 
@@ -1441,31 +1430,17 @@ globalScope.edit = function (macro, overwrite, line) {
         "editorStartLine": line || 0
     };
 
-    function persistEditorData(targetStorage, onSuccess, onFailure) {
-        targetStorage.set(editorData, function () {
-            if (chrome.runtime.lastError) {
-                onFailure(chrome.runtime.lastError);
-                return;
-            }
-            onSuccess();
-        });
-    }
+    chrome.runtime.sendMessage({
+        command: "openEditorWindow",
+        editorData
+    }, (response) => {
+        if (chrome.runtime.lastError) {
+            console.error("[iMacros Offscreen] Failed to request editor window:", chrome.runtime.lastError);
+            return;
+        }
 
-    function requestEditorWindow() {
-        // Request Service Worker to open the editor window
-        chrome.runtime.sendMessage({
-            command: "openEditorWindow"
-        });
-    }
-
-    persistEditorData(primaryStorage, requestEditorWindow, function (error) {
-        if (fallbackStorage && primaryStorage === sessionStorage) {
-            console.warn("[iMacros Offscreen] Session storage failed, falling back to local storage:", error);
-            persistEditorData(fallbackStorage, requestEditorWindow, function (fallbackError) {
-                console.error("[iMacros Offscreen] Failed to save macro data for editor even in local storage:", fallbackError);
-            });
-        } else {
-            console.error("[iMacros Offscreen] Failed to save macro data for editor:", error);
+        if (response && response.success === false) {
+            console.error("[iMacros Offscreen] Service Worker reported failure to open editor:", response.error);
         }
     });
 };
