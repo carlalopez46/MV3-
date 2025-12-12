@@ -384,11 +384,13 @@ window.addEventListener("load", function () {
             // Initialize editor
             initializeEditor();
 
-            // Optional: Clear storage after loading to prevent stale data
-            storage.remove(["currentMacroToEdit", "editorOverwriteMode", "editorStartLine"], function () {
-                if (chrome.runtime.lastError) {
-                    console.warn("[iMacros Editor] Failed to clear storage:", chrome.runtime.lastError);
-                }
+            // Clear from all backends to prevent stale data
+            storages.forEach((st) => {
+                st.remove(["currentMacroToEdit", "editorOverwriteMode", "editorStartLine"], function () {
+                    if (chrome.runtime.lastError) {
+                        console.warn("[iMacros Editor] Failed to clear storage from backend:", chrome.runtime.lastError);
+                    }
+                });
             });
         });
     }

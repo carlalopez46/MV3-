@@ -38,67 +38,6 @@ if (typeof registerSharedBackgroundHandlers === 'function') {
     console.error("registerSharedBackgroundHandlers is not available; shared background handlers not registered");
 }
 
-function edit(macro, overwrite, line) {
-    console.log("[iMacros] Requesting editor for:", macro && macro.name);
-
-    // MV3-safe editor opener: stash data in storage and ask the Service Worker
-    // to create a popup via chrome.windows.create.
-    const editorData = {
-        currentMacroToEdit: macro,
-        editorOverwriteMode: overwrite || false,
-        editorStartLine: line || 0
-    };
-
-    if (typeof chrome === 'undefined' || !chrome.storage) {
-        console.error("[iMacros] chrome.storage not available for editor launch");
-        return;
-    }
-
-    // Prefer session storage for transient editor data, fall back to local if unavailable
-    const sessionStorage = chrome.storage.session;
-    const localStorage = chrome.storage.local;
-    const primaryStorage = sessionStorage || localStorage;
-    const fallbackStorage = primaryStorage === sessionStorage ? localStorage : null;
-
-    if (!primaryStorage) {
-        console.error("[iMacros] No storage backend available for editor launch");
-        return;
-    }
-
-    function requestEditorWindow() {
-        chrome.runtime.sendMessage({ command: 'openEditorWindow' }, function (response) {
-            if (chrome.runtime.lastError) {
-                console.error("[iMacros] Failed to open editor window:", chrome.runtime.lastError);
-            } else {
-                console.log("[iMacros] Editor window request dispatched", response);
-            }
-        });
-    }
-
-    function persistEditorData(targetStorage, onSuccess, onFailure) {
-        targetStorage.set(editorData, function () {
-            if (chrome.runtime.lastError) {
-                onFailure(chrome.runtime.lastError);
-                return;
-            }
-            onSuccess();
-        });
-    }
-
-    persistEditorData(primaryStorage, requestEditorWindow, function (error) {
-        // If session storage fails (e.g., quota), retry with local storage
-        if (fallbackStorage && primaryStorage === sessionStorage) {
-            console.warn("[iMacros] Session storage failed, falling back to local storage:", error);
-            persistEditorData(fallbackStorage, requestEditorWindow, function (fallbackError) {
-                console.error("[iMacros] Failed to persist editor data even in local storage:", fallbackError);
-            });
-        } else {
-            console.error("[iMacros] Failed to persist editor data:", error);
-        }
-    });
-}
-
-
 // called from panel
 // we use it to find and set win_id for that panel
 // NOTE: unfortnunately, it seems there is no more straightforward way
