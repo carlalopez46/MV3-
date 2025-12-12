@@ -364,18 +364,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         const win_id = request.win_id;
         console.log('[Offscreen] Received startRecording for window:', win_id);
 
-        const start = () => {
-            if (context[win_id] && context[win_id].recorder) {
-                context[win_id].recorder.start();
-                sendResponse({ success: true });
-            } else {
-                sendResponse({ success: false, error: "Recorder not found" });
-            }
-        };
+        const start = () => executeContextMethod(win_id, 'recorder.start', sendResponse, []);
 
         if (!context[win_id]) {
             context.init(win_id).then(start).catch(err => {
-                sendResponse({ success: false, error: err.message });
+                sendResponse({ success: false, error: err.message || String(err) });
             });
         } else {
             start();
@@ -400,7 +393,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 // we need to access it. Ah, executeContextMethod is defined below in the same scope.
                 executeContextMethod(win_id, 'playFile', sendResponse, [filePath, loop]);
             }).catch(err => {
-                sendResponse({ success: false, error: err.message });
+                sendResponse({ success: false, error: err.message || String(err) });
             });
         } else {
             executeContextMethod(win_id, 'playFile', sendResponse, [filePath, loop]);
@@ -470,15 +463,29 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (request.command === 'pause') {
         const win_id = request.win_id;
         console.log('[Offscreen] Received pause command');
-        if (context[win_id] && context[win_id].mplayer) {
-            if (context[win_id].mplayer.paused) {
-                context[win_id].mplayer.unpause();
-            } else {
-                context[win_id].mplayer.pause();
-            }
-            sendResponse({ success: true });
+        const runPause = () => executeContextMethod(win_id, 'pause', sendResponse, []);
+
+        if (!context[win_id]) {
+            context.init(win_id).then(runPause).catch(err => {
+                sendResponse({ success: false, error: err.message || String(err) });
+            });
         } else {
-            sendResponse({ success: false, error: "Player not found" });
+            runPause();
+        }
+        return true;
+    }
+
+    if (request.command === 'unpause') {
+        const win_id = request.win_id;
+        console.log('[Offscreen] Received unpause command');
+        const runUnpause = () => executeContextMethod(win_id, 'unpause', sendResponse, []);
+
+        if (!context[win_id]) {
+            context.init(win_id).then(runUnpause).catch(err => {
+                sendResponse({ success: false, error: err.message || String(err) });
+            });
+        } else {
+            runUnpause();
         }
         return true;
     }
@@ -594,7 +601,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     context.init(win_id).then(() => {
                         executeContextMethod(win_id, method, sendResponse, request.args);
                     }).catch(err => {
-                        sendResponse({ success: false, error: `Failed to initialize context: ${err.message}` });
+                        sendResponse({ success: false, error: `Failed to initialize context: ${err.message || String(err)}` });
                     });
                     return true;
                 }
@@ -609,8 +616,18 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         function executeContextMethod(win_id, method, sendResponse, args) {
             if (method === "recorder.start") {
                 console.log("[Offscreen] Starting recorder...");
-                context[win_id].recorder.start();
-                sendResponse({ success: true });
+                const rec = context[win_id].recorder;
+                if (!rec) {
+                    sendResponse({ success: false, error: `Recorder not initialized for window ${win_id}` });
+                    return;
+                }
+                try {
+                    rec.start();
+                    sendResponse({ success: true });
+                } catch (e) {
+                    console.error('[Offscreen] Error starting recorder:', e);
+                    sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+                }
             } else if (method === "stop") {
                 console.log("[Offscreen] Stopping...");
                 let stoppedPlayer = false;
@@ -639,6 +656,66 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 }
 
                 sendResponse({ success: true, stoppedPlayer, stoppedRecorder });
+            } else if (method === "pause") {
+                console.log("[Offscreen] Pausing/Unpausing player...");
+                const mplayer = context[win_id].mplayer;
+                if (!mplayer) {
+                    sendResponse({ success: false, error: 'mplayer not available for pause' });
+                    return;
+                }
+
+                const pausedState = mplayer.paused;
+                console.log('[Offscreen] Current paused state:', pausedState);
+
+                if (pausedState) {
+                    if (typeof mplayer.unpause === 'function') {
+                        try {
+                            mplayer.unpause();
+                            sendResponse({ success: true, resumed: true });
+                        } catch (e) {
+                            console.error('[Offscreen] Error unpausing mplayer:', e);
+                            sendResponse({ success: false, error: 'Error unpausing mplayer', details: String(e) });
+                        }
+                    } else {
+                        sendResponse({ success: false, error: 'unpause method not available' });
+                    }
+                } else {
+                    if (typeof mplayer.pause === 'function') {
+                        try {
+                            mplayer.pause();
+                            sendResponse({ success: true, resumed: false });
+                        } catch (e) {
+                            console.error('[Offscreen] Error pausing mplayer:', e);
+                            sendResponse({ success: false, error: 'Error pausing mplayer', details: String(e) });
+                        }
+                    } else {
+                        sendResponse({ success: false, error: 'pause method not available' });
+                    }
+                }
+            } else if (method === "unpause") {
+                console.log("[Offscreen] Unpausing player...");
+                const mplayer = context[win_id].mplayer;
+                if (!mplayer) {
+                    sendResponse({ success: false, error: 'mplayer not available for unpause' });
+                    return;
+                }
+
+                if (!mplayer.paused) {
+                    sendResponse({ success: false, error: 'mplayer is not paused' });
+                    return;
+                }
+
+                if (typeof mplayer.unpause === 'function') {
+                    try {
+                        mplayer.unpause();
+                        sendResponse({ success: true, resumed: true });
+                    } catch (e) {
+                        console.error('[Offscreen] Error unpausing mplayer:', e);
+                        sendResponse({ success: false, error: 'Error unpausing mplayer', details: String(e) });
+                    }
+                } else {
+                    sendResponse({ success: false, error: 'unpause method not available' });
+                }
             } else if (method === "mplayer.play") {
                 console.log("[Offscreen] Calling mplayer.play with:", args[0].name);
                 const mplayer = context[win_id].mplayer;
@@ -784,42 +861,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         switch (request.command) {
             case 'actionClicked':
                 handleActionClicked(request.tab);
-                break;
-
-            case 'playMacro':
-                playMacro(request.macro, request.win_id);
-                break;
-
-            case 'record':
-                var win_id = request.win_id;
-                if (context[win_id]) {
-                    context[win_id].recorder.start();
-                }
-                break;
-
-            case 'stop':
-                var win_id = request.win_id;
-                if (context[win_id]) {
-                    if (context[win_id].mplayer.playing) {
-                        context[win_id].mplayer.stop();
-                    } else if (context[win_id].recorder.recording) {
-                        context[win_id].recorder.stop();
-                    }
-                }
-                break;
-
-            case 'pause':
-                var win_id = request.win_id;
-                if (context[win_id] && context[win_id].mplayer) {
-                    context[win_id].mplayer.pause();
-                }
-                break;
-
-            case 'unpause':
-                var win_id = request.win_id;
-                if (context[win_id] && context[win_id].mplayer) {
-                    context[win_id].mplayer.unpause();
-                }
                 break;
 
             case 'notificationClicked':
@@ -969,6 +1010,7 @@ function handleActionClicked(tab) {
     });
 }
 
+// Helper for opening a new tab (single authoritative definition)
 function addTab(url, win_id) {
     var args = { url: url };
     if (win_id)
@@ -1648,19 +1690,6 @@ globalScope.edit = function (macro, overwrite, line) {
         }
     );
 })();
-
-
-function addTab(url, win_id) {
-    var args = { url: url };
-    if (win_id)
-        args.windowId = parseInt(win_id);
-
-    chrome.tabs.create(args, function (tab) {
-        if (chrome.runtime.lastError) {
-            console.error("Error creating tab:", chrome.runtime.lastError);
-        }
-    });
-}
 
 
 function showNotification(win_id, args) {
