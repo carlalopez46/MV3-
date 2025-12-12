@@ -55,18 +55,17 @@ function edit(macro, overwrite, line) {
     }
 
     // Prefer session storage for transient editor data, fall back to local if unavailable
-    const storage = chrome.storage.session || chrome.storage.local;
-    if (!storage) {
+    const sessionStorage = chrome.storage.session;
+    const localStorage = chrome.storage.local;
+    const primaryStorage = sessionStorage || localStorage;
+    const fallbackStorage = primaryStorage === sessionStorage ? localStorage : null;
+
+    if (!primaryStorage) {
         console.error("[iMacros] No storage backend available for editor launch");
         return;
     }
 
-    storage.set(editorData, function () {
-        if (chrome.runtime.lastError) {
-            console.error("[iMacros] Failed to persist editor data:", chrome.runtime.lastError);
-            return;
-        }
-
+    function requestEditorWindow() {
         chrome.runtime.sendMessage({ command: 'openEditorWindow' }, function (response) {
             if (chrome.runtime.lastError) {
                 console.error("[iMacros] Failed to open editor window:", chrome.runtime.lastError);
@@ -74,6 +73,28 @@ function edit(macro, overwrite, line) {
                 console.log("[iMacros] Editor window request dispatched", response);
             }
         });
+    }
+
+    function persistEditorData(targetStorage, onSuccess, onFailure) {
+        targetStorage.set(editorData, function () {
+            if (chrome.runtime.lastError) {
+                onFailure(chrome.runtime.lastError);
+                return;
+            }
+            onSuccess();
+        });
+    }
+
+    persistEditorData(primaryStorage, requestEditorWindow, function (error) {
+        // If session storage fails (e.g., quota), retry with local storage
+        if (fallbackStorage && primaryStorage === sessionStorage) {
+            console.warn("[iMacros] Session storage failed, falling back to local storage:", error);
+            persistEditorData(fallbackStorage, requestEditorWindow, function (fallbackError) {
+                console.error("[iMacros] Failed to persist editor data even in local storage:", fallbackError);
+            });
+        } else {
+            console.error("[iMacros] Failed to persist editor data:", error);
+        }
     });
 }
 
