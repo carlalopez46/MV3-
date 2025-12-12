@@ -32,6 +32,14 @@ function MacroPlayer(win_id) {
     this._onTabUpdated = this.onTabUpdated.bind(this);
     this._onActivated = this.onTabActivated.bind(this);
 
+    // Initialize timers and loading flags early so that tab events forwarded
+    // from the Service Worker cannot hit undefined objects before a macro run
+    // begins (Offscreen documents do not receive chrome.tabs events directly).
+    this.timers = new Map();
+    this.waitingForPageLoad = false;
+    this.inWaitCommand = false;
+    this.waitingForDelay = false;
+
     // bindings to monitor network activity
     this.onAuth = this.onAuthRequired.bind(this);
     // this.onRequest = this.onBeforeRequest.bind(this);
