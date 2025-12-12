@@ -1269,19 +1269,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
-    if (msg.command === 'openEditorWindow') {
-        // Open the editor window
-        chrome.windows.create({
-            url: 'editor/editor.html',
-            type: 'popup',
-            width: 660,
-            height: 520 // Slightly larger than content
-        }, (win) => {
-            console.log('[iMacros SW] Editor window created:', win.id);
-        });
-        return true;
-    }
-
     // NOTE: openPanel command is handled by the main handler above (lines 221-302)
     // Do NOT add duplicate handler here - it causes panel to open twice
 });

@@ -1197,10 +1197,13 @@ let cachedManifestVersion = null;
 function getSafeManifestVersion() {
     if (cachedManifestVersion) return cachedManifestVersion;
     try {
-        if (!chrome || !chrome.runtime || typeof chrome.runtime.getManifest !== "function") {
-            throw new Error("chrome.runtime.getManifest not available");
+        if (chrome && chrome.runtime && typeof chrome.runtime.getManifest === "function") {
+            cachedManifestVersion = chrome.runtime.getManifest().version || "unknown";
+        } else {
+            // Some contexts (e.g., sandboxed iframes) do not expose chrome.runtime.
+            console.warn("[iMacros] chrome.runtime.getManifest not available; using 'unknown' version");
+            cachedManifestVersion = "unknown";
         }
-        cachedManifestVersion = chrome.runtime.getManifest().version || "unknown";
     } catch (e) {
         console.error("[iMacros] Failed to read manifest version for redirect", e);
         cachedManifestVersion = "unknown";
