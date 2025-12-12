@@ -1419,26 +1419,29 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 globalScope.edit = function (macro, overwrite, line) {
     console.log("[iMacros Offscreen] Requesting Service Worker to open editor for:", macro.name);
 
-    // Check if chrome.storage is available
-    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
-        console.error("[iMacros Offscreen] chrome.storage.local not available");
+    if (!chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
+        console.error("[iMacros Offscreen] chrome.runtime messaging not available");
         return;
     }
 
-    // Use chrome.storage.local to pass data to the new window (more reliable than URL params)
-    chrome.storage.local.set({
+    const editorData = {
         "currentMacroToEdit": macro,
         "editorOverwriteMode": overwrite,
         "editorStartLine": line || 0
-    }, function () {
+    };
+
+    chrome.runtime.sendMessage({
+        command: "openEditorWindow",
+        editorData
+    }, (response) => {
         if (chrome.runtime.lastError) {
-            console.error("[iMacros Offscreen] Failed to save macro data for editor:", chrome.runtime.lastError);
+            console.error("[iMacros Offscreen] Failed to request editor window:", chrome.runtime.lastError);
             return;
         }
-        // Request Service Worker to open the editor window
-        chrome.runtime.sendMessage({
-            command: "openEditorWindow"
-        });
+
+        if (response && response.success === false) {
+            console.error("[iMacros Offscreen] Service Worker reported failure to open editor:", response.error);
+        }
     });
 };
 

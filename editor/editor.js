@@ -135,11 +135,16 @@ var Editor = {
             win_id: this.win_id
         };
 
-        // MV3: Use chrome.storage.session to pass dialog args
-        // Generate a unique key for this dialog instance
+        // Prefer session storage for transient dialog args; fall back to local if session isn't available
         var dialogKey = 'saveAsDialog_' + Date.now();
+        var store = (chrome.storage && chrome.storage.session) || (chrome.storage && chrome.storage.local);
+        if (!store) {
+            console.error("[iMacros] No storage backend available for dialog args");
+            alert("Failed to open Save As dialog (no storage backend available).");
+            return true;
+        }
 
-        chrome.storage.session.set({
+        store.set({
             [dialogKey]: { save_data: save_data }
         }, function () {
             if (chrome.runtime.lastError) {
@@ -330,44 +335,74 @@ function initializeEditor() {
 }
 
 window.addEventListener("load", function () {
-    console.log("[iMacros Editor] Loading macro data from chrome.storage.local...");
+    const sessionStore = chrome.storage && chrome.storage.session;
+    const localStore = chrome.storage && chrome.storage.local;
+    const storages = [];
 
-    // MV3: Get macro data from chrome.storage.local
-    chrome.storage.local.get(["currentMacroToEdit", "editorOverwriteMode", "editorStartLine"], function (data) {
-        if (chrome.runtime.lastError) {
-            console.error("[iMacros Editor] Failed to load data:", chrome.runtime.lastError);
-            alert("Error: Failed to load macro data");
-            return;
-        }
+    if (sessionStore) {
+        storages.push(sessionStore);
+    }
+    if (localStore && localStore !== sessionStore) {
+        storages.push(localStore);
+    }
 
-        if (!data.currentMacroToEdit) {
-            console.error("[iMacros Editor] No macro data found in storage");
-            // Try legacy fallback
+    if (!storages.length) {
+        console.error("[iMacros Editor] No storage backend available for macro data");
+        alert("Error: Unable to access macro data");
+        return;
+    }
+
+    console.log("[iMacros Editor] Loading macro data from storage...");
+
+    function loadFromStorage(index) {
+        if (index >= storages.length) {
+            console.error("[iMacros Editor] No macro data found in available storage backends");
             if (!tryLegacyFallback()) {
                 alert("Error: No macro data found to edit");
             }
             return;
         }
 
-        console.log("[iMacros Editor] Loaded macro:", data.currentMacroToEdit.name);
-
-        // Set up args object for compatibility with existing code
-        args = {
-            macro: data.currentMacroToEdit,
-            overwrite: data.editorOverwriteMode || false,
-            line: data.editorStartLine || 0
-        };
-
-        // Initialize editor
-        initializeEditor();
-
-        // Optional: Clear storage after loading to prevent stale data
-        chrome.storage.local.remove(["currentMacroToEdit", "editorOverwriteMode", "editorStartLine"], function () {
+        const storage = storages[index];
+        storage.get(["currentMacroToEdit", "editorOverwriteMode", "editorStartLine"], function (data) {
             if (chrome.runtime.lastError) {
-                console.warn("[iMacros Editor] Failed to clear storage:", chrome.runtime.lastError);
+                console.warn("[iMacros Editor] Failed to load data from storage index", index, chrome.runtime.lastError);
+                loadFromStorage(index + 1);
+                return;
             }
+
+            if (!data.currentMacroToEdit) {
+                console.warn("[iMacros Editor] No macro data found in storage index", index, "- trying next backend if available");
+                loadFromStorage(index + 1);
+                return;
+            }
+
+            if (Storage && Storage.getBool && Storage.getBool("debug")) {
+                console.log("[iMacros Editor] Loaded macro:", data.currentMacroToEdit.name);
+            }
+
+            // Set up args object for compatibility with existing code
+            args = {
+                macro: data.currentMacroToEdit,
+                overwrite: data.editorOverwriteMode || false,
+                line: data.editorStartLine || 0
+            };
+
+            // Initialize editor
+            initializeEditor();
+
+            // Clear from all backends to prevent stale data
+            storages.forEach((st) => {
+                st.remove(["currentMacroToEdit", "editorOverwriteMode", "editorStartLine"], function () {
+                    if (chrome.runtime.lastError) {
+                        console.warn("[iMacros Editor] Failed to clear storage from backend:", chrome.runtime.lastError);
+                    }
+                });
+            });
         });
-    });
+    }
+
+    loadFromStorage(0);
 });
 
 

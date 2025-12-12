@@ -38,45 +38,6 @@ if (typeof registerSharedBackgroundHandlers === 'function') {
     console.error("registerSharedBackgroundHandlers is not available; shared background handlers not registered");
 }
 
-function edit(macro, overwrite, line) {
-    console.log("[iMacros] Requesting editor for:", macro && macro.name);
-
-    // MV3-safe editor opener: stash data in storage and ask the Service Worker
-    // to create a popup via chrome.windows.create.
-    const editorData = {
-        currentMacroToEdit: macro,
-        editorOverwriteMode: overwrite || false,
-        editorStartLine: line || 0
-    };
-
-    if (typeof chrome === 'undefined' || !chrome.storage) {
-        console.error("[iMacros] chrome.storage not available for editor launch");
-        return;
-    }
-
-    const storage = chrome.storage.local || chrome.storage.session;
-    if (!storage) {
-        console.error("[iMacros] No storage backend available for editor launch");
-        return;
-    }
-
-    storage.set(editorData, function () {
-        if (chrome.runtime.lastError) {
-            console.error("[iMacros] Failed to persist editor data:", chrome.runtime.lastError);
-            return;
-        }
-
-        chrome.runtime.sendMessage({ command: 'openEditorWindow' }, function (response) {
-            if (chrome.runtime.lastError) {
-                console.error("[iMacros] Failed to open editor window:", chrome.runtime.lastError);
-            } else {
-                console.log("[iMacros] Editor window request dispatched", response);
-            }
-        });
-    });
-}
-
-
 // called from panel
 // we use it to find and set win_id for that panel
 // NOTE: unfortnunately, it seems there is no more straightforward way
