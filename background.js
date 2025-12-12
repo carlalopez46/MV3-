@@ -33,7 +33,7 @@ const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
 const executionState = new ExecutionStateMachine({
     storage: chrome.storage.session || chrome.storage.local,
     alarmNamespace: chrome.alarms,
-    heartbeatMinutes: 0.25
+    heartbeatMinutes: 1 // Chrome MV3 periodic alarms clamp below 1 minute
 });
 
 executionState.hydrate().catch((error) => {
@@ -1252,24 +1252,8 @@ async function ensureOffscreenDocument() {
 async function sendMessageToOffscreen(msg) {
     const payload = { target: 'offscreen', ...msg };
 
-    const send = async () => {
-        await ensureOffscreenDocument();
-        return messagingBus.sendRuntime(payload, { context: 'offscreen_bridge' });
-    };
-
-    try {
-        return await send();
-    } catch (e) {
-        console.warn("[iMacros SW] Msg to offscreen failed, retrying once...", e.message);
-        await new Promise((resolve) => setTimeout(resolve, 150));
-
-        try {
-            return await send();
-        } catch (e2) {
-            console.error("[iMacros SW] Msg to offscreen failed permanently:", e2.message);
-            return null;
-        }
-    }
+    await ensureOffscreenDocument();
+    return messagingBus.sendRuntime(payload, { expectAck: true });
 }
 
 // =============================================================================

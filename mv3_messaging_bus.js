@@ -54,11 +54,19 @@
         async _retry(fn, opts, channelLabel) {
             const maxRetries = opts.maxRetries ?? this.options.maxRetries;
             const baseBackoff = opts.backoffMs ?? this.options.backoffMs;
+            const ackTimeout = opts.ackTimeoutMs ?? this.options.ackTimeoutMs;
+            const enforceAck = opts.expectAck === true;
 
             for (let attempt = 0; attempt <= maxRetries; attempt++) {
                 try {
-                    const result = await fn();
-                    if (opts.expectAck && !this._hasAck(result)) {
+                    const resultPromise = enforceAck && typeof ackTimeout === 'number'
+                        ? Promise.race([
+                            fn(),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('Ack timeout')), ackTimeout))
+                        ])
+                        : fn();
+                    const result = await resultPromise;
+                    if (enforceAck && !this._hasAck(result)) {
                         throw new Error(`No ack received on ${channelLabel || 'channel'}`);
                     }
                     return result;
@@ -70,7 +78,6 @@
                     await new Promise((resolve) => setTimeout(resolve, delay));
                 }
             }
-            throw new Error(`Failed to deliver message on ${channelLabel || 'channel'}`);
         }
 
         _resolveWithLastError(resolve, reject, response) {
@@ -90,7 +97,7 @@
 
         _hasAck(response) {
             if (!response) return false;
-            return Boolean(response.ack || response.success || response.ok);
+            return response.ack === true || response.success === true || response.ok === true;
         }
     }
 
