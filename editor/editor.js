@@ -330,10 +330,17 @@ function initializeEditor() {
 }
 
 window.addEventListener("load", function () {
-    console.log("[iMacros Editor] Loading macro data from chrome.storage.local...");
+    const storage = (chrome.storage && (chrome.storage.session || chrome.storage.local));
+    if (!storage) {
+        console.error("[iMacros Editor] No storage backend available for macro data");
+        alert("Error: Unable to access macro data");
+        return;
+    }
 
-    // MV3: Get macro data from chrome.storage.local
-    chrome.storage.local.get(["currentMacroToEdit", "editorOverwriteMode", "editorStartLine"], function (data) {
+    console.log("[iMacros Editor] Loading macro data from storage...");
+
+    // MV3: Get macro data from the same storage used to stash it (session preferred)
+    storage.get(["currentMacroToEdit", "editorOverwriteMode", "editorStartLine"], function (data) {
         if (chrome.runtime.lastError) {
             console.error("[iMacros Editor] Failed to load data:", chrome.runtime.lastError);
             alert("Error: Failed to load macro data");
@@ -362,7 +369,7 @@ window.addEventListener("load", function () {
         initializeEditor();
 
         // Optional: Clear storage after loading to prevent stale data
-        chrome.storage.local.remove(["currentMacroToEdit", "editorOverwriteMode", "editorStartLine"], function () {
+        storage.remove(["currentMacroToEdit", "editorOverwriteMode", "editorStartLine"], function () {
             if (chrome.runtime.lastError) {
                 console.warn("[iMacros Editor] Failed to clear storage:", chrome.runtime.lastError);
             }
