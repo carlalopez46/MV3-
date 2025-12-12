@@ -54,7 +54,8 @@ function edit(macro, overwrite, line) {
         return;
     }
 
-    const storage = chrome.storage.local || chrome.storage.session;
+    // Prefer session storage for transient editor data, fall back to local if unavailable
+    const storage = chrome.storage.session || chrome.storage.local;
     if (!storage) {
         console.error("[iMacros] No storage backend available for editor launch");
         return;
