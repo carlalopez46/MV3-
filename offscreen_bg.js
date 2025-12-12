@@ -1010,6 +1010,7 @@ function handleActionClicked(tab) {
     });
 }
 
+// Helper for opening a new tab (single authoritative definition)
 function addTab(url, win_id) {
     var args = { url: url };
     if (win_id)
