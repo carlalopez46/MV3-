@@ -611,7 +611,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
-    // --- BROADCAST_TO_WINDOW: Broadcast message to all tabs in a window ---
+    // --- BROADCAST_TO_WINDOW: Broadcast message to all tabs in a window (or all tabs if win_id not specified) ---
     if (msg.command === 'BROADCAST_TO_WINDOW') {
         const { win_id, message } = msg;
         if (!message) {
