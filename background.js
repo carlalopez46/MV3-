@@ -611,15 +611,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
-    // --- BROADCAST_TO_WINDOW: Broadcast message to all tabs in a window ---
+    // --- BROADCAST_TO_WINDOW: Broadcast message to all tabs in a window (or all tabs if win_id not specified) ---
     if (msg.command === 'BROADCAST_TO_WINDOW') {
         const { win_id, message } = msg;
-        if (!win_id || !message) {
-            sendResponse({ error: 'Missing win_id or message' });
+        if (!message) {
+            sendResponse({ error: 'Missing message' });
             return true;
         }
 
-        chrome.tabs.query({ windowId: win_id }, (tabs) => {
+        const queryInfo = win_id ? { windowId: win_id } : {};
+
+        chrome.tabs.query(queryInfo, (tabs) => {
             if (chrome.runtime.lastError) {
                 console.error('[iMacros SW] BROADCAST_TO_WINDOW query error:', chrome.runtime.lastError);
                 sendResponse({ error: chrome.runtime.lastError.message });

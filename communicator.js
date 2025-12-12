@@ -189,13 +189,15 @@ Communicator.prototype.broadcastMessage = function (topic, data, win_id) {
     // 必要に応じて実装するか、runtime.sendMessageで代用を検討
     if (chrome.tabs && chrome.tabs.query) {
         // Direct access (Service Worker or extension page)
-        chrome.tabs.query({ windowId: win_id }, (tabs) => {
+        const queryInfo = win_id ? { windowId: win_id } : {};
+
+        chrome.tabs.query(queryInfo, (tabs) => {
             if (!tabs) return;
             tabs.forEach((tab) => {
                 chrome.tabs.sendMessage(tab.id, { topic: topic, data: data }, () => { });
             });
         });
-    } else if (win_id) {
+    } else {
         // Proxy through Service Worker (Offscreen Document)
         chrome.runtime.sendMessage({
             command: 'BROADCAST_TO_WINDOW',
