@@ -1109,19 +1109,39 @@ var dialogUtils = (function () {
             if (typeof chrome.windows === 'undefined') {
                 console.log("[iMacros Utils] openDialog proxying to Service Worker");
                 return new Promise(function (resolve, reject) {
+                    // Set default dimensions/timeout the same way as the chrome.windows path
+                    const width = pos && pos.width ? pos.width : 400;
+                    const height = pos && pos.height ? pos.height : 250;
+                    const timeout = (pos && pos.timeout) || args.timeout || DEFAULT_DIALOG_TIMEOUT_MS;
+
                     chrome.runtime.sendMessage({
                         command: "openDialog",
                         url: url,
                         name: name,
                         args: args,
-                        pos: pos
+                        pos: Object.assign({}, pos, { width, height })
                     }, function (response) {
                         if (chrome.runtime.lastError) {
                             reject(new Error(chrome.runtime.lastError.message));
-                        } else if (response && response.error) {
-                            reject(new Error(response.error));
-                        } else {
-                            resolve(response.result);
+                            return;
+                        }
+                        if (!response || response.error) {
+                            reject(new Error((response && response.error) || "Failed to open dialog"));
+                            return;
+                        }
+
+                        const win = response.result;
+                        if (!win || typeof win.id !== 'number') {
+                            reject(new Error('Invalid dialog window returned'));
+                            return;
+                        }
+
+                        // Mirror the normal path by registering args/resolver locally so GET_DIALOG_ARGS works
+                        dialogArgs.set(win.id, args);
+                        dialogResolvers.set(win.id, resolve);
+
+                        if (timeout > 0) {
+                            setDialogTimeout(win.id, timeout, resolve);
                         }
                     });
                 });
@@ -1177,10 +1197,13 @@ let cachedManifestVersion = null;
 function getSafeManifestVersion() {
     if (cachedManifestVersion) return cachedManifestVersion;
     try {
-        if (!chrome || !chrome.runtime || typeof chrome.runtime.getManifest !== "function") {
-            throw new Error("chrome.runtime.getManifest not available");
+        if (chrome && chrome.runtime && typeof chrome.runtime.getManifest === "function") {
+            cachedManifestVersion = chrome.runtime.getManifest().version || "unknown";
+        } else {
+            // Some contexts (e.g., sandboxed iframes) do not expose chrome.runtime.
+            console.warn("[iMacros] chrome.runtime.getManifest not available; using 'unknown' version");
+            cachedManifestVersion = "unknown";
         }
-        cachedManifestVersion = chrome.runtime.getManifest().version || "unknown";
     } catch (e) {
         console.error("[iMacros] Failed to read manifest version for redirect", e);
         cachedManifestVersion = "unknown";

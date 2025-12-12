@@ -53,52 +53,6 @@ window.updatePanels = function () {
     console.error("registerSharedBackgroundHandlers is not available; shared background handlers not registered");
 })();
 
-function edit(macro, overwrite, line) {
-    console.log("[iMacros Offscreen] Opening editor for:", macro.name);
-
-    // MV3: Store macro data in chrome.storage.local instead of window.args
-    const editorData = {
-        currentMacroToEdit: macro,
-        editorOverwriteMode: overwrite || false,
-        editorStartLine: line || 0
-    };
-
-    // Check if chrome.storage is available
-    if (typeof chrome === 'undefined' || !chrome.storage) {
-        console.error("[iMacros Offscreen] chrome.storage not available");
-        return;
-    }
-
-    // Use chrome.storage.local if available, otherwise try session
-    const storage = chrome.storage.local || chrome.storage.session;
-
-    if (!storage) {
-        console.error("[iMacros Offscreen] No storage API available");
-        return;
-    }
-
-    storage.set(editorData, function () {
-        if (chrome.runtime.lastError) {
-            console.error("[iMacros Offscreen] Failed to store editor data:", chrome.runtime.lastError);
-            return;
-        }
-
-        console.log("[iMacros Offscreen] Editor data stored, requesting editor window");
-
-        // Request Service Worker to open editor window
-        chrome.runtime.sendMessage({
-            command: 'openEditorWindow'
-        }, function (response) {
-            if (chrome.runtime.lastError) {
-                console.error("[iMacros Offscreen] Failed to open editor:", chrome.runtime.lastError);
-            } else {
-                console.log("[iMacros Offscreen] Editor window opened successfully");
-            }
-        });
-    });
-}
-
-
 // called from panel
 // we use it to find and set win_id for that panel
 // NOTE: unfortnunately, it seems there is no more straightforward way

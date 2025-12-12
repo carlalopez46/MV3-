@@ -39,16 +39,41 @@ if (typeof registerSharedBackgroundHandlers === 'function') {
 }
 
 function edit(macro, overwrite, line) {
-    var features = "titlebar=no,menubar=no,location=no," +
-        "resizable=yes,scrollbars=yes,status=no," +
-        "width=640,height=480";
-    // var win = window.open("editor/simple_editor.html",
-    //     null, features);
-    // console.info("Edit macro: %O", macro);
-    var win = window.open("editor/editor.html",
-        null, features);
+    console.log("[iMacros] Requesting editor for:", macro && macro.name);
 
-    dialogUtils.setArgs(win, { macro: macro, overwrite: overwrite, line: line || 0 });
+    // MV3-safe editor opener: stash data in storage and ask the Service Worker
+    // to create a popup via chrome.windows.create.
+    const editorData = {
+        currentMacroToEdit: macro,
+        editorOverwriteMode: overwrite || false,
+        editorStartLine: line || 0
+    };
+
+    if (typeof chrome === 'undefined' || !chrome.storage) {
+        console.error("[iMacros] chrome.storage not available for editor launch");
+        return;
+    }
+
+    const storage = chrome.storage.local || chrome.storage.session;
+    if (!storage) {
+        console.error("[iMacros] No storage backend available for editor launch");
+        return;
+    }
+
+    storage.set(editorData, function () {
+        if (chrome.runtime.lastError) {
+            console.error("[iMacros] Failed to persist editor data:", chrome.runtime.lastError);
+            return;
+        }
+
+        chrome.runtime.sendMessage({ command: 'openEditorWindow' }, function (response) {
+            if (chrome.runtime.lastError) {
+                console.error("[iMacros] Failed to open editor window:", chrome.runtime.lastError);
+            } else {
+                console.log("[iMacros] Editor window request dispatched", response);
+            }
+        });
+    });
 }
 
 
