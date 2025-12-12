@@ -467,17 +467,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         const RESTRICTED_SCHEMES = ['chrome://', 'edge://', 'about:', 'file://', 'chrome-extension://'];
 
+        const checkHostPermissions = async () => {
+            try {
+                const granted = await chrome.permissions.contains({ origins: ['<all_urls>', 'file:///*'] });
+                return granted;
+            } catch (e) {
+                // If the API is unavailable or throws, fail open so we still attempt injection
+                console.warn('[iMacros SW] Unable to verify host permissions:', e);
+                return true;
+            }
+        };
+
         const injectContentScripts = async () => {
             // Best-effort injection for cases where the content script was not injected (e.g., site access off)
             try {
                 const tab = await chrome.tabs.get(tab_id).catch(() => null);
                 if (!tab || !tab.url) {
-                    return false;
+                    return { injected: false };
                 }
 
                 if (RESTRICTED_SCHEMES.some((scheme) => tab.url.startsWith(scheme))) {
                     console.warn('[iMacros SW] Skipping content script injection due to restricted scheme:', tab.url);
-                    return false;
+                    return { injected: false, restricted: true };
+                }
+
+                const hasHostPermissions = await checkHostPermissions();
+                if (!hasHostPermissions) {
+                    console.warn('[iMacros SW] Host permissions not granted; cannot inject content scripts');
+                    return { injected: false, missingHostPermissions: true };
                 }
 
                 try {
@@ -485,15 +502,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                         target: { tabId: tab_id, allFrames: true },
                         files: CONTENT_SCRIPT_FILES
                     });
-                    return true;
+                    return { injected: true };
                 } catch (err) {
                     const msg = err && err.message ? err.message : err;
                     console.warn('[iMacros SW] Failed to inject content scripts:', msg);
-                    return false;
+                    return { injected: false, error: msg };
                 }
             } catch (e) {
                 console.warn('[iMacros SW] Exception during content script injection:', e);
-                return false;
+                return { injected: false, error: e && e.message ? e.message : String(e) };
             }
         };
 
@@ -516,9 +533,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             const lastErrMsg = lastErr && lastErr.message ? lastErr.message : '';
             if (lastErrMsg && lastErrMsg.includes('Receiving end does not exist')) {
                 console.warn('[iMacros SW] No receiver in tab. Attempting to inject content scripts...');
-                const injected = await injectContentScripts();
-                if (injected) {
+                const injectionResult = await injectContentScripts();
+                if (injectionResult.injected) {
                     sendMessageToTab();
+                } else if (injectionResult.missingHostPermissions) {
+                    sendResponse({
+                        error: 'Content scripts not injected: host permissions are not granted for this site. Enable access to all sites in the extension settings.',
+                        injected: false,
+                        missingHostPermissions: true
+                    });
                 } else {
                     const errorMsg = lastErrMsg || 'No receiver in tab';
                     sendResponse({ error: `${errorMsg}; content script injection failed or not allowed`, injected: false });
