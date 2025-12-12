@@ -9,15 +9,7 @@ try {
         'errorLogger.js',
         'VirtualFileService.js',
         'variable-manager.js',
-        'AsyncFileIO.js',
-        'communicator.js',
-        'bg_common.js',
-        'context.js',
-        'mplayer.js',
-        'mrecorder.js',
-        'nm_connector.js',
-        'rijndael.js',
-        'bg.js'
+        'AsyncFileIO.js'
     );
 } catch (e) {
     console.error('Failed to import scripts:', e);
