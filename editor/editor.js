@@ -135,11 +135,16 @@ var Editor = {
             win_id: this.win_id
         };
 
-        // MV3: Use chrome.storage.session to pass dialog args
-        // Generate a unique key for this dialog instance
+        // Prefer session storage for transient dialog args; fall back to local if session isn't available
         var dialogKey = 'saveAsDialog_' + Date.now();
+        var store = (chrome.storage && chrome.storage.session) || (chrome.storage && chrome.storage.local);
+        if (!store) {
+            console.error("[iMacros] No storage backend available for dialog args");
+            alert("Failed to open Save As dialog (no storage backend available).");
+            return true;
+        }
 
-        chrome.storage.session.set({
+        store.set({
             [dialogKey]: { save_data: save_data }
         }, function () {
             if (chrome.runtime.lastError) {
@@ -330,15 +335,15 @@ function initializeEditor() {
 }
 
 window.addEventListener("load", function () {
-    const sessionStorage = chrome.storage && chrome.storage.session;
-    const localStorage = chrome.storage && chrome.storage.local;
+    const sessionStore = chrome.storage && chrome.storage.session;
+    const localStore = chrome.storage && chrome.storage.local;
     const storages = [];
 
-    if (sessionStorage) {
-        storages.push(sessionStorage);
+    if (sessionStore) {
+        storages.push(sessionStore);
     }
-    if (localStorage && localStorage !== sessionStorage) {
-        storages.push(localStorage);
+    if (localStore && localStore !== sessionStore) {
+        storages.push(localStore);
     }
 
     if (!storages.length) {
@@ -372,7 +377,9 @@ window.addEventListener("load", function () {
                 return;
             }
 
-            console.log("[iMacros Editor] Loaded macro:", data.currentMacroToEdit.name);
+            if (Storage && Storage.getBool && Storage.getBool("debug")) {
+                console.log("[iMacros Editor] Loaded macro:", data.currentMacroToEdit.name);
+            }
 
             // Set up args object for compatibility with existing code
             args = {
