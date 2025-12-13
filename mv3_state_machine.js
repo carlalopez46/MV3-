@@ -23,8 +23,9 @@
         constructor(options = {}) {
             this.storage = options.storage || null;
             this.alarmNamespace = options.alarmNamespace || null;
-            this.heartbeatName = typeof options.heartbeatName === 'string' && options.heartbeatName.trim()
-                ? options.heartbeatName
+            const providedHeartbeat = typeof options.heartbeatName === 'string' ? options.heartbeatName.trim() : '';
+            this.heartbeatName = providedHeartbeat.length > 0
+                ? providedHeartbeat
                 : 'imacros-execution-heartbeat';
             this.heartbeatMinutes = this._validateHeartbeatInterval(options.heartbeatMinutes); // Chrome clamps MV3 alarm intervals below 1 minute up to 1 minute (effective min: 1)
             this.state = DEFAULT_STATE();

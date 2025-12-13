@@ -107,6 +107,16 @@
             const normalized = { ...options };
             const isValidNonNegative = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 
+            if (normalized.maxRetries === undefined || normalized.maxRetries === null) {
+                normalized.maxRetries = DEFAULT_OPTIONS.maxRetries;
+            }
+            if (normalized.backoffMs === undefined || normalized.backoffMs === null) {
+                normalized.backoffMs = DEFAULT_OPTIONS.backoffMs;
+            }
+            if (normalized.ackTimeoutMs === undefined || normalized.ackTimeoutMs === null) {
+                normalized.ackTimeoutMs = DEFAULT_OPTIONS.ackTimeoutMs;
+            }
+
             if (!Number.isInteger(normalized.maxRetries) || normalized.maxRetries < 0) {
                 throw new Error('MessagingBus: maxRetries must be a non-negative integer');
             }
