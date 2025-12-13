@@ -197,9 +197,18 @@ async function createOffscreen() {
     }
 }
 
-// Initialize on startup and install
-chrome.runtime.onStartup.addListener(createOffscreen);
-chrome.runtime.onInstalled.addListener(createOffscreen);
+// Initialize on startup and install with guarded error handling to avoid unhandled rejections
+const logOffscreenError = (context, error) => {
+    console.error(`[iMacros SW] Failed to create offscreen during ${context}:`, error);
+};
+
+chrome.runtime.onStartup.addListener(() => {
+    createOffscreen().catch((error) => logOffscreenError('onStartup', error));
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+    createOffscreen().catch((error) => logOffscreenError('onInstalled', error));
+});
 
 function persistEditorLaunchData(editorData) {
     if (editorData === null || typeof editorData !== 'object' || Array.isArray(editorData)) {
@@ -210,7 +219,12 @@ function persistEditorLaunchData(editorData) {
 
 // Forward action click to Offscreen
 chrome.action.onClicked.addListener(async (tab) => {
-    await createOffscreen();
+    try {
+        await createOffscreen();
+    } catch (error) {
+        console.warn('[iMacros SW] Unable to create offscreen document for action click:', error);
+        return;
+    }
     try {
         const transitioned = await transitionState('playing', { source: 'action_click', tabId: tab?.id }, 'action click');
         if (!transitioned) {
