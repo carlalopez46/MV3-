@@ -3327,9 +3327,11 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
                 // Intentional global-scope execution of trusted macro JavaScript.
                 func: (code) => { return (0, eval)(code); },
                 args: [scriptCode]
-            }, () => {
+            }, (results) => {
                 if (chrome.runtime.lastError) {
                     executeScriptCallback({ error: chrome.runtime.lastError.message });
+                } else if (Array.isArray(results) && results[0] && results[0].error) {
+                    executeScriptCallback({ error: results[0].error.message || String(results[0].error) });
                 } else {
                     executeScriptCallback({ success: true });
                 }
