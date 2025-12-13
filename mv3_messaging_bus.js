@@ -100,7 +100,8 @@
 
         _hasAck(response) {
             if (!response) return false;
-            // For compatibility across legacy callers, treat boolean true for any of these keys as an acknowledgment.
+            // For compatibility across legacy callers, treat boolean true for any of these keys as an acknowledgment
+            // (callers should prefer the explicit `ack: true` contract going forward).
             return response.ack === true || response.success === true || response.ok === true;
         }
     }

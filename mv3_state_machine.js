@@ -14,7 +14,7 @@
             this.storage = options.storage || null;
             this.alarmNamespace = options.alarmNamespace || null;
             this.heartbeatName = options.heartbeatName || 'imacros-execution-heartbeat';
-            this.heartbeatMinutes = options.heartbeatMinutes || 0.2; // MV3 alarms clamp values below 1 minute up to 1 minute
+            this.heartbeatMinutes = options.heartbeatMinutes || 0.2; // MV3 alarms clamp values below 1 minute up to 1 minute (effective min: 1)
             this.state = DEFAULT_STATE();
         }
 
@@ -28,7 +28,11 @@
             } else {
                 this.state = DEFAULT_STATE();
             }
-            await this._scheduleHeartbeat();
+            try {
+                await this._scheduleHeartbeat();
+            } catch (error) {
+                console.warn('[ExecutionStateMachine] Failed to schedule heartbeat on hydrate:', error);
+            }
             return this.snapshot();
         }
 
@@ -50,7 +54,11 @@
                 persisted = false;
             }
             if (persisted) {
-                await this._scheduleHeartbeat();
+                try {
+                    await this._scheduleHeartbeat();
+                } catch (error) {
+                    console.warn('[ExecutionStateMachine] Failed to schedule heartbeat:', error);
+                }
             }
             return this.snapshot();
         }
