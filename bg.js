@@ -70,131 +70,138 @@ function onPanelLoaded(panel, panelWindowId) {
 
 
 // browser action button onclick handler
-chrome.action.onClicked.addListener(function (tab) {
-    var win_id = tab.windowId;
-    if (Storage.getBool("show-updated-badge")) {
-        doAfterUpdateAction();
-        return;
-    }
+// Note: chrome.action is only available in Service Worker, not in Offscreen Document
+if (typeof chrome !== 'undefined' && chrome.action && chrome.action.onClicked) {
+    chrome.action.onClicked.addListener(function (tab) {
+        var win_id = tab.windowId;
+        if (Storage.getBool("show-updated-badge")) {
+            doAfterUpdateAction();
+            return;
+        }
 
-    // Ensure context is initialized before processing
-    var contextPromise = context[win_id] && context[win_id]._initialized
-        ? Promise.resolve(context[win_id])
-        : context.init(win_id);
+        // Ensure context is initialized before processing
+        var contextPromise = context[win_id] && context[win_id]._initialized
+            ? Promise.resolve(context[win_id])
+            : context.init(win_id);
 
-    contextPromise.then(function (ctx) {
-        var mplayer = ctx.mplayer;
-        var recorder = ctx.recorder;
+        contextPromise.then(function (ctx) {
+            var mplayer = ctx.mplayer;
+            var recorder = ctx.recorder;
 
-        if (ctx.state === "idle") {
-            var panel = ctx.panelWindow;
-            if (!panel || panel.closed) {
-                openPanel(win_id);
-            } else {
-                panel.close();
-                delete ctx.panelId;
-                delete ctx.panelWindow;
-            }
-        } else if (ctx.state === "paused") {
-            if (mplayer.paused) {
-                // Switch to the tab where macro was paused before unpausing
-                if (ctx.pausedTabId) {
-                    chrome.tabs.update(ctx.pausedTabId, { active: true }, function () {
-                        if (chrome.runtime.lastError) {
-                            logError("Failed to switch to paused tab: " + chrome.runtime.lastError.message, { pausedTabId: ctx.pausedTabId });
-                            // Still try to unpause even if tab switch failed
-                        }
-                        // After switching tabs, unpause the macro
-                        mplayer.unpause();
-                    });
+            if (ctx.state === "idle") {
+                var panel = ctx.panelWindow;
+                if (!panel || panel.closed) {
+                    openPanel(win_id);
                 } else {
-                    // If no tab_id was saved, just unpause
-                    mplayer.unpause();
+                    panel.close();
+                    delete ctx.panelId;
+                    delete ctx.panelWindow;
                 }
-            }
-        } else {
-            if (mplayer.playing) {
-                mplayer.stop();
-            } else if (recorder.recording) {
-                recorder.stop();
-                var recorded_macro = recorder.actions.join("\n");
-                var macro = {
-                    source: recorded_macro, win_id: win_id,
-                    name: "#Current.iim"
-                };
+            } else if (ctx.state === "paused") {
+                if (mplayer.paused) {
+                    // Switch to the tab where macro was paused before unpausing
+                    if (ctx.pausedTabId) {
+                        chrome.tabs.update(ctx.pausedTabId, { active: true }, function () {
+                            if (chrome.runtime.lastError) {
+                                logError("Failed to switch to paused tab: " + chrome.runtime.lastError.message, { pausedTabId: ctx.pausedTabId });
+                                // Still try to unpause even if tab switch failed
+                            }
+                            // After switching tabs, unpause the macro
+                            mplayer.unpause();
+                        });
+                    } else {
+                        // If no tab_id was saved, just unpause
+                        mplayer.unpause();
+                    }
+                }
+            } else {
+                if (mplayer.playing) {
+                    mplayer.stop();
+                } else if (recorder.recording) {
+                    recorder.stop();
+                    var recorded_macro = recorder.actions.join("\n");
+                    var macro = {
+                        source: recorded_macro, win_id: win_id,
+                        name: "#Current.iim"
+                    };
 
-                console.log('[iMacros MV3] Recording stopped, saving macro with', recorder.actions.length, 'actions');
+                    console.log('[iMacros MV3] Recording stopped, saving macro with', recorder.actions.length, 'actions');
 
-                var treeType = Storage.getChar("tree-type");
+                    var treeType = Storage.getChar("tree-type");
 
-                if (treeType === "files") {
-                    afioCache.isInstalled().then(function (installed) {
-                        if (installed) {
-                            afio.getDefaultDir("savepath").then(function (node) {
-                                node.append("#Current.iim");
-                                macro.file_id = node.path;
-                                console.log('[iMacros MV3] Saving #Current.iim to Files tab at:', node.path);
+                    if (treeType === "files") {
+                        afioCache.isInstalled().then(function (installed) {
+                            if (installed) {
+                                afio.getDefaultDir("savepath").then(function (node) {
+                                    node.append("#Current.iim");
+                                    macro.file_id = node.path;
+                                    console.log('[iMacros MV3] Saving #Current.iim to Files tab at:', node.path);
 
-                                // Save the file first, then open editor
-                                afio.writeTextFile(node, recorded_macro).then(function () {
-                                    console.log('[iMacros MV3] #Current.iim saved successfully');
-                                    edit(macro, /* overwrite */ true);
+                                    // Save the file first, then open editor
+                                    afio.writeTextFile(node, recorded_macro).then(function () {
+                                        console.log('[iMacros MV3] #Current.iim saved successfully');
+                                        edit(macro, /* overwrite */ true);
+                                    }).catch(function (err) {
+                                        logError('Failed to write #Current.iim: ' + err.message, {
+                                            context: 'recording_stop',
+                                            path: node.path,
+                                            error: err
+                                        });
+                                        // Still open editor even if save failed
+                                        edit(macro, true);
+                                    });
                                 }).catch(function (err) {
-                                    logError('Failed to write #Current.iim: ' + err.message, {
+                                    logError('Failed to get save path for #Current.iim: ' + err.message, {
                                         context: 'recording_stop',
-                                        path: node.path,
+                                        tree_type: 'files',
                                         error: err
                                     });
-                                    // Still open editor even if save failed
-                                    edit(macro, true);
+                                    // Fallback to bookmark save
+                                    console.warn('[iMacros MV3] Falling back to bookmark save for #Current.iim');
+                                    delete macro.file_id;
+                                    save(macro, true, function () {
+                                        edit(macro, true);
+                                    });
                                 });
-                            }).catch(function (err) {
-                                logError('Failed to get save path for #Current.iim: ' + err.message, {
-                                    context: 'recording_stop',
-                                    tree_type: 'files',
-                                    error: err
-                                });
-                                // Fallback to bookmark save
-                                console.warn('[iMacros MV3] Falling back to bookmark save for #Current.iim');
-                                delete macro.file_id;
+                            } else {            // no file access
+                                console.log('[iMacros MV3] File system unavailable, saving #Current.iim to bookmarks');
                                 save(macro, true, function () {
                                     edit(macro, true);
                                 });
+                            }
+                        }).catch(function (err) {
+                            logError('Failed to check file system installation: ' + err.message, {
+                                context: 'recording_stop',
+                                tree_type: 'files',
+                                error: err
                             });
-                        } else {            // no file access
-                            console.log('[iMacros MV3] File system unavailable, saving #Current.iim to bookmarks');
+                            // Fallback to bookmark save
+                            console.warn('[iMacros MV3] Falling back to bookmark save for #Current.iim');
                             save(macro, true, function () {
                                 edit(macro, true);
                             });
-                        }
-                    }).catch(function (err) {
-                        logError('Failed to check file system installation: ' + err.message, {
-                            context: 'recording_stop',
-                            tree_type: 'files',
-                            error: err
                         });
-                        // Fallback to bookmark save
-                        console.warn('[iMacros MV3] Falling back to bookmark save for #Current.iim');
+                    } else {
+                        console.log('[iMacros MV3] Saving #Current.iim to Bookmarks tab');
                         save(macro, true, function () {
                             edit(macro, true);
                         });
-                    });
-                } else {
-                    console.log('[iMacros MV3] Saving #Current.iim to Bookmarks tab');
-                    save(macro, true, function () {
-                        edit(macro, true);
-                    });
+                    }
                 }
             }
-        }
-    }).catch(err => {
-        logError("Failed to initialize context in action.onClicked: " + err.message, { win_id: win_id });
+        }).catch(err => {
+            logError("Failed to initialize context in action.onClicked: " + err.message, { win_id: win_id });
+        });
     });
-});
+} // End of chrome.action.onClicked guard
 
 
 function addSampleBookmarkletMacro(name, parentId, content) {
     return new Promise(function (resolve, reject) {
+        // chrome.bookmarks is not available in Offscreen Document
+        if (typeof chrome === 'undefined' || !chrome.bookmarks || !chrome.bookmarks.getChildren) {
+            return resolve();
+        }
         chrome.bookmarks.getChildren(parentId, function (a) {
             if (chrome.runtime.lastError) {
                 logError("Failed to get bookmark children in addSampleBookmarkletMacro: " + chrome.runtime.lastError.message, { parentId: parentId, name: name });
@@ -278,6 +285,11 @@ function installSampleBookmarkletMacros() {
     ];
 
     return new Promise(function (resolve, reject) {
+        // chrome.bookmarks is not available in Offscreen Document
+        if (typeof chrome === 'undefined' || !chrome.bookmarks || !chrome.bookmarks.getTree) {
+            console.log('[bg.js] chrome.bookmarks not available, skipping sample macro installation');
+            return resolve();
+        }
         chrome.bookmarks.getTree(function (tree) {
             if (chrome.runtime.lastError) {
                 logError("Failed to get bookmark tree in installSampleBookmarkletMacros: " + chrome.runtime.lastError.message);
