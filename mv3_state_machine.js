@@ -88,6 +88,7 @@
 
         async _scheduleHeartbeat() {
             if (!this.alarmNamespace || typeof this.alarmNamespace.create !== 'function') return;
+            // chrome.alarms.create is synchronous; runtime.lastError is not set for this API.
             this.alarmNamespace.create(this.heartbeatName, {
                 delayInMinutes: this.heartbeatMinutes,
                 periodInMinutes: this.heartbeatMinutes

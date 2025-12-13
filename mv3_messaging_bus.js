@@ -18,6 +18,9 @@
         }
 
         async sendRuntime(message, opts = {}) {
+            if (!this.runtime || typeof this.runtime.sendMessage !== 'function') {
+                throw new Error('chrome.runtime is not available');
+            }
             return this._retry(async () => {
                 return await this._send((resolve, reject) => {
                     this.runtime.sendMessage(message, (response) => {
