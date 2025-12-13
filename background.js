@@ -435,6 +435,16 @@ if (chrome.downloads && chrome.downloads.onChanged) {
 // Keep-alive logic (optional, but good for stability)
 // If Offscreen sends a keep-alive message, we can respond to keep SW alive
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    const isTrustedSender = sender && sender.id === chrome.runtime.id;
+    const isOffscreenSender = isTrustedSender && typeof sender.url === 'string' && sender.url.endsWith('/offscreen.html');
+    const rejectInvalidSender = () => {
+        sendResponse({ error: 'invalid sender' });
+        return true;
+    };
+
+    const isValidTabId = (value) => Number.isInteger(value) && value >= 0;
+    const isValidObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
+
     if (msg.keepAlive) {
         sendResponse({ alive: true });
         return true;
@@ -809,7 +819,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // --- SCRIPTING_EXECUTE: Proxy chrome.scripting.executeScript from Offscreen Document ---
     if (msg.command === 'SCRIPTING_EXECUTE') {
+        if (!isOffscreenSender) {
+            return rejectInvalidSender();
+        }
+
         const { tabId, func, args } = msg;
+        if (!isValidTabId(tabId) || typeof func !== 'string' || (args !== undefined && !Array.isArray(args))) {
+            sendResponse({ error: 'invalid input' });
+            return true;
+        }
         if (!chrome.scripting || !chrome.scripting.executeScript) {
             sendResponse({ error: 'chrome.scripting not available' });
             return true;
@@ -831,7 +849,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // --- DEBUGGER_ATTACH: Proxy chrome.debugger.attach from Offscreen Document ---
     if (msg.command === 'DEBUGGER_ATTACH') {
+        if (!isOffscreenSender) {
+            return rejectInvalidSender();
+        }
+
         const { tabId, version } = msg;
+        if (!isValidTabId(tabId) || (version !== undefined && typeof version !== 'string')) {
+            sendResponse({ error: 'invalid input' });
+            return true;
+        }
         if (!chrome.debugger || !chrome.debugger.attach) {
             sendResponse({ error: 'chrome.debugger not available' });
             return true;
@@ -849,7 +875,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // --- DEBUGGER_SEND_COMMAND: Proxy chrome.debugger.sendCommand from Offscreen Document ---
     if (msg.command === 'DEBUGGER_SEND_COMMAND') {
+        if (!isOffscreenSender) {
+            return rejectInvalidSender();
+        }
+
         const { tabId, method, params } = msg;
+        if (!isValidTabId(tabId) || typeof method !== 'string' || (params !== undefined && !isValidObject(params))) {
+            sendResponse({ error: 'invalid input' });
+            return true;
+        }
         if (!chrome.debugger || !chrome.debugger.sendCommand) {
             sendResponse({ error: 'chrome.debugger not available' });
             return true;
@@ -867,7 +901,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // --- DEBUGGER_DETACH: Proxy chrome.debugger.detach from Offscreen Document ---
     if (msg.command === 'DEBUGGER_DETACH') {
+        if (!isOffscreenSender) {
+            return rejectInvalidSender();
+        }
+
         const { tabId } = msg;
+        if (!isValidTabId(tabId)) {
+            sendResponse({ error: 'invalid input' });
+            return true;
+        }
         if (!chrome.debugger || !chrome.debugger.detach) {
             sendResponse({ error: 'chrome.debugger not available' });
             return true;
@@ -885,7 +927,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // --- DOWNLOADS_DOWNLOAD: Proxy chrome.downloads.download from Offscreen Document ---
     if (msg.command === 'DOWNLOADS_DOWNLOAD') {
+        if (!isOffscreenSender) {
+            return rejectInvalidSender();
+        }
+
         const { options, win_id, tab_id } = msg;
+        if (!isValidObject(options) || (win_id !== undefined && !isValidTabId(win_id)) || (tab_id !== undefined && !isValidTabId(tab_id))) {
+            sendResponse({ error: 'invalid input' });
+            return true;
+        }
         if (!chrome.downloads || !chrome.downloads.download) {
             sendResponse({ error: 'chrome.downloads not available' });
             return true;
