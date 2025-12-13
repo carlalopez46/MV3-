@@ -14,7 +14,7 @@
             this.storage = options.storage || null;
             this.alarmNamespace = options.alarmNamespace || null;
             this.heartbeatName = options.heartbeatName || 'imacros-execution-heartbeat';
-            this.heartbeatMinutes = options.heartbeatMinutes || 0.2;
+            this.heartbeatMinutes = options.heartbeatMinutes || 0.2; // MV3 alarms clamp values below 1 minute up to 1 minute
             this.state = DEFAULT_STATE();
         }
 
@@ -42,12 +42,16 @@
                 meta: Object.assign({}, meta),
                 updatedAt: Date.now()
             };
+            let persisted = true;
             try {
                 await this._persist();
             } catch (error) {
                 console.warn('[ExecutionStateMachine] Failed to persist transition:', error);
+                persisted = false;
             }
-            await this._scheduleHeartbeat();
+            if (persisted) {
+                await this._scheduleHeartbeat();
+            }
             return this.snapshot();
         }
 
@@ -88,8 +92,8 @@
 
         async _scheduleHeartbeat() {
             if (!this.alarmNamespace || typeof this.alarmNamespace.create !== 'function') return;
-            // chrome.alarms.create is synchronous; runtime.lastError is not set for this API.
-            this.alarmNamespace.create(this.heartbeatName, {
+            // In MV3, chrome.alarms.create returns a Promise when called without a callback.
+            await this.alarmNamespace.create(this.heartbeatName, {
                 delayInMinutes: this.heartbeatMinutes,
                 periodInMinutes: this.heartbeatMinutes
             });

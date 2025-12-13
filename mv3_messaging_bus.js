@@ -65,7 +65,7 @@
                     const resultPromise = enforceAck && typeof ackTimeout === 'number'
                         ? Promise.race([
                             fn(),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('Ack timeout')), ackTimeout))
+                            new Promise((_, reject) => setTimeout(() => reject(new Error(`Ack timeout on ${channelLabel || 'channel'}`)), ackTimeout))
                         ])
                         : fn();
                     const result = await resultPromise;
@@ -100,6 +100,7 @@
 
         _hasAck(response) {
             if (!response) return false;
+            // For compatibility across legacy callers, treat boolean true for any of these keys as an acknowledgment.
             return response.ack === true || response.success === true || response.ok === true;
         }
     }
