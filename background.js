@@ -32,7 +32,7 @@ const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
 
 const executionStateStorage = chrome.storage.session || chrome.storage.local;
 if (executionStateStorage === chrome.storage.local) {
-    chrome.storage.local.remove(['executionState'], (err) => {
+    chrome.storage.local.remove(['executionState'], () => {
         if (chrome.runtime.lastError) {
             console.warn('[iMacros SW] Failed to clear persisted execution state on startup:', chrome.runtime.lastError);
         }
@@ -63,17 +63,15 @@ function logForwardingError(context, error) {
 async function transitionState(phase, meta, context) {
     try {
         await executionState.transition(phase, meta);
+        return true;
     } catch (error) {
         console.warn(`[iMacros SW] State transition failed during ${context}:`, error);
+        return false;
     }
 }
 
-function forwardToOffscreen(payload, contextLabel, { suppressErrors = true } = {}) {
-    const sendPromise = messagingBus.sendRuntime({ target: 'offscreen', ...payload });
-    if (!suppressErrors) return sendPromise;
-    return sendPromise.catch((error) => {
-        logForwardingError(contextLabel || payload?.type || payload?.command || 'offscreen', error);
-    });
+function forwardToOffscreen(payload) {
+    return messagingBus.sendRuntime({ target: 'offscreen', ...payload });
 }
 
 // Create Offscreen Document
@@ -175,12 +173,12 @@ function persistEditorLaunchData(editorData) {
 // Forward action click to Offscreen
 chrome.action.onClicked.addListener(async (tab) => {
     await createOffscreen();
-    await transitionState('playing', { source: 'action_click', tabId: tab?.id }, 'action click');
     try {
         await forwardToOffscreen({
             command: 'actionClicked',
             tab: tab
-        }, 'actionClicked', { suppressErrors: false });
+        });
+        await transitionState('playing', { source: 'action_click', tabId: tab?.id }, 'action click');
     } catch (error) {
         logForwardingError('actionClicked', error);
     }
@@ -228,7 +226,7 @@ chrome.windows.onRemoved.addListener(async (windowId) => {
             await forwardToOffscreen({
                 command: 'panelClosed',
                 panelId: windowId
-            }, 'panelClosed', { suppressErrors: false });
+            });
         } catch (error) {
             logForwardingError('panelClosed', error);
         }
@@ -244,21 +242,21 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         tabId: tabId,
         changeInfo: changeInfo,
         tab: tab
-    }, 'TAB_UPDATED');
+    }).catch((error) => logForwardingError('TAB_UPDATED', error));
 });
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
     forwardToOffscreen({
         type: 'TAB_ACTIVATED',
         activeInfo: activeInfo
-    }, 'TAB_ACTIVATED');
+    }).catch((error) => logForwardingError('TAB_ACTIVATED', error));
 });
 
 chrome.tabs.onCreated.addListener((tab) => {
     forwardToOffscreen({
         type: 'TAB_CREATED',
         tab: tab
-    }, 'TAB_CREATED');
+    }).catch((error) => logForwardingError('TAB_CREATED', error));
 });
 
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
@@ -266,7 +264,7 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
         type: 'TAB_REMOVED',
         tabId: tabId,
         removeInfo: removeInfo
-    }, 'TAB_REMOVED');
+    }).catch((error) => logForwardingError('TAB_REMOVED', error));
 });
 
 chrome.tabs.onMoved.addListener((tabId, moveInfo) => {
@@ -274,7 +272,7 @@ chrome.tabs.onMoved.addListener((tabId, moveInfo) => {
         type: 'TAB_MOVED',
         tabId: tabId,
         moveInfo: moveInfo
-    }, 'TAB_MOVED');
+    }).catch((error) => logForwardingError('TAB_MOVED', error));
 });
 
 chrome.tabs.onAttached.addListener((tabId, attachInfo) => {
@@ -282,7 +280,7 @@ chrome.tabs.onAttached.addListener((tabId, attachInfo) => {
         type: 'TAB_ATTACHED',
         tabId: tabId,
         attachInfo: attachInfo
-    }, 'TAB_ATTACHED');
+    }).catch((error) => logForwardingError('TAB_ATTACHED', error));
 });
 
 chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
@@ -290,7 +288,7 @@ chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
         type: 'TAB_DETACHED',
         tabId: tabId,
         detachInfo: detachInfo
-    }, 'TAB_DETACHED');
+    }).catch((error) => logForwardingError('TAB_DETACHED', error));
 });
 
 
@@ -401,12 +399,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     globalPanelId = panelWin.id;
 
                     // Notify Offscreen Document that panel was created
-                    await transitionState('editing', { panelId: panelWin.id, windowId: win_id }, 'panel creation');
-                    await forwardToOffscreen({
-                        command: "panelCreated",
-                        win_id: win_id,
-                        panelId: panelWin.id
-                    }, 'panelCreated');
+                    const transitioned = await transitionState('editing', { panelId: panelWin.id, windowId: win_id }, 'panel creation');
+                    if (!transitioned) {
+                        if (respond) respond({ success: false, error: 'State transition failed during panel creation' });
+                        return;
+                    }
+                    try {
+                        await forwardToOffscreen({
+                            command: "panelCreated",
+                            win_id: win_id,
+                            panelId: panelWin.id
+                        });
+                    } catch (error) {
+                        logForwardingError('panelCreated', error);
+                        if (respond) respond({ success: false, error: error && error.message ? error.message : String(error) });
+                        return;
+                    }
 
                     // Store in session storage for persistence
                     chrome.storage.session.set({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
@@ -437,8 +445,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     sendResponse({ success: false, error: chrome.runtime.lastError.message });
                 } else {
                     console.log('[iMacros SW] Editor window created:', win.id);
-                    await transitionState('editing', { windowId: win.id, source: 'editor' }, 'editor creation');
-                    sendResponse({ success: true, windowId: win.id });
+                    try {
+                        const transitioned = await transitionState('editing', { windowId: win.id, source: 'editor' }, 'editor creation');
+                        if (!transitioned) {
+                            sendResponse({ success: false, error: 'State transition failed during editor creation' });
+                            return;
+                        }
+                        sendResponse({ success: true, windowId: win.id });
+                    } catch (error) {
+                        console.error('[iMacros SW] Editor state transition failed:', error);
+                        sendResponse({ success: false, error: error && error.message ? error.message : String(error) });
+                    }
                 }
             });
         }).catch((error) => {
@@ -1234,7 +1251,7 @@ chrome.notifications.onClicked.addListener(function (n_id) {
     forwardToOffscreen({
         command: 'notificationClicked',
         notificationId: n_id
-    }, 'notificationClicked');
+    }).catch((error) => logForwardingError('notificationClicked', error));
 });
 
 // =============================================================================
@@ -1280,13 +1297,27 @@ async function ensureOffscreenDocument() {
     return createOffscreen();
 }
 
-// --- [復元] Offscreen へメッセージを安全に送る関数 ---
-// --- [復元] Offscreen へメッセージを安全に送る関数 ---
+// --- Offscreen へメッセージを安全に送る関数 ---
 async function sendMessageToOffscreen(msg) {
     const payload = { target: 'offscreen', ...msg };
 
     await ensureOffscreenDocument();
-    return messagingBus.sendRuntime(payload, { expectAck: true });
+    try {
+        return await messagingBus.sendRuntime(payload, { expectAck: true });
+    } catch (err) {
+        const genericPatterns = ['No ack received on channel', 'Ack timeout'];
+        const isGeneric = genericPatterns.some(pat => err && err.message && err.message.includes(pat));
+        if (isGeneric) {
+            const context = [];
+            if (msg.type) context.push(`type=${msg.type}`);
+            if (msg.command) context.push(`command=${msg.command}`);
+            if (msg.windowId !== undefined) context.push(`windowId=${msg.windowId}`);
+            if (msg.tabId !== undefined) context.push(`tabId=${msg.tabId}`);
+            const contextStr = context.length ? ` [${context.join(', ')}]` : '';
+            throw new Error(`${err.message}${contextStr}`);
+        }
+        throw err;
+    }
 }
 
 // =============================================================================
