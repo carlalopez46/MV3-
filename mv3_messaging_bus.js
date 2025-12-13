@@ -12,6 +12,12 @@
 
     class MessagingBus {
         constructor(runtime, tabs, options = {}) {
+            if (!runtime || typeof runtime !== 'object') {
+                throw new Error('MessagingBus: runtime parameter must be a valid object');
+            }
+            if (tabs && typeof tabs !== 'object') {
+                throw new Error('MessagingBus: tabs parameter must be a valid object');
+            }
             this.runtime = runtime;
             this.tabs = tabs;
             this.options = Object.assign({}, DEFAULT_OPTIONS, options);
@@ -31,12 +37,11 @@
         }
 
         async sendToTab(tabId, message, opts = {}) {
+            if (!this.tabs || typeof this.tabs.sendMessage !== 'function') {
+                throw new Error('chrome.tabs is not available');
+            }
             return this._retry(async () => {
                 return await this._send((resolve, reject) => {
-                    if (!this.tabs || !this.tabs.sendMessage) {
-                        reject(new Error('chrome.tabs is not available'));
-                        return;
-                    }
                     this.tabs.sendMessage(tabId, message, (response) => {
                         this._resolveWithLastError(resolve, reject, response);
                     });
@@ -107,11 +112,9 @@
 
         _hasAck(response) {
             if (!response) return false;
-            // For compatibility across legacy callers, treat boolean true for any of these keys as an acknowledgment
-            // (callers should prefer the explicit `ack: true` contract going forward).
-            if (response.ack === true || response.success === true || response.ok === true) return true;
-            // Explicit error responses still count as acknowledgments to avoid needless retries when a responder
-            // returns success: false with an error payload.
+            // Any response containing an explicit ack/success/ok boolean (true or false) counts as an acknowledgment.
+            // This avoids needless retries when a responder returns { success: false, error: ... } while preserving
+            // compatibility with the preferred `ack: true` contract.
             return typeof response.ack === 'boolean' || typeof response.success === 'boolean' || typeof response.ok === 'boolean';
         }
     }

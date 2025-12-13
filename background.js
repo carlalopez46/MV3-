@@ -212,12 +212,15 @@ function persistEditorLaunchData(editorData) {
 chrome.action.onClicked.addListener(async (tab) => {
     await createOffscreen();
     try {
+        const transitioned = await transitionState('playing', { source: 'action_click', tabId: tab?.id }, 'action click');
+        if (!transitioned) {
+            console.warn('[iMacros SW] actionClicked: state transition failed');
+            return;
+        }
         await forwardToOffscreen({
             command: 'actionClicked',
             tab: tab
         });
-        const transitioned = await transitionState('playing', { source: 'action_click', tabId: tab?.id }, 'action click');
-        if (!transitioned) console.warn('[iMacros SW] actionClicked: state transition failed');
     } catch (error) {
         logForwardingError('actionClicked', error);
     }
