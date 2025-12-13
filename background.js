@@ -836,7 +836,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         chrome.scripting.executeScript({
             target: { tabId: tabId },
             func: new Function('return (' + func + ')(...arguments)'),
-            args: Array.isArray(args) ? args : []
+            args: args || []
         }, (results) => {
             if (chrome.runtime.lastError) {
                 sendResponse({ error: chrome.runtime.lastError.message });
@@ -889,7 +889,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             return true;
         }
 
-        chrome.debugger.sendCommand({ tabId: tabId }, method, isValidObject(params) ? params : {}, (result) => {
+        chrome.debugger.sendCommand({ tabId: tabId }, method, params || {}, (result) => {
             if (chrome.runtime.lastError) {
                 sendResponse({ error: chrome.runtime.lastError.message });
             } else {
@@ -932,7 +932,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
 
         const { options, win_id, tab_id } = msg;
-        if (!isValidObject(options) || (win_id !== undefined && !Number.isInteger(win_id)) || (tab_id !== undefined && !Number.isInteger(tab_id))) {
+        if (!isValidObject(options) || (win_id !== undefined && !isValidTabId(win_id)) || (tab_id !== undefined && !isValidTabId(tab_id))) {
             sendResponse({ error: 'invalid input' });
             return true;
         }
