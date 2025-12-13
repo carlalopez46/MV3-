@@ -964,15 +964,30 @@ MacroPlayer.prototype.ActionTable["clear"] = function (cmd) {
     if (hasCookiesAPI()) {
         // Direct access (Service Worker context)
         chrome.cookies.getAll(details, function(cookies) {
+            if (chrome.runtime.lastError) {
+                console.warn("[MacroPlayer] CLEAR: Failed to get cookies:", chrome.runtime.lastError.message);
+                mplayer.next("CLEAR");
+                return;
+            }
+            if (!cookies || cookies.length === 0) {
+                mplayer.next("CLEAR");
+                return;
+            }
+            var remaining = cookies.length;
             cookies.forEach(function(cookie) {
-                // TODO: check if we should omit storeId here.
-                // As for now I think that only current execution context
-                // store's cookies should be removed
-                var url = (cookie.secure? "https" : "http")+"://"+
-                    cookie.domain+cookie.path;
-                chrome.cookies.remove({url: url, name: cookie.name});
+                // Strip leading dot from domain (e.g., ".example.com" -> "example.com")
+                var domain = cookie.domain.startsWith('.') ? cookie.domain.slice(1) : cookie.domain;
+                var url = (cookie.secure ? "https" : "http") + "://" + domain + cookie.path;
+                chrome.cookies.remove({url: url, name: cookie.name}, function() {
+                    if (chrome.runtime.lastError) {
+                        console.warn("[MacroPlayer] CLEAR: Failed to remove cookie:", cookie.name, chrome.runtime.lastError.message);
+                    }
+                    remaining--;
+                    if (remaining === 0) {
+                        mplayer.next("CLEAR");
+                    }
+                });
             });
-            mplayer.next("CLEAR");
         });
     } else {
         // Proxy through Service Worker (Offscreen Document context)
@@ -981,10 +996,11 @@ MacroPlayer.prototype.ActionTable["clear"] = function (cmd) {
             details: details
         }, function(response) {
             if (chrome.runtime.lastError) {
-                console.error("[MacroPlayer] COOKIES_CLEAR error:", chrome.runtime.lastError);
+                console.warn("[MacroPlayer] COOKIES_CLEAR error:", chrome.runtime.lastError.message);
             } else if (response && response.error) {
-                console.error("[MacroPlayer] COOKIES_CLEAR failed:", response.error);
+                console.warn("[MacroPlayer] COOKIES_CLEAR failed:", response.error);
             }
+            // Continue macro execution regardless of errors (matches original behavior)
             mplayer.next("CLEAR");
         });
     }

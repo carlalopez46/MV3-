@@ -899,21 +899,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 return;
             }
 
-            let removed = 0;
             if (!cookies || cookies.length === 0) {
                 sendResponse({ success: true, removed: 0 });
                 return;
             }
 
-            cookies.forEach((cookie) => {
-                const url = (cookie.secure ? "https" : "http") + "://" +
-                    cookie.domain + cookie.path;
-                chrome.cookies.remove({ url: url, name: cookie.name }, () => {
-                    removed++;
-                    if (removed === cookies.length) {
-                        sendResponse({ success: true, removed: removed });
-                    }
+            // Use Promise.all for robust completion tracking
+            const removePromises = cookies.map((cookie) => {
+                return new Promise((resolve) => {
+                    // Strip leading dot from domain (e.g., ".example.com" -> "example.com")
+                    const domain = cookie.domain.startsWith('.') ? cookie.domain.slice(1) : cookie.domain;
+                    const url = (cookie.secure ? "https" : "http") + "://" + domain + cookie.path;
+                    chrome.cookies.remove({ url: url, name: cookie.name }, (details) => {
+                        // Check for errors and resolve with success status
+                        if (chrome.runtime.lastError) {
+                            console.warn('[iMacros SW] Cookie removal failed:', cookie.name, chrome.runtime.lastError.message);
+                            resolve(false);
+                        } else {
+                            resolve(details !== null);
+                        }
+                    });
                 });
+            });
+
+            Promise.all(removePromises).then((results) => {
+                const removed = results.filter(Boolean).length;
+                sendResponse({ success: true, removed: removed });
+            }).catch((err) => {
+                sendResponse({ error: err && err.message ? err.message : String(err) });
             });
         });
         return true;

@@ -169,20 +169,19 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         for (let win_id in context) {
             if (context[win_id]) {
                 const mplayer = context[win_id].mplayer;
-                const req = request;
 
                 try {
-                    if (req.type === 'DOWNLOAD_CREATED') {
+                    if (request.type === 'DOWNLOAD_CREATED') {
                         if (mplayer && mplayer.onDownloadCreated) {
-                            mplayer.onDownloadCreated(req.downloadItem);
+                            mplayer.onDownloadCreated(request.downloadItem);
                         }
-                    } else if (req.type === 'DOWNLOAD_CHANGED') {
+                    } else if (request.type === 'DOWNLOAD_CHANGED') {
                         if (mplayer && mplayer.onDownloadChanged) {
-                            mplayer.onDownloadChanged(req.downloadDelta);
+                            mplayer.onDownloadChanged(request.downloadDelta);
                         }
                     }
                 } catch (e) {
-                    console.error(`[iMacros Offscreen] Error handling ${req.type} for win_id ${win_id}:`, e);
+                    console.error(`[iMacros Offscreen] Error handling ${request.type} for win_id ${win_id}:`, e);
                 }
             }
         }
