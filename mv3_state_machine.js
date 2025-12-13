@@ -37,12 +37,14 @@
         }
 
         /**
-         * Returns a shallow copy of the current state.
-         * Note: nested properties inside `meta` are not deep-cloned; callers must avoid mutating them
-         * or perform their own deep copy when necessary.
+         * Returns a deep copy of the current state to prevent callers from mutating internal metadata.
          */
         snapshot() {
-            return Object.assign({}, this.state, { meta: Object.assign({}, this.state.meta) });
+            if (typeof structuredClone === 'function') {
+                return structuredClone(this.state);
+            }
+            // Fallback for environments without structuredClone
+            return JSON.parse(JSON.stringify(this.state));
         }
 
         async transition(phase, meta = {}) {
