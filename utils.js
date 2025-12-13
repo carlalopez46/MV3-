@@ -1277,6 +1277,10 @@ function getRedirectURL(id_or_kw) {
 }
 
 function getRedirFromString(idString) {
+    // Custom redirect URL for welcome page
+    if (idString === "welcome") {
+        return "https://yokohamaticket.co.jp";
+    }
     const version = getSafeManifestVersion();
     const prefix = `http://rd.imacros.net/redirect.aspx?type=CR&version=${version}`;
     return `${prefix}&helpid=${idString}`;
