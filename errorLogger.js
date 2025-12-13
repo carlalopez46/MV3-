@@ -471,17 +471,15 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         saveToStorage() {
             try {
                 // Check if localStorage is accessible
-                try {
-                    if (!window.localStorage) return;
-                } catch (e) {
-                    // Expected in sandboxed environments
+                // In Service Worker, window/localStorage might not be available
+                if (typeof window === 'undefined' || !window.localStorage) {
                     return;
                 }
 
                 // Store only the most recent errors
                 const recentErrors = this.errors.slice(-MAX_ERROR_LOG_SIZE);
-                localStorage.setItem(ERROR_LOG_KEY, JSON.stringify(recentErrors));
-                localStorage.setItem(ERROR_STATS_KEY, JSON.stringify(this.stats));
+                window.localStorage.setItem(ERROR_LOG_KEY, JSON.stringify(recentErrors));
+                window.localStorage.setItem(ERROR_STATS_KEY, JSON.stringify(this.stats));
             } catch (e) {
                 // If localStorage is full or unavailable, emit an explicit warning with a code
                 const errorDetails = e.name ? `${e.name}: ${e.message}` : String(e);
@@ -530,23 +528,24 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         loadFromStorage() {
             try {
                 // Check if localStorage is accessible
+                // In Service Worker or restricted contexts, window/localStorage might not be available
+                if (typeof window === 'undefined') {
+                    return;
+                }
+
                 try {
-                    // Accessing localStorage property can throw SecurityError in sandboxed iframe
-                    // or return null/undefined in some contexts
                     if (!window.localStorage) {
-                        // Silent return for contexts without localStorage
                         return;
                     }
                     // Try a read operation to verify access permissions
                     const test = window.localStorage.getItem(ERROR_LOG_KEY);
                 } catch (e) {
-                    // Expected in sandboxed environments, just return silently
-                    // console.warn("[iMacros] localStorage access denied (sandboxed?): " + e.message);
+                    // Expected in sandboxed environments or when window is defined but localStorage throws
                     return;
                 }
 
-                const storedErrors = localStorage.getItem(ERROR_LOG_KEY);
-                const storedStats = localStorage.getItem(ERROR_STATS_KEY);
+                const storedErrors = window.localStorage.getItem(ERROR_LOG_KEY);
+                const storedStats = window.localStorage.getItem(ERROR_STATS_KEY);
 
                 // Preserve errors that were logged before storage initialization completed
                 // This is critical in MV3 service workers where startup errors may be captured
