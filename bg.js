@@ -813,19 +813,22 @@ function isPersonalVersion() {
 // chrome.windows.onRemoved listener below and in context.js.
 
 // remove panel when its parent window is closed
-chrome.windows.onRemoved.addListener(function (win_id) {
-    if (!context[win_id])
-        return;
-    var panel = context[win_id].panelWindow;
-    if (panel && !panel.closed) {
-        panel.close();
-    }
-    // Clear dock interval to prevent memory leak
-    if (context[win_id].dockInterval) {
-        clearInterval(context[win_id].dockInterval);
-        context[win_id].dockInterval = null;
-    }
-});
+// Note: chrome.windows is not available in Offscreen Document
+if (typeof chrome !== 'undefined' && chrome.windows && chrome.windows.onRemoved) {
+    chrome.windows.onRemoved.addListener(function (win_id) {
+        if (!context[win_id])
+            return;
+        var panel = context[win_id].panelWindow;
+        if (panel && !panel.closed) {
+            panel.close();
+        }
+        // Clear dock interval to prevent memory leak
+        if (context[win_id].dockInterval) {
+            clearInterval(context[win_id].dockInterval);
+            context[win_id].dockInterval = null;
+        }
+    });
+}
 
 // Inject content scripts into existing tabs on installation/update
 chrome.runtime.onInstalled.addListener(async () => {
