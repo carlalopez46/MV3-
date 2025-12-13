@@ -59,6 +59,7 @@
         "notifications",
         "webRequest",
         "nativeMessaging",
+        "bookmarks",
         "downloads",
         "contextMenus",
         "debugger",
