@@ -14,7 +14,7 @@
             this.storage = options.storage || null;
             this.alarmNamespace = options.alarmNamespace || null;
             this.heartbeatName = options.heartbeatName || 'imacros-execution-heartbeat';
-            this.heartbeatMinutes = options.heartbeatMinutes || 0.2; // MV3 alarms clamp values below 1 minute up to 1 minute (effective min: 1)
+            this.heartbeatMinutes = options.heartbeatMinutes || 1; // MV3 alarms clamp values below 1 minute up to 1 minute (effective min: 1)
             this.state = DEFAULT_STATE();
         }
 
