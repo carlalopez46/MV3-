@@ -1,6 +1,24 @@
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
+// Minimal localStorage shim to prevent ReferenceErrors during early importScripts
+// execution in the MV3 service worker environment. A more complete polyfill is
+// provided in utils.js, but we need this guard so that utils.js itself can load
+// without the platform-provided localStorage API.
+if (typeof globalThis.localStorage === 'undefined') {
+    const memoryStore = new Map();
+    globalThis.localStorage = {
+        getItem: (key) => (memoryStore.has(key) ? memoryStore.get(key) : null),
+        setItem: (key, value) => memoryStore.set(key, String(value)),
+        removeItem: (key) => memoryStore.delete(key),
+        clear: () => memoryStore.clear(),
+        key: (index) => Array.from(memoryStore.keys())[index] ?? null,
+        get length() {
+            return memoryStore.size;
+        },
+    };
+}
+
 try {
     importScripts(
         'utils.js',
