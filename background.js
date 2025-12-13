@@ -10,13 +10,16 @@ if (typeof globalThis.localStorage === 'undefined') {
     globalThis.localStorage = {
         getItem: (key) => (memoryStore.has(key) ? memoryStore.get(key) : null),
         setItem: (key, value) => memoryStore.set(key, String(value)),
-        removeItem: (key) => memoryStore.delete(key),
+        removeItem: (key) => {
+            memoryStore.delete(key);
+        },
         clear: () => memoryStore.clear(),
         key: (index) => Array.from(memoryStore.keys())[index] ?? null,
         get length() {
             return memoryStore.size;
         },
         __isMinimalLocalStorageShim: true,
+        __isInMemoryShim: true,
     };
 }
 
