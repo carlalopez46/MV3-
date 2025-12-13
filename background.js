@@ -140,7 +140,8 @@ async function transitionState(phase, meta, context) {
     }
 }
 
-function forwardToOffscreen(payload) {
+async function forwardToOffscreen(payload) {
+    await ensureOffscreenDocument();
     return messagingBus.sendRuntime({ target: 'offscreen', ...payload });
 }
 
@@ -498,6 +499,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     try {
                         const transitioned = await transitionState('editing', { windowId: win.id, source: 'editor' }, 'editor creation');
                         if (!transitioned) {
+                            await transitionState('idle', { source: 'editor rollback' }, 'editor creation rollback');
                             await removeWindowWithLog(win.id, 'editor');
                             sendResponse({ success: false, error: 'State transition failed during editor creation' });
                             return;
@@ -505,6 +507,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                         sendResponse({ success: true, windowId: win.id });
                     } catch (error) {
                         console.error('[iMacros SW] Editor state transition failed:', error);
+                        await transitionState('idle', { source: 'editor rollback' }, 'editor creation rollback');
                         await removeWindowWithLog(win.id, 'editor');
                         sendResponse({ success: false, error: error && error.message ? error.message : String(error) });
                     }
@@ -1393,12 +1396,16 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
             const windowId = tab.windowId;
 
             // Send message to offscreen to execute the macro
-            await sendMessageToOffscreen({
-                command: 'runMacroByUrl',
-                macroPath: macroPath,
-                windowId: windowId,
-                tabId: details.tabId
-            });
+            try {
+                await sendMessageToOffscreen({
+                    command: 'runMacroByUrl',
+                    macroPath: macroPath,
+                    windowId: windowId,
+                    tabId: details.tabId
+                });
+            } catch (error) {
+                console.error('[iMacros SW] Failed to trigger macro from imacros:// URL:', error);
+            }
 
             // Navigate back or to a blank page to prevent the error page
             try {
