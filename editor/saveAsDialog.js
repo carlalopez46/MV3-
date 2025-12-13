@@ -7,9 +7,13 @@ var dialogWindowId = null;
 
 window.addEventListener("load", function () {
     // Primary MV3 path: request dialog args from background
+    // Primary MV3 path: request dialog args from background with retry
     chrome.windows.getCurrent(function (currentWindow) {
         dialogWindowId = currentWindow.id;
+        requestArgs(5);
+    });
 
+    function requestArgs(retries) {
         chrome.runtime.sendMessage({
             type: 'GET_DIALOG_ARGS',
             windowId: dialogWindowId
@@ -20,6 +24,14 @@ window.addEventListener("load", function () {
                 return;
             }
             if (!result || !result.success) {
+                // If it's a "bad dialog id" error, it likely means the background hasn't registered the ID yet (race condition)
+                // Retry a few times
+                if (retries > 0 && result && result.error && result.error.includes('bad dialog id')) {
+                    console.log("[iMacros] Args not ready yet (" + result.error + "), retrying... remaining: " + retries);
+                    setTimeout(function () { requestArgs(retries - 1); }, 200);
+                    return;
+                }
+
                 console.error("[iMacros] Background failed to get dialog args:", result && result.error);
                 fallbackToSessionStorage();
                 return;
@@ -28,7 +40,7 @@ window.addEventListener("load", function () {
             args = result.args;
             initializeWithAfio();
         });
-    });
+    }
 
 
     function fallbackToSessionStorage() {
