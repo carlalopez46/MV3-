@@ -3171,7 +3171,22 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
     if (jsRegex.test(param)) {
         let matches = jsRegex.exec(param);
         let scriptCode = matches[1];
+        const mplayer = this;
+
+        const executeScriptCallback = (response) => {
+            if (response && response.error) {
+                console.error("[MacroPlayer] scripting.executeScript error:", response.error);
+                mplayer.handleError(new RuntimeError(
+                    response.error || "javascript: execution failed",
+                    999
+                ));
+                return;
+            }
+            mplayer.next("URL");
+        };
+
         if (chrome.scripting && chrome.scripting.executeScript) {
+            // Direct access (Service Worker context)
             chrome.scripting.executeScript({
                 target: { tabId: this.tab_id },
                 // Intentional global-scope execution of trusted macro JavaScript.
@@ -3179,18 +3194,20 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
                 args: [scriptCode]
             }, () => {
                 if (chrome.runtime.lastError) {
-                    console.error("[MacroPlayer] scripting.executeScript error:", chrome.runtime.lastError);
-                    this.handleError(new RuntimeError(
-                        chrome.runtime.lastError.message || "javascript: execution failed",
-                        999
-                    ));
-                    return;
+                    executeScriptCallback({ error: chrome.runtime.lastError.message });
+                } else {
+                    executeScriptCallback({ success: true });
                 }
-                this.next("URL");
             });
         } else {
-            console.warn("[MacroPlayer] scripting.executeScript unavailable; skipping javascript: URL");
-            this.next("URL");
+            // Proxy through Service Worker (Offscreen Document context)
+            console.log("[MacroPlayer] Proxying scripting.executeScript through Service Worker");
+            chrome.runtime.sendMessage({
+                command: 'SCRIPTING_EXECUTE',
+                tabId: this.tab_id,
+                func: '(code) => { return (0, eval)(code); }',
+                args: [scriptCode]
+            }, executeScriptCallback);
         }
     } else {
         const onUpdated = () => {

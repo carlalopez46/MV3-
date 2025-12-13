@@ -689,6 +689,81 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
+    // --- UPDATE_BADGE: Proxy badge updates from Offscreen Document ---
+    if (msg.type === 'UPDATE_BADGE') {
+        const { method, winId, arg } = msg;
+        const actionApi = chrome.action || chrome.browserAction;
+
+        if (!actionApi) {
+            console.warn('[iMacros SW] No action API available for badge update');
+            return false;
+        }
+
+        // Helper to iterate all tabs in a window
+        const forAllTabs = (win_id, callback) => {
+            chrome.windows.getAll({ populate: true }, (windows) => {
+                if (chrome.runtime.lastError) {
+                    console.warn('[iMacros SW] Error getting windows:', chrome.runtime.lastError.message);
+                    return;
+                }
+                windows.forEach((win) => {
+                    if (win.id === win_id && Array.isArray(win.tabs)) {
+                        win.tabs.forEach((tab) => callback(tab));
+                    }
+                });
+            });
+        };
+
+        switch (method) {
+            case 'setBackgroundColor':
+                forAllTabs(winId, (tab) => {
+                    try {
+                        actionApi.setBadgeBackgroundColor({ tabId: tab.id, color: arg });
+                    } catch (e) { /* ignore */ }
+                });
+                break;
+            case 'setText':
+                forAllTabs(winId, (tab) => {
+                    try {
+                        actionApi.setBadgeText({ tabId: tab.id, text: arg || '' });
+                    } catch (e) { /* ignore */ }
+                });
+                break;
+            case 'setIcon':
+                forAllTabs(winId, (tab) => {
+                    try {
+                        actionApi.setIcon({ tabId: tab.id, path: arg });
+                    } catch (e) { /* ignore */ }
+                });
+                break;
+            default:
+                console.warn('[iMacros SW] Unknown badge method:', method);
+        }
+        return false; // No response needed
+    }
+
+    // --- SCRIPTING_EXECUTE: Proxy chrome.scripting.executeScript from Offscreen Document ---
+    if (msg.command === 'SCRIPTING_EXECUTE') {
+        const { tabId, func, args } = msg;
+        if (!chrome.scripting || !chrome.scripting.executeScript) {
+            sendResponse({ error: 'chrome.scripting not available' });
+            return true;
+        }
+
+        chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            func: new Function('return (' + func + ')(...arguments)'),
+            args: args || []
+        }, (results) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ success: true, results: results });
+            }
+        });
+        return true;
+    }
+
     // --- SEND_TO_TAB: Proxy tab messaging from Offscreen Document ---
     if (msg.command === 'SEND_TO_TAB') {
         const { tab_id, message } = msg;
