@@ -5,7 +5,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // Some utility functions
 // Some utility functions
 // MV3 Service Worker Polyfill for localStorage
-if (typeof localStorage === "undefined" || localStorage === null) {
+if (typeof localStorage === "undefined" || localStorage === null || localStorage.__isMinimalLocalStorageShim) {
     var _localStorageData = {};
     // Define properly on global scope
     var _global = typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : {});

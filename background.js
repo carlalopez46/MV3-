@@ -16,6 +16,7 @@ if (typeof globalThis.localStorage === 'undefined') {
         get length() {
             return memoryStore.size;
         },
+        __isMinimalLocalStorageShim: true,
     };
 }
 
