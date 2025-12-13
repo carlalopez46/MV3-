@@ -18,7 +18,10 @@ function Connector() {
             let handledByNew = connector.onMessage(msg, callback);
 
             // Log warning only if neither system handled the message and it has a topic
-            if (!handledByLegacy && !handledByNew && msg.topic) {
+            // AND the message was not targeting a different frame (if _frame is specified)
+            let isTargetingOtherFrame = msg._frame && !connector.thisFrame(msg._frame);
+
+            if (!handledByLegacy && !handledByNew && msg.topic && !isTargetingOtherFrame) {
                 console.warn("[iMacros MV3] Unknown topic:", msg.topic, "Current handlers:", Object.keys(connector.handlers));
                 logWarning(`Connector: Unknown topic '${msg.topic}' - not handled by any system`, {
                     topic: msg.topic,
