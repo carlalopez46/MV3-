@@ -87,20 +87,7 @@ async function performStorageWithFallback(method, payload) {
 
 const executionStateStorage = sessionStorage || localStorage;
 const clearStaleExecutionState = executionStateStorage === localStorage
-    ? Promise.allSettled([
-        removeFromSessionOrLocal(['executionState']),
-        sessionStorage && typeof sessionStorage.remove === 'function'
-            ? new Promise((resolve, reject) => {
-                sessionStorage.remove(['executionState'], () => {
-                    if (chrome.runtime && chrome.runtime.lastError) {
-                        reject(chrome.runtime.lastError);
-                        return;
-                    }
-                    resolve(true);
-                });
-            })
-            : Promise.resolve(true)
-    ]).catch((error) => {
+    ? removeFromSessionOrLocal(['executionState']).catch((error) => {
         console.warn('[iMacros SW] Failed to clear persisted execution state on startup:', error);
     })
     : Promise.resolve(true);
@@ -154,7 +141,12 @@ async function transitionState(phase, meta, context) {
 }
 
 async function forwardToOffscreen(payload) {
-    await ensureOffscreenDocument();
+    try {
+        await ensureOffscreenDocument();
+    } catch (error) {
+        console.warn('[iMacros SW] Failed to ensure offscreen document before forwarding:', error);
+        throw error;
+    }
     return messagingBus.sendRuntime({ target: 'offscreen', ...payload });
 }
 
@@ -205,28 +197,35 @@ async function createOffscreen() {
     }
 }
 
-// Initialize on startup and install
-chrome.runtime.onStartup.addListener(createOffscreen);
-chrome.runtime.onInstalled.addListener(createOffscreen);
+// Initialize on startup and install with guarded error handling to avoid unhandled rejections
+const logOffscreenError = (context, error) => {
+    console.error(`[iMacros SW] Failed to create offscreen during ${context}:`, error);
+};
+
+chrome.runtime.onStartup.addListener(() => {
+    createOffscreen().catch((error) => logOffscreenError('onStartup', error));
+});
+
+chrome.runtime.onInstalled.addListener((details) => {
+    const reason = details && details.reason ? `onInstalled:${details.reason}` : 'onInstalled';
+    createOffscreen().catch((error) => logOffscreenError(reason, error));
+});
 
 function persistEditorLaunchData(editorData) {
-    return new Promise((resolve, reject) => {
-        if (editorData === null || typeof editorData !== 'object' || Array.isArray(editorData)) {
-            reject(new Error('Editor launch payload must be an object'));
-            return;
-        }
-
-        setInSessionOrLocal(editorData)
-            .then(() => resolve())
-            .catch((error) => {
-                reject(new Error(error && error.message ? error.message : String(error)));
-            });
-    });
+    if (editorData === null || typeof editorData !== 'object' || Array.isArray(editorData)) {
+        return Promise.reject(new Error('Editor launch payload must be an object'));
+    }
+    return setInSessionOrLocal(editorData);
 }
 
 // Forward action click to Offscreen
-chrome.action.onClicked.addListener(async (tab) => {
-    await createOffscreen();
+    chrome.action.onClicked.addListener(async (tab) => {
+        try {
+            await createOffscreen();
+        } catch (error) {
+            logOffscreenError('action.onClicked', error);
+            return;
+        }
     try {
         const transitioned = await transitionState('playing', { source: 'action_click', tabId: tab?.id }, 'action click');
         if (!transitioned) {
@@ -486,10 +485,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
                     // Store in storage for persistence
                     try {
-                        const stored = await setInSessionOrLocal({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
-                        if (!stored) {
-                            console.warn('[iMacros SW] Failed to persist panel ID to storage');
-                        }
+                        await setInSessionOrLocal({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
                     } catch (error) {
                         console.warn('[iMacros SW] Exception while persisting panel ID to storage:', error);
                     }
