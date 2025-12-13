@@ -10,6 +10,14 @@
         ackTimeoutMs: 500
     };
 
+    /**
+     * MessagingBus provides resilient runtime/tab messaging with retry, backoff, and acknowledgment
+     * handling for MV3 service workers and offscreen documents.
+     *
+     * @param {chrome.runtime} runtime - chrome.runtime messaging API (required).
+     * @param {chrome.tabs} tabs - chrome.tabs API for tab-targeted messaging (optional but recommended).
+     * @param {Object} options - Optional configuration ({ maxRetries, backoffMs, ackTimeoutMs }).
+     */
     class MessagingBus {
         constructor(runtime, tabs, options = {}) {
             if (!runtime || typeof runtime !== 'object') {
@@ -114,7 +122,8 @@
             if (!response) return false;
             // Any response containing an explicit ack/success/ok boolean (true or false) counts as an acknowledgment.
             // This avoids needless retries when a responder returns { success: false, error: ... } while preserving
-            // compatibility with the preferred `ack: true` contract.
+            // compatibility with the preferred `ack: true` contract. Callers must still inspect the response fields to
+            // determine success/failure semantics.
             return typeof response.ack === 'boolean' || typeof response.success === 'boolean' || typeof response.ok === 'boolean';
         }
     }

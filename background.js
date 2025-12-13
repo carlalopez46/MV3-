@@ -87,20 +87,7 @@ async function performStorageWithFallback(method, payload) {
 
 const executionStateStorage = sessionStorage || localStorage;
 const clearStaleExecutionState = executionStateStorage === localStorage
-    ? Promise.allSettled([
-        removeFromSessionOrLocal(['executionState']),
-        sessionStorage && typeof sessionStorage.remove === 'function'
-            ? new Promise((resolve, reject) => {
-                sessionStorage.remove(['executionState'], () => {
-                    if (chrome.runtime && chrome.runtime.lastError) {
-                        reject(chrome.runtime.lastError);
-                        return;
-                    }
-                    resolve(true);
-                });
-            })
-            : Promise.resolve(true)
-    ]).catch((error) => {
+    ? removeFromSessionOrLocal(['executionState']).catch((error) => {
         console.warn('[iMacros SW] Failed to clear persisted execution state on startup:', error);
     })
     : Promise.resolve(true);
@@ -128,6 +115,21 @@ function logForwardingError(context, error) {
     console.warn(`[iMacros SW] ${context} forwarding failed:`, message, error);
 }
 
+function removeWindowWithLog(windowId, context) {
+    return new Promise((resolve) => {
+        if (!chrome.windows || typeof chrome.windows.remove !== 'function') {
+            resolve();
+            return;
+        }
+        chrome.windows.remove(windowId, () => {
+            if (chrome.runtime && chrome.runtime.lastError) {
+                console.warn(`[iMacros SW] Failed to remove ${context} window during cleanup:`, chrome.runtime.lastError);
+            }
+            resolve();
+        });
+    });
+}
+
 async function transitionState(phase, meta, context) {
     try {
         await executionState.transition(phase, meta);
@@ -138,7 +140,13 @@ async function transitionState(phase, meta, context) {
     }
 }
 
-function forwardToOffscreen(payload) {
+async function forwardToOffscreen(payload) {
+    try {
+        await ensureOffscreenDocument();
+    } catch (error) {
+        console.warn('[iMacros SW] Failed to ensure offscreen document before forwarding:', error);
+        throw error;
+    }
     return messagingBus.sendRuntime({ target: 'offscreen', ...payload });
 }
 
@@ -194,18 +202,10 @@ chrome.runtime.onStartup.addListener(createOffscreen);
 chrome.runtime.onInstalled.addListener(createOffscreen);
 
 function persistEditorLaunchData(editorData) {
-    return new Promise((resolve, reject) => {
-        if (editorData === null || typeof editorData !== 'object' || Array.isArray(editorData)) {
-            reject(new Error('Editor launch payload must be an object'));
-            return;
-        }
-
-        setInSessionOrLocal(editorData)
-            .then(() => resolve())
-            .catch((error) => {
-                reject(new Error(error && error.message ? error.message : String(error)));
-            });
-    });
+    if (editorData === null || typeof editorData !== 'object' || Array.isArray(editorData)) {
+        return Promise.reject(new Error('Editor launch payload must be an object'));
+    }
+    return setInSessionOrLocal(editorData);
 }
 
 // Forward action click to Offscreen
@@ -463,17 +463,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                         } catch (storageError) {
                             console.warn('[iMacros SW] Failed to clear panel ids during rollback:', storageError);
                         }
-                        chrome.windows.remove(panelWin.id, () => { /* best effort cleanup */ });
+                        await removeWindowWithLog(panelWin.id, 'panel');
                         if (respond) respond({ success: false, error: error && error.message ? error.message : String(error) });
                         return;
                     }
 
                     // Store in storage for persistence
                     try {
-                        const stored = await setInSessionOrLocal({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
-                        if (!stored) {
-                            console.warn('[iMacros SW] Failed to persist panel ID to storage');
-                        }
+                        await setInSessionOrLocal({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
                     } catch (error) {
                         console.warn('[iMacros SW] Exception while persisting panel ID to storage:', error);
                     }
@@ -507,14 +504,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     try {
                         const transitioned = await transitionState('editing', { windowId: win.id, source: 'editor' }, 'editor creation');
                         if (!transitioned) {
-                            chrome.windows.remove(win.id, () => { /* best effort cleanup */ });
+                            await transitionState('idle', { source: 'editor rollback' }, 'editor creation rollback');
+                            await removeWindowWithLog(win.id, 'editor');
                             sendResponse({ success: false, error: 'State transition failed during editor creation' });
                             return;
                         }
                         sendResponse({ success: true, windowId: win.id });
                     } catch (error) {
                         console.error('[iMacros SW] Editor state transition failed:', error);
-                        chrome.windows.remove(win.id, () => { /* best effort cleanup */ });
+                        await transitionState('idle', { source: 'editor rollback' }, 'editor creation rollback');
+                        await removeWindowWithLog(win.id, 'editor');
                         sendResponse({ success: false, error: error && error.message ? error.message : String(error) });
                     }
                 }
@@ -1091,6 +1090,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 sessionData = await getFromSessionOrLocal(null);
             } catch (error) {
                 console.warn('[iMacros SW] Failed to read panel mapping from storage:', error);
+                return null;
             }
 
             // panel_XXX形式のキーから逆引き
@@ -1364,7 +1364,7 @@ async function sendMessageToOffscreen(msg) {
             if (msg.windowId !== undefined) context.push(`windowId=${msg.windowId}`);
             if (msg.tabId !== undefined) context.push(`tabId=${msg.tabId}`);
             const contextStr = context.length ? ` [${context.join(', ')}]` : '';
-            throw new Error(`${err.message}${contextStr}`);
+            throw new Error(`${err.message}${contextStr}`, { cause: err });
         }
         throw err;
     }
@@ -1401,12 +1401,16 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
             const windowId = tab.windowId;
 
             // Send message to offscreen to execute the macro
-            await sendMessageToOffscreen({
-                command: 'runMacroByUrl',
-                macroPath: macroPath,
-                windowId: windowId,
-                tabId: details.tabId
-            });
+            try {
+                await sendMessageToOffscreen({
+                    command: 'runMacroByUrl',
+                    macroPath: macroPath,
+                    windowId: windowId,
+                    tabId: details.tabId
+                });
+            } catch (error) {
+                console.error('[iMacros SW] Failed to trigger macro from imacros:// URL:', error);
+            }
 
             // Navigate back or to a blank page to prevent the error page
             try {

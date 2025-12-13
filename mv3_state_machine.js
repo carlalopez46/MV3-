@@ -9,22 +9,33 @@
         updatedAt: Date.now()
     });
 
+    /**
+     * ExecutionStateMachine persists and manages lifecycle phases (idle/playing/editing/recording)
+     * for the MV3 service worker, with periodic heartbeat persistence to tolerate restarts.
+     *
+     * @param {Object} options
+     * @param {chrome.storage.StorageArea} [options.storage] - Storage area for state persistence.
+     * @param {chrome.alarms.AlarmNamespace} [options.alarmNamespace] - Alarms API for heartbeats.
+     * @param {string} [options.heartbeatName] - Alarm name used for heartbeat scheduling.
+     * @param {number} [options.heartbeatMinutes] - Heartbeat interval (minutes).
+     */
     class ExecutionStateMachine {
         constructor(options = {}) {
             this.storage = options.storage || null;
             this.alarmNamespace = options.alarmNamespace || null;
             this.heartbeatName = options.heartbeatName || 'imacros-execution-heartbeat';
-            this.heartbeatMinutes = options.heartbeatMinutes || 1; // MV3 alarms clamp values below 1 minute up to 1 minute (effective min: 1)
+            this.heartbeatMinutes = options.heartbeatMinutes || 1; // Chrome clamps MV3 alarm intervals below 1 minute up to 1 minute (effective min: 1)
             this.state = DEFAULT_STATE();
         }
 
         async hydrate() {
             const stored = await this._read();
             if (stored && stored.phase) {
-                this.state = Object.assign(DEFAULT_STATE(), {
+                this.state = {
+                    ...DEFAULT_STATE(),
                     ...stored,
-                    meta: Object.assign({}, stored.meta || {})
-                });
+                    meta: { ...(stored.meta || {}) }
+                };
             } else {
                 this.state = DEFAULT_STATE();
             }
@@ -108,7 +119,7 @@
 
         async _scheduleHeartbeat() {
             if (!this.alarmNamespace || typeof this.alarmNamespace.create !== 'function') return;
-            // In MV3, chrome.alarms.create returns a Promise when called without a callback.
+            // In Chrome MV3, chrome.alarms.create returns a Promise when called without a callback (other browsers may differ).
             await this.alarmNamespace.create(this.heartbeatName, {
                 delayInMinutes: this.heartbeatMinutes,
                 periodInMinutes: this.heartbeatMinutes
