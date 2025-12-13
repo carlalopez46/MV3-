@@ -2029,7 +2029,9 @@ MacroPlayer.prototype.saveTarget = function(url) {
         // Proxy through Service Worker (Offscreen Document context)
         chrome.runtime.sendMessage({
             command: 'DOWNLOADS_DOWNLOAD',
-            options: { url: url }
+            options: { url: url },
+            win_id: self.win_id,
+            tab_id: self.tab_id
         }, function(response) {
             if (chrome.runtime.lastError) {
                 self.handleError(new RuntimeError(

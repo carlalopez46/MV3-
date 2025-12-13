@@ -397,21 +397,37 @@ chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
 });
 
 // Forward download events to Offscreen Document for ONDOWNLOAD command support
+// Track active downloads with correlation data for routing to correct MacroPlayer
+const activeDownloadCorrelation = new Map();
+
 if (chrome.downloads && chrome.downloads.onCreated) {
     chrome.downloads.onCreated.addListener((downloadItem) => {
+        // Include correlation data if available
+        const correlation = activeDownloadCorrelation.get(downloadItem.id) || {};
         forwardToOffscreen({
             type: 'DOWNLOAD_CREATED',
-            downloadItem: downloadItem
+            downloadItem: downloadItem,
+            win_id: correlation.win_id,
+            tab_id: correlation.tab_id
         }).catch((error) => logForwardingError('DOWNLOAD_CREATED', error));
     });
 }
 
 if (chrome.downloads && chrome.downloads.onChanged) {
     chrome.downloads.onChanged.addListener((downloadDelta) => {
+        // Include correlation data if available
+        const correlation = activeDownloadCorrelation.get(downloadDelta.id) || {};
         forwardToOffscreen({
             type: 'DOWNLOAD_CHANGED',
-            downloadDelta: downloadDelta
+            downloadDelta: downloadDelta,
+            win_id: correlation.win_id,
+            tab_id: correlation.tab_id
         }).catch((error) => logForwardingError('DOWNLOAD_CHANGED', error));
+
+        // Clean up correlation data when download completes or is interrupted
+        if (downloadDelta.state && (downloadDelta.state.current === 'complete' || downloadDelta.state.current === 'interrupted')) {
+            activeDownloadCorrelation.delete(downloadDelta.id);
+        }
     });
 }
 
@@ -869,7 +885,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // --- DOWNLOADS_DOWNLOAD: Proxy chrome.downloads.download from Offscreen Document ---
     if (msg.command === 'DOWNLOADS_DOWNLOAD') {
-        const { options } = msg;
+        const { options, win_id, tab_id } = msg;
         if (!chrome.downloads || !chrome.downloads.download) {
             sendResponse({ error: 'chrome.downloads not available' });
             return true;
@@ -879,6 +895,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (chrome.runtime.lastError) {
                 sendResponse({ error: chrome.runtime.lastError.message });
             } else {
+                // Store correlation data for routing download events to correct MacroPlayer
+                if (downloadId && (win_id || tab_id)) {
+                    activeDownloadCorrelation.set(downloadId, { win_id, tab_id });
+                }
                 sendResponse({ success: true, downloadId: downloadId });
             }
         });
@@ -904,7 +924,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 return;
             }
 
-            // Use Promise.all for robust completion tracking
+            // Use Promise.all with timeout for robust completion tracking
+            const COOKIE_REMOVAL_TIMEOUT_MS = 10000; // 10 second timeout
+            let responded = false;
+
             const removePromises = cookies.map((cookie) => {
                 return new Promise((resolve) => {
                     // Strip leading dot from domain (e.g., ".example.com" -> "example.com")
@@ -922,10 +945,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 });
             });
 
-            Promise.all(removePromises).then((results) => {
-                const removed = results.filter(Boolean).length;
-                sendResponse({ success: true, removed: removed });
+            // Timeout fallback to prevent indefinite waiting
+            const timeoutPromise = new Promise((resolve) => {
+                setTimeout(() => {
+                    resolve({ timeout: true });
+                }, COOKIE_REMOVAL_TIMEOUT_MS);
+            });
+
+            Promise.race([
+                Promise.all(removePromises).then((results) => ({ results })),
+                timeoutPromise
+            ]).then((outcome) => {
+                if (responded) return;
+                responded = true;
+
+                if (outcome.timeout) {
+                    console.warn('[iMacros SW] Cookie removal timed out');
+                    sendResponse({ success: true, removed: -1, warning: 'timeout' });
+                } else {
+                    const removed = outcome.results.filter(Boolean).length;
+                    sendResponse({ success: true, removed: removed });
+                }
             }).catch((err) => {
+                if (responded) return;
+                responded = true;
                 sendResponse({ error: err && err.message ? err.message : String(err) });
             });
         });

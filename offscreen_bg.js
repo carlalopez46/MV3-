@@ -166,7 +166,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
     // Handle download events from Service Worker and forward to mplayer
     if (['DOWNLOAD_CREATED', 'DOWNLOAD_CHANGED'].includes(request.type)) {
-        for (let win_id in context) {
+        // Use correlation win_id if available to route to specific MacroPlayer
+        const targetWinIds = request.win_id ? [request.win_id] : Object.keys(context);
+
+        for (let win_id of targetWinIds) {
+            win_id = parseInt(win_id);
             if (context[win_id]) {
                 const mplayer = context[win_id].mplayer;
 
