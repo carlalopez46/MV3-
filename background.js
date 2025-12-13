@@ -15,7 +15,6 @@ try {
     );
 } catch (e) {
     console.error('Failed to import scripts:', e);
-    throw e;
 }
 
 // Background Service Worker for iMacros MV3
@@ -38,19 +37,21 @@ const sessionOrLocalStorage = sessionStorage || localStorage;
 function removeFromSessionOrLocal(keys) {
     return new Promise((resolve) => {
         if (!sessionOrLocalStorage || typeof sessionOrLocalStorage.remove !== 'function') {
-            resolve();
+            resolve(false);
             return;
         }
         try {
             sessionOrLocalStorage.remove(keys, () => {
                 if (chrome.runtime && chrome.runtime.lastError) {
                     console.warn('[iMacros SW] Failed to remove keys from storage:', chrome.runtime.lastError);
+                    resolve(false);
+                    return;
                 }
-                resolve();
+                resolve(true);
             });
         } catch (error) {
             console.warn('[iMacros SW] Exception removing keys from storage:', error);
-            resolve();
+            resolve(false);
         }
     });
 }
@@ -78,7 +79,7 @@ function setInSessionOrLocal(items) {
 }
 
 function getFromSessionOrLocal(keys) {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
         if (!sessionOrLocalStorage || typeof sessionOrLocalStorage.get !== 'function') {
             resolve({});
             return;
@@ -86,13 +87,15 @@ function getFromSessionOrLocal(keys) {
         try {
             sessionOrLocalStorage.get(keys, (result) => {
                 if (chrome.runtime && chrome.runtime.lastError) {
-                    reject(chrome.runtime.lastError);
+                    console.warn('[iMacros SW] Failed to get storage items:', chrome.runtime.lastError);
+                    resolve({});
                     return;
                 }
                 resolve(result || {});
             });
         } catch (error) {
-            reject(error);
+            console.warn('[iMacros SW] Exception reading storage items:', error);
+            resolve({});
         }
     });
 }
@@ -276,7 +279,7 @@ chrome.windows.onRemoved.addListener(async (windowId) => {
     if (windowId === globalPanelId) {
         console.log('[iMacros SW] Panel window closed:', windowId);
         globalPanelId = null;
-        removeFromSessionOrLocal(['globalPanelId']);
+        await removeFromSessionOrLocal(['globalPanelId']);
         await transitionState('idle', { source: 'panelClosed', windowId }, 'panel close');
 
         // Notify Offscreen Document that panel was closed
@@ -470,12 +473,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                         });
                     } catch (error) {
                         logForwardingError('panelCreated', error);
+                        globalPanelId = null;
+                        await removeFromSessionOrLocal(['globalPanelId', `panel_${win_id}`]);
+                        chrome.windows.remove(panelWin.id, () => { /* best effort cleanup */ });
                         if (respond) respond({ success: false, error: error && error.message ? error.message : String(error) });
                         return;
                     }
 
                     // Store in storage for persistence
-                    setInSessionOrLocal({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
+                    const stored = await setInSessionOrLocal({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
+                    if (!stored) {
+                        console.warn('[iMacros SW] Failed to persist panel ID to storage');
+                    }
 
                     if (respond) respond({ success: true, panelId: panelWin.id });
                 });
