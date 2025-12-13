@@ -396,6 +396,25 @@ chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
     }).catch((error) => logForwardingError('TAB_DETACHED', error));
 });
 
+// Forward download events to Offscreen Document for ONDOWNLOAD command support
+if (chrome.downloads && chrome.downloads.onCreated) {
+    chrome.downloads.onCreated.addListener((downloadItem) => {
+        forwardToOffscreen({
+            type: 'DOWNLOAD_CREATED',
+            downloadItem: downloadItem
+        }).catch((error) => logForwardingError('DOWNLOAD_CREATED', error));
+    });
+}
+
+if (chrome.downloads && chrome.downloads.onChanged) {
+    chrome.downloads.onChanged.addListener((downloadDelta) => {
+        forwardToOffscreen({
+            type: 'DOWNLOAD_CHANGED',
+            downloadDelta: downloadDelta
+        }).catch((error) => logForwardingError('DOWNLOAD_CHANGED', error));
+    });
+}
+
 
 // Keep-alive logic (optional, but good for stability)
 // If Offscreen sends a keep-alive message, we can respond to keep SW alive
@@ -790,6 +809,112 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             } else {
                 sendResponse({ success: true, results: results });
             }
+        });
+        return true;
+    }
+
+    // --- DEBUGGER_ATTACH: Proxy chrome.debugger.attach from Offscreen Document ---
+    if (msg.command === 'DEBUGGER_ATTACH') {
+        const { tabId, version } = msg;
+        if (!chrome.debugger || !chrome.debugger.attach) {
+            sendResponse({ error: 'chrome.debugger not available' });
+            return true;
+        }
+
+        chrome.debugger.attach({ tabId: tabId }, version || '1.2', () => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ success: true });
+            }
+        });
+        return true;
+    }
+
+    // --- DEBUGGER_SEND_COMMAND: Proxy chrome.debugger.sendCommand from Offscreen Document ---
+    if (msg.command === 'DEBUGGER_SEND_COMMAND') {
+        const { tabId, method, params } = msg;
+        if (!chrome.debugger || !chrome.debugger.sendCommand) {
+            sendResponse({ error: 'chrome.debugger not available' });
+            return true;
+        }
+
+        chrome.debugger.sendCommand({ tabId: tabId }, method, params || {}, (result) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ success: true, result: result });
+            }
+        });
+        return true;
+    }
+
+    // --- DEBUGGER_DETACH: Proxy chrome.debugger.detach from Offscreen Document ---
+    if (msg.command === 'DEBUGGER_DETACH') {
+        const { tabId } = msg;
+        if (!chrome.debugger || !chrome.debugger.detach) {
+            sendResponse({ error: 'chrome.debugger not available' });
+            return true;
+        }
+
+        chrome.debugger.detach({ tabId: tabId }, () => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ success: true });
+            }
+        });
+        return true;
+    }
+
+    // --- DOWNLOADS_DOWNLOAD: Proxy chrome.downloads.download from Offscreen Document ---
+    if (msg.command === 'DOWNLOADS_DOWNLOAD') {
+        const { options } = msg;
+        if (!chrome.downloads || !chrome.downloads.download) {
+            sendResponse({ error: 'chrome.downloads not available' });
+            return true;
+        }
+
+        chrome.downloads.download(options || {}, (downloadId) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ success: true, downloadId: downloadId });
+            }
+        });
+        return true;
+    }
+
+    // --- COOKIES_CLEAR: Proxy chrome.cookies for CLEAR command from Offscreen Document ---
+    if (msg.command === 'COOKIES_CLEAR') {
+        const { details } = msg;
+        if (!chrome.cookies || !chrome.cookies.getAll) {
+            sendResponse({ error: 'chrome.cookies not available' });
+            return true;
+        }
+
+        chrome.cookies.getAll(details || {}, (cookies) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+                return;
+            }
+
+            let removed = 0;
+            if (!cookies || cookies.length === 0) {
+                sendResponse({ success: true, removed: 0 });
+                return;
+            }
+
+            cookies.forEach((cookie) => {
+                const url = (cookie.secure ? "https" : "http") + "://" +
+                    cookie.domain + cookie.path;
+                chrome.cookies.remove({ url: url, name: cookie.name }, () => {
+                    removed++;
+                    if (removed === cookies.length) {
+                        sendResponse({ success: true, removed: removed });
+                    }
+                });
+            });
         });
         return true;
     }

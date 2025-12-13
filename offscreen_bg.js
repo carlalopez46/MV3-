@@ -164,6 +164,32 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         return true;
     }
 
+    // Handle download events from Service Worker and forward to mplayer
+    if (['DOWNLOAD_CREATED', 'DOWNLOAD_CHANGED'].includes(request.type)) {
+        for (let win_id in context) {
+            if (context[win_id]) {
+                const mplayer = context[win_id].mplayer;
+                const req = request;
+
+                try {
+                    if (req.type === 'DOWNLOAD_CREATED') {
+                        if (mplayer && mplayer.onDownloadCreated) {
+                            mplayer.onDownloadCreated(req.downloadItem);
+                        }
+                    } else if (req.type === 'DOWNLOAD_CHANGED') {
+                        if (mplayer && mplayer.onDownloadChanged) {
+                            mplayer.onDownloadChanged(req.downloadDelta);
+                        }
+                    }
+                } catch (e) {
+                    console.error(`[iMacros Offscreen] Error handling ${req.type} for win_id ${win_id}:`, e);
+                }
+            }
+        }
+        if (sendResponse) sendResponse({ success: true });
+        return true;
+    }
+
     // Handle tab events from Service Worker and forward to mplayer and recorder
     if (['TAB_UPDATED', 'TAB_ACTIVATED', 'TAB_CREATED', 'TAB_REMOVED', 'TAB_MOVED', 'TAB_ATTACHED', 'TAB_DETACHED', 'WEB_NAVIGATION_ERROR', 'WEB_NAVIGATION_COMMITTED'].includes(request.type)) {
         for (let win_id in context) {

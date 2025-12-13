@@ -940,6 +940,11 @@ MacroPlayer.prototype.ActionTable["back"] = function (cmd) {
 // cookies removal to specified domain/url
 MacroPlayer.prototype.RegExpTable["clear"] = "^\\s*("+im_strre+")?\\s*$";
 
+// Check if chrome.cookies is available (not in Offscreen Document)
+function hasCookiesAPI() {
+    return typeof chrome !== 'undefined' && chrome.cookies && typeof chrome.cookies.getAll === 'function';
+}
+
 MacroPlayer.prototype.ActionTable["clear"] = function (cmd) {
     var specifier = cmd[1] ?
         imns.unwrap(this.expandVariables(cmd[1], "clear1")) : null;
@@ -955,17 +960,34 @@ MacroPlayer.prototype.ActionTable["clear"] = function (cmd) {
     }
 
     var mplayer = this;
-    chrome.cookies.getAll(details, function(cookies) {
-        cookies.forEach(function(cookie) {
-            // TODO: check if we should omit storeId here.
-            // As for now I think that only current execution context
-            // store's cookies should be removed
-            var url = (cookie.secure? "https" : "http")+"://"+
-                cookie.domain+cookie.path;
-            chrome.cookies.remove({url: url, name: cookie.name});
+
+    if (hasCookiesAPI()) {
+        // Direct access (Service Worker context)
+        chrome.cookies.getAll(details, function(cookies) {
+            cookies.forEach(function(cookie) {
+                // TODO: check if we should omit storeId here.
+                // As for now I think that only current execution context
+                // store's cookies should be removed
+                var url = (cookie.secure? "https" : "http")+"://"+
+                    cookie.domain+cookie.path;
+                chrome.cookies.remove({url: url, name: cookie.name});
+            });
+            mplayer.next("CLEAR");
         });
-        mplayer.next("CLEAR");
-    });
+    } else {
+        // Proxy through Service Worker (Offscreen Document context)
+        chrome.runtime.sendMessage({
+            command: 'COOKIES_CLEAR',
+            details: details
+        }, function(response) {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] COOKIES_CLEAR error:", chrome.runtime.lastError);
+            } else if (response && response.error) {
+                console.error("[MacroPlayer] COOKIES_CLEAR failed:", response.error);
+            }
+            mplayer.next("CLEAR");
+        });
+    }
 };
 
 
@@ -990,40 +1012,105 @@ MacroPlayer.prototype.detachDebugger = function() {
         }) : Promise.resolve()
 }
 
-function attach_debugger(tab_id, version = "1.2") {
-    return new Promise(function(resolve, reject) {
-        chrome.debugger.attach({tabId: tab_id}, version, function() {
-            if (chrome.runtime.lastError)
-                reject(chrome.runtime.lastError);
-            else
-                resolve();
-        });
-    });
+// Check if chrome.debugger is available (not in Offscreen Document)
+function hasDebuggerAPI() {
+    return typeof chrome !== 'undefined' && chrome.debugger && typeof chrome.debugger.attach === 'function';
 }
 
-function send_command(tab_id, method, params) {
-    return new Promise(function(resolve, reject) {
-        chrome.debugger.sendCommand(
-            {tabId: tab_id}, method, params,
-            function(response) {
+function attach_debugger(tab_id, version = "1.2") {
+    if (hasDebuggerAPI()) {
+        // Direct access (Service Worker context)
+        return new Promise(function(resolve, reject) {
+            chrome.debugger.attach({tabId: tab_id}, version, function() {
                 if (chrome.runtime.lastError)
                     reject(chrome.runtime.lastError);
                 else
-                    resolve(response);
-            }
-        );
-    });
+                    resolve();
+            });
+        });
+    } else {
+        // Proxy through Service Worker (Offscreen Document context)
+        return new Promise(function(resolve, reject) {
+            chrome.runtime.sendMessage({
+                command: 'DEBUGGER_ATTACH',
+                tabId: tab_id,
+                version: version
+            }, function(response) {
+                if (chrome.runtime.lastError) {
+                    reject(chrome.runtime.lastError);
+                } else if (response && response.error) {
+                    reject(new Error(response.error));
+                } else {
+                    resolve();
+                }
+            });
+        });
+    }
+}
+
+function send_command(tab_id, method, params) {
+    if (hasDebuggerAPI()) {
+        // Direct access (Service Worker context)
+        return new Promise(function(resolve, reject) {
+            chrome.debugger.sendCommand(
+                {tabId: tab_id}, method, params,
+                function(response) {
+                    if (chrome.runtime.lastError)
+                        reject(chrome.runtime.lastError);
+                    else
+                        resolve(response);
+                }
+            );
+        });
+    } else {
+        // Proxy through Service Worker (Offscreen Document context)
+        return new Promise(function(resolve, reject) {
+            chrome.runtime.sendMessage({
+                command: 'DEBUGGER_SEND_COMMAND',
+                tabId: tab_id,
+                method: method,
+                params: params
+            }, function(response) {
+                if (chrome.runtime.lastError) {
+                    reject(chrome.runtime.lastError);
+                } else if (response && response.error) {
+                    reject(new Error(response.error));
+                } else {
+                    resolve(response && response.result);
+                }
+            });
+        });
+    }
 }
 
 function detach_debugger(tab_id) {
-    return new Promise(function(resolve, reject) {
-        chrome.debugger.detach({tabId: tab_id}, function() {
-            if (chrome.runtime.lastError)
-                reject(chrome.runtime.lastError);
-            else
-                resolve();
+    if (hasDebuggerAPI()) {
+        // Direct access (Service Worker context)
+        return new Promise(function(resolve, reject) {
+            chrome.debugger.detach({tabId: tab_id}, function() {
+                if (chrome.runtime.lastError)
+                    reject(chrome.runtime.lastError);
+                else
+                    resolve();
+            });
         });
-    });
+    } else {
+        // Proxy through Service Worker (Offscreen Document context)
+        return new Promise(function(resolve, reject) {
+            chrome.runtime.sendMessage({
+                command: 'DEBUGGER_DETACH',
+                tabId: tab_id
+            }, function(response) {
+                if (chrome.runtime.lastError) {
+                    reject(chrome.runtime.lastError);
+                } else if (response && response.error) {
+                    reject(new Error(response.error));
+                } else {
+                    resolve();
+                }
+            });
+        });
+    }
 }
 
 function get_modifiers_bitmask(modifiers) {
@@ -1737,9 +1824,13 @@ MacroPlayer.prototype.ActionTable["ondownload"] = function (cmd) {
     this.downloadFilename = file;
     this.shouldDownloadPDF = true;
     if (!this.downloadHooksRegistered) {
-        this.downloadHooksRegistered = true
-        chrome.downloads.onCreated.addListener(this._onDownloadCreated);
-        chrome.downloads.onChanged.addListener(this._onDownloadChanged);
+        this.downloadHooksRegistered = true;
+        // Only register direct listeners if chrome.downloads API is available (Service Worker)
+        // In Offscreen Document, events are forwarded via DOWNLOAD_CREATED/DOWNLOAD_CHANGED messages
+        if (hasDownloadsAPI()) {
+            chrome.downloads.onCreated.addListener(this._onDownloadCreated);
+            chrome.downloads.onChanged.addListener(this._onDownloadChanged);
+        }
         context.registerDfHandler(this.win_id);
     }
     this.next("ONDOWNLOAD");
@@ -1788,10 +1879,13 @@ MacroPlayer.prototype.onDownloadCompleted = function(id) {
 
     // do cleanup
     if (this.downloadHooksRegistered && this.activeDownloads.size == 0) {
-        chrome.downloads.onCreated.removeListener(this._onDownloadCreated);
-        chrome.downloads.onChanged.removeListener(this._onDownloadChanged);
+        // Only remove direct listeners if chrome.downloads API is available (Service Worker)
+        if (hasDownloadsAPI()) {
+            chrome.downloads.onCreated.removeListener(this._onDownloadCreated);
+            chrome.downloads.onChanged.removeListener(this._onDownloadChanged);
+        }
         context.unregisterDfHandler(this.win_id);
-        this.downloadHooksRegistered = false
+        this.downloadHooksRegistered = false;
     }
 
     if (!this.afioIsInstalled) {
@@ -1895,24 +1989,47 @@ MacroPlayer.prototype.onDownloadChanged = function(changeInfo) {
     }
 };
 
+// Check if chrome.downloads is available (not in Offscreen Document)
+function hasDownloadsAPI() {
+    return typeof chrome !== 'undefined' && chrome.downloads && typeof chrome.downloads.download === 'function';
+}
+
 MacroPlayer.prototype.saveTarget = function(url) {
     var self = this;
-    chrome.downloads.download({url: url}, function(dl_id) {
-        if (chrome.runtime.lastError) {
-            self.handleError(new RuntimeError(
-                "Download failed: "+chrome.runtime.lastError.message
-            ));
-            return;
-        }
-        // NOTE: The download object will be set inside
-        // onDownloadCreated handler
-        // console.log("download id=%d", dl_id);
-        // var dl_obj = {
-        //     downloadFilename: this.downloadFilename,
-        //     downloadFolder: this.downloadFolder
-        // };
-        // self.activeDownloads.set(dl_id, dl_obj);
-    });
+
+    if (hasDownloadsAPI()) {
+        // Direct access (Service Worker context)
+        chrome.downloads.download({url: url}, function(dl_id) {
+            if (chrome.runtime.lastError) {
+                self.handleError(new RuntimeError(
+                    "Download failed: "+chrome.runtime.lastError.message
+                ));
+                return;
+            }
+            // NOTE: The download object will be set inside
+            // onDownloadCreated handler
+        });
+    } else {
+        // Proxy through Service Worker (Offscreen Document context)
+        chrome.runtime.sendMessage({
+            command: 'DOWNLOADS_DOWNLOAD',
+            options: { url: url }
+        }, function(response) {
+            if (chrome.runtime.lastError) {
+                self.handleError(new RuntimeError(
+                    "Download failed: " + chrome.runtime.lastError.message
+                ));
+                return;
+            }
+            if (response && response.error) {
+                self.handleError(new RuntimeError(
+                    "Download failed: " + response.error
+                ));
+                return;
+            }
+            // Download started, events will be forwarded
+        });
+    }
 };
 
 // ONERRORDIALOG command http://wiki.imacros.net/ONERRORDIALOG
