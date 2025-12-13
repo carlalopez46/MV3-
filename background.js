@@ -87,7 +87,7 @@ async function performStorageWithFallback(method, payload) {
 
 const executionStateStorage = sessionStorage || localStorage;
 const clearStaleExecutionState = executionStateStorage === localStorage
-    ? Promise.all([
+    ? Promise.allSettled([
         removeFromSessionOrLocal(['executionState']),
         sessionStorage && typeof sessionStorage.remove === 'function'
             ? new Promise((resolve, reject) => {
@@ -194,10 +194,18 @@ chrome.runtime.onStartup.addListener(createOffscreen);
 chrome.runtime.onInstalled.addListener(createOffscreen);
 
 function persistEditorLaunchData(editorData) {
-    if (editorData === null || typeof editorData !== 'object' || Array.isArray(editorData)) {
-        return Promise.reject(new Error('Editor launch payload must be an object'));
-    }
-    return setInSessionOrLocal(editorData);
+    return new Promise((resolve, reject) => {
+        if (editorData === null || typeof editorData !== 'object' || Array.isArray(editorData)) {
+            reject(new Error('Editor launch payload must be an object'));
+            return;
+        }
+
+        setInSessionOrLocal(editorData)
+            .then(() => resolve())
+            .catch((error) => {
+                reject(new Error(error && error.message ? error.message : String(error)));
+            });
+    });
 }
 
 // Forward action click to Offscreen
