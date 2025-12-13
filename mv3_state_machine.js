@@ -36,6 +36,11 @@
             return this.snapshot();
         }
 
+        /**
+         * Returns a shallow copy of the current state.
+         * Note: nested properties inside `meta` are not deep-cloned; callers must avoid mutating them
+         * or perform their own deep copy when necessary.
+         */
         snapshot() {
             return Object.assign({}, this.state, { meta: Object.assign({}, this.state.meta) });
         }
