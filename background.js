@@ -464,10 +464,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
                     // Store in storage for persistence
                     try {
-                        const stored = await setInSessionOrLocal({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
-                        if (!stored) {
-                            console.warn('[iMacros SW] Failed to persist panel ID to storage');
-                        }
+                        await setInSessionOrLocal({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
                     } catch (error) {
                         console.warn('[iMacros SW] Exception while persisting panel ID to storage:', error);
                     }
@@ -1085,6 +1082,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 sessionData = await getFromSessionOrLocal(null);
             } catch (error) {
                 console.warn('[iMacros SW] Failed to read panel mapping from storage:', error);
+                return null;
             }
 
             // panel_XXX形式のキーから逆引き
@@ -1358,7 +1356,7 @@ async function sendMessageToOffscreen(msg) {
             if (msg.windowId !== undefined) context.push(`windowId=${msg.windowId}`);
             if (msg.tabId !== undefined) context.push(`tabId=${msg.tabId}`);
             const contextStr = context.length ? ` [${context.join(', ')}]` : '';
-            throw new Error(`${err.message}${contextStr}`);
+            throw new Error(`${err.message}${contextStr}`, { cause: err });
         }
         throw err;
     }
