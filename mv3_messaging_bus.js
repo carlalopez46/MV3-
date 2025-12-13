@@ -92,7 +92,7 @@
         }
 
         _isTransient(error) {
-            if (!error || !error.message) return false;
+            if (!error || typeof error.message !== 'string') return false;
             return error.message.includes('Receiving end does not exist') ||
                 error.message.includes('Could not establish connection') ||
                 error.message.includes('The message port closed');
@@ -102,7 +102,10 @@
             if (!response) return false;
             // For compatibility across legacy callers, treat boolean true for any of these keys as an acknowledgment
             // (callers should prefer the explicit `ack: true` contract going forward).
-            return response.ack === true || response.success === true || response.ok === true;
+            if (response.ack === true || response.success === true || response.ok === true) return true;
+            // Explicit error responses still count as acknowledgments to avoid needless retries when a responder
+            // returns success: false with an error payload.
+            return typeof response.ack === 'boolean' || typeof response.success === 'boolean' || typeof response.ok === 'boolean';
         }
     }
 

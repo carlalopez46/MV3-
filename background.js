@@ -201,7 +201,11 @@ chrome.storage.session.get(['globalPanelId'], (result) => {
                 console.log('[iMacros SW] Restored globalPanelId from session:', globalPanelId);
             } else {
                 // Panel no longer exists, clear from session storage
-                chrome.storage.session.remove(['globalPanelId']);
+                chrome.storage.session.remove(['globalPanelId'], () => {
+                    if (chrome.runtime.lastError) {
+                        console.warn('[iMacros SW] Failed clearing stale panel id from session storage:', chrome.runtime.lastError);
+                    }
+                });
             }
         });
     }
@@ -212,7 +216,11 @@ chrome.windows.onRemoved.addListener(async (windowId) => {
     if (windowId === globalPanelId) {
         console.log('[iMacros SW] Panel window closed:', windowId);
         globalPanelId = null;
-        chrome.storage.session.remove(['globalPanelId']);
+        chrome.storage.session.remove(['globalPanelId'], () => {
+            if (chrome.runtime.lastError) {
+                console.warn('[iMacros SW] Failed removing panel id from session storage:', chrome.runtime.lastError);
+            }
+        });
         await transitionState('idle', { source: 'panelClosed', windowId }, 'panel close');
 
         // Notify Offscreen Document that panel was closed
