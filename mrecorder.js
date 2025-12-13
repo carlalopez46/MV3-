@@ -215,8 +215,8 @@ Recorder.prototype.stop = function () {
 
     this.recording = false;
 
-    // Fix: Save the recorded macro to #Current.iim
-    this.save();
+    // Note: Macro saving is handled by offscreen_bg.js or bg.js after recorder.stop() is called.
+    // This ensures proper tree-type detection and fallback to bookmarks when file system is unavailable.
 
     // Clear saved state
     if (chrome.storage && chrome.storage.session) {
@@ -232,55 +232,6 @@ Recorder.prototype.stop = function () {
             panelWindowId: context[this.win_id].panelId
         });
     } catch (e) { /* ignore */ }
-};
-
-Recorder.prototype.save = function () {
-    if (!this.actions || this.actions.length === 0) {
-        console.log("[Recorder] No actions to save");
-        return;
-    }
-
-    var content = this.actions.join("\n");
-    // Ensure header
-    if (content.indexOf("VERSION BUILD") === -1) {
-        content = "VERSION BUILD=1011 RECORDER=CR\n" + content;
-    }
-
-    var self = this;
-
-    if (typeof afio === "undefined") {
-        console.error("[Recorder] afio not available, cannot save #Current.iim");
-        return;
-    }
-
-    afio.getDefaultDir("savepath").then(function (dir) {
-        var file = dir.clone();
-        file.append("#Current.iim");
-        console.log("[Recorder] Saving to:", file.path);
-        return afio.writeTextFile(file, content);
-    }).then(function () {
-        console.log("[Recorder] Saved #Current.iim successfully");
-        // Refresh the file tree in the panel
-        if (context[self.win_id] && context[self.win_id].panelId) {
-            try {
-                chrome.runtime.sendMessage({
-                    type: 'UPDATE_PANEL_VIEWS',
-                    panelWindowId: context[self.win_id].panelId
-                });
-            } catch (e) { console.warn("[Recorder] Failed to notify panel update:", e); }
-        }
-    }).catch(function (err) {
-        console.error("[Recorder] Failed to save #Current.iim:", err);
-        if (context[self.win_id] && context[self.win_id].panelId) {
-            try {
-                chrome.runtime.sendMessage({
-                    type: 'PANEL_SET_STAT_LINE',
-                    panelWindowId: context[self.win_id].panelId,
-                    data: { txt: "Save failed: " + err.message, type: "error" }
-                });
-            } catch (e) { /* ignore */ }
-        }
-    });
 };
 
 
