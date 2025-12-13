@@ -18,6 +18,9 @@
         }
 
         async sendRuntime(message, opts = {}) {
+            if (!this.runtime || typeof this.runtime.sendMessage !== 'function') {
+                throw new Error('chrome.runtime is not available');
+            }
             return this._retry(async () => {
                 return await this._send((resolve, reject) => {
                     this.runtime.sendMessage(message, (response) => {
@@ -58,19 +61,26 @@
             const enforceAck = opts.expectAck === true;
 
             for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                let timeoutId = null;
                 try {
+                    const fnPromise = fn();
                     const resultPromise = enforceAck && typeof ackTimeout === 'number'
                         ? Promise.race([
-                            fn(),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('Ack timeout')), ackTimeout))
+                            fnPromise,
+                            new Promise((_, reject) => {
+                                timeoutId = setTimeout(() => reject(new Error(`Ack timeout on ${channelLabel || 'channel'}`)), ackTimeout);
+                            })
                         ])
-                        : fn();
+                        : fnPromise;
                     const result = await resultPromise;
+                    if (timeoutId) clearTimeout(timeoutId);
                     if (enforceAck && !this._hasAck(result)) {
                         throw new Error(`No ack received on ${channelLabel || 'channel'}`);
                     }
                     return result;
                 } catch (error) {
+                    // Clear any pending timeout if the primary promise rejected first.
+                    if (timeoutId) clearTimeout(timeoutId);
                     if (attempt >= maxRetries || !this._isTransient(error)) {
                         throw error;
                     }
@@ -89,7 +99,7 @@
         }
 
         _isTransient(error) {
-            if (!error || !error.message) return false;
+            if (!error || typeof error.message !== 'string') return false;
             return error.message.includes('Receiving end does not exist') ||
                 error.message.includes('Could not establish connection') ||
                 error.message.includes('The message port closed');
@@ -97,7 +107,12 @@
 
         _hasAck(response) {
             if (!response) return false;
-            return response.ack === true || response.success === true || response.ok === true;
+            // For compatibility across legacy callers, treat boolean true for any of these keys as an acknowledgment
+            // (callers should prefer the explicit `ack: true` contract going forward).
+            if (response.ack === true || response.success === true || response.ok === true) return true;
+            // Explicit error responses still count as acknowledgments to avoid needless retries when a responder
+            // returns success: false with an error payload.
+            return typeof response.ack === 'boolean' || typeof response.success === 'boolean' || typeof response.ok === 'boolean';
         }
     }
 

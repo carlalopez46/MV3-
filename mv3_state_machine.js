@@ -14,7 +14,7 @@
             this.storage = options.storage || null;
             this.alarmNamespace = options.alarmNamespace || null;
             this.heartbeatName = options.heartbeatName || 'imacros-execution-heartbeat';
-            this.heartbeatMinutes = options.heartbeatMinutes || 0.2;
+            this.heartbeatMinutes = options.heartbeatMinutes || 1; // MV3 alarms clamp values below 1 minute up to 1 minute (effective min: 1)
             this.state = DEFAULT_STATE();
         }
 
@@ -28,12 +28,23 @@
             } else {
                 this.state = DEFAULT_STATE();
             }
-            await this._scheduleHeartbeat();
+            try {
+                await this._scheduleHeartbeat();
+            } catch (error) {
+                console.warn('[ExecutionStateMachine] Failed to schedule heartbeat on hydrate:', error);
+            }
             return this.snapshot();
         }
 
+        /**
+         * Returns a deep copy of the current state to prevent callers from mutating internal metadata.
+         */
         snapshot() {
-            return Object.assign({}, this.state, { meta: Object.assign({}, this.state.meta) });
+            if (typeof structuredClone === 'function') {
+                return structuredClone(this.state);
+            }
+            // Fallback for environments without structuredClone
+            return JSON.parse(JSON.stringify(this.state));
         }
 
         async transition(phase, meta = {}) {
@@ -42,12 +53,20 @@
                 meta: Object.assign({}, meta),
                 updatedAt: Date.now()
             };
+            let persisted = true;
             try {
                 await this._persist();
             } catch (error) {
                 console.warn('[ExecutionStateMachine] Failed to persist transition:', error);
+                persisted = false;
             }
-            await this._scheduleHeartbeat();
+            if (persisted) {
+                try {
+                    await this._scheduleHeartbeat();
+                } catch (error) {
+                    console.warn('[ExecutionStateMachine] Failed to schedule heartbeat:', error);
+                }
+            }
             return this.snapshot();
         }
 
@@ -78,6 +97,7 @@
             return await new Promise((resolve) => {
                 this.storage.get(['executionState'], (result) => {
                     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[ExecutionStateMachine] Failed to read execution state:', chrome.runtime.lastError);
                         resolve(null);
                         return;
                     }
@@ -88,17 +108,11 @@
 
         async _scheduleHeartbeat() {
             if (!this.alarmNamespace || typeof this.alarmNamespace.create !== 'function') return;
-            try {
-                this.alarmNamespace.create(this.heartbeatName, {
-                    delayInMinutes: this.heartbeatMinutes,
-                    periodInMinutes: this.heartbeatMinutes
-                });
-                if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.lastError) {
-                    console.warn('[ExecutionStateMachine] Failed to schedule heartbeat:', chrome.runtime.lastError);
-                }
-            } catch (error) {
-                console.warn('[ExecutionStateMachine] Exception scheduling heartbeat:', error);
-            }
+            // In MV3, chrome.alarms.create returns a Promise when called without a callback.
+            await this.alarmNamespace.create(this.heartbeatName, {
+                delayInMinutes: this.heartbeatMinutes,
+                periodInMinutes: this.heartbeatMinutes
+            });
         }
     }
 
