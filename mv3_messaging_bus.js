@@ -61,19 +61,26 @@
             const enforceAck = opts.expectAck === true;
 
             for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                let timeoutId = null;
                 try {
+                    const fnPromise = fn();
                     const resultPromise = enforceAck && typeof ackTimeout === 'number'
                         ? Promise.race([
-                            fn(),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error(`Ack timeout on ${channelLabel || 'channel'}`)), ackTimeout))
+                            fnPromise,
+                            new Promise((_, reject) => {
+                                timeoutId = setTimeout(() => reject(new Error(`Ack timeout on ${channelLabel || 'channel'}`)), ackTimeout);
+                            })
                         ])
-                        : fn();
+                        : fnPromise;
                     const result = await resultPromise;
+                    if (timeoutId) clearTimeout(timeoutId);
                     if (enforceAck && !this._hasAck(result)) {
                         throw new Error(`No ack received on ${channelLabel || 'channel'}`);
                     }
                     return result;
                 } catch (error) {
+                    // Clear any pending timeout if the primary promise rejected first.
+                    if (timeoutId) clearTimeout(timeoutId);
                     if (attempt >= maxRetries || !this._isTransient(error)) {
                         throw error;
                     }

@@ -97,6 +97,7 @@
             return await new Promise((resolve) => {
                 this.storage.get(['executionState'], (result) => {
                     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[ExecutionStateMachine] Failed to read execution state:', chrome.runtime.lastError);
                         resolve(null);
                         return;
                     }

@@ -531,12 +531,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     try {
                         const transitioned = await transitionState('editing', { windowId: win.id, source: 'editor' }, 'editor creation');
                         if (!transitioned) {
+                            chrome.windows.remove(win.id, () => { /* best effort cleanup */ });
                             sendResponse({ success: false, error: 'State transition failed during editor creation' });
                             return;
                         }
                         sendResponse({ success: true, windowId: win.id });
                     } catch (error) {
                         console.error('[iMacros SW] Editor state transition failed:', error);
+                        chrome.windows.remove(win.id, () => { /* best effort cleanup */ });
                         sendResponse({ success: false, error: error && error.message ? error.message : String(error) });
                     }
                 }
