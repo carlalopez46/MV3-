@@ -195,46 +195,16 @@ chrome.runtime.onInstalled.addListener(createOffscreen);
 
 function persistEditorLaunchData(editorData) {
     return new Promise((resolve, reject) => {
-        if (!chrome.storage) {
-            reject(new Error('chrome.storage not available for editor launch'));
-            return;
-        }
-
         if (editorData === null || typeof editorData !== 'object' || Array.isArray(editorData)) {
             reject(new Error('Editor launch payload must be an object'));
             return;
         }
 
-        const sessionStorage = chrome.storage.session;
-        const localStorage = chrome.storage.local;
-        const primaryStorage = sessionStorage || localStorage;
-        const fallbackStorage = primaryStorage === sessionStorage ? localStorage : null;
-
-        if (!primaryStorage) {
-            reject(new Error('No storage backend available for editor launch'));
-            return;
-        }
-
-        const persistToStorage = (targetStorage, onFailure) => {
-            targetStorage.set(editorData, () => {
-                if (chrome.runtime.lastError) {
-                    onFailure(chrome.runtime.lastError);
-                    return;
-                }
-                resolve();
+        setInSessionOrLocal(editorData)
+            .then(() => resolve())
+            .catch((error) => {
+                reject(new Error(error && error.message ? error.message : String(error)));
             });
-        };
-
-        persistToStorage(primaryStorage, (primaryError) => {
-            if (fallbackStorage) {
-                console.warn('[iMacros SW] Session storage failed, falling back to local storage:', primaryError);
-                persistToStorage(fallbackStorage, (fallbackError) => {
-                    reject(new Error(fallbackError && fallbackError.message ? fallbackError.message : String(fallbackError)));
-                });
-            } else {
-                reject(new Error(primaryError && primaryError.message ? primaryError.message : String(primaryError)));
-            }
-        });
     });
 }
 
