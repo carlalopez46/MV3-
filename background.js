@@ -5,23 +5,35 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // execution in the MV3 service worker environment. A more complete polyfill is
 // provided in utils.js, but we need this guard so that utils.js itself can load
 // without the platform-provided localStorage API.
-if (typeof globalThis.localStorage === 'undefined') {
-    const memoryStore = new Map();
-    globalThis.localStorage = {
-        getItem: (key) => (memoryStore.has(key) ? memoryStore.get(key) : null),
-        setItem: (key, value) => memoryStore.set(key, String(value)),
-        removeItem: (key) => {
-            memoryStore.delete(key);
-        },
-        clear: () => memoryStore.clear(),
-        key: (index) => Array.from(memoryStore.keys())[index] ?? null,
-        get length() {
-            return memoryStore.size;
-        },
-        __isMinimalLocalStorageShim: true,
-        __isInMemoryShim: true,
-    };
-}
+(function () {
+    var needsShim = false;
+    try {
+        // Check if localStorage exists and is accessible
+        needsShim = (typeof localStorage === 'undefined' || localStorage === null);
+    } catch (e) {
+        // ReferenceError in strict Service Worker environment
+        needsShim = true;
+    }
+
+    if (needsShim) {
+        var memoryStore = new Map();
+        var shim = {
+            getItem: function (key) { return memoryStore.has(key) ? memoryStore.get(key) : null; },
+            setItem: function (key, value) { memoryStore.set(key, String(value)); },
+            removeItem: function (key) { memoryStore.delete(key); },
+            clear: function () { memoryStore.clear(); },
+            key: function (index) { return Array.from(memoryStore.keys())[index] || null; },
+            get length() { return memoryStore.size; },
+            __isMinimalLocalStorageShim: true,
+            __isInMemoryShim: true
+        };
+
+        // Set on all possible global scopes
+        if (typeof globalThis !== 'undefined') globalThis.localStorage = shim;
+        if (typeof self !== 'undefined') self.localStorage = shim;
+    }
+})();
+
 
 try {
     importScripts(
@@ -44,7 +56,7 @@ try {
 // This is critical for MV3 Service Workers where localStorage is not available
 (function hydrateLocalStoragePolyfill() {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(null, function(items) {
+        chrome.storage.local.get(null, function (items) {
             if (chrome.runtime.lastError) {
                 console.warn('[iMacros SW] Failed to hydrate localStorage polyfill:', chrome.runtime.lastError);
                 return;
@@ -54,7 +66,7 @@ try {
                 // This avoids polluting localStorage with unrelated extension data
                 var prefix = (typeof _LOCALSTORAGE_PREFIX === 'string') ? _LOCALSTORAGE_PREFIX : '__imacros_ls__:';
                 var hydratedCount = 0;
-                Object.keys(items).forEach(function(storageKey) {
+                Object.keys(items).forEach(function (storageKey) {
                     if (storageKey.indexOf(prefix) !== 0) return;
                     var key = storageKey.slice(prefix.length);
                     _localStorageData[key] = String(items[storageKey]);
@@ -267,13 +279,13 @@ function persistEditorLaunchData(editorData) {
 }
 
 // Forward action click to Offscreen
-    chrome.action.onClicked.addListener(async (tab) => {
-        try {
-            await createOffscreen();
-        } catch (error) {
-            logOffscreenError('action.onClicked', error);
-            return;
-        }
+chrome.action.onClicked.addListener(async (tab) => {
+    try {
+        await createOffscreen();
+    } catch (error) {
+        logOffscreenError('action.onClicked', error);
+        return;
+    }
     try {
         const transitioned = await transitionState('playing', { source: 'action_click', tabId: tab?.id }, 'action click');
         if (!transitioned) {

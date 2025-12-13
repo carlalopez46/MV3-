@@ -214,6 +214,10 @@ Recorder.prototype.stop = function () {
     context.updateState(this.win_id, "idle");
 
     this.recording = false;
+
+    // Note: Macro saving is handled by offscreen_bg.js or bg.js after recorder.stop() is called.
+    // This ensures proper tree-type detection and fallback to bookmarks when file system is unavailable.
+
     // Clear saved state
     if (chrome.storage && chrome.storage.session) {
         chrome.storage.session.remove("recorder_state_" + this.win_id);
@@ -751,8 +755,8 @@ Recorder.prototype.onQueryState = function (data, tab_id, callback) {
 Recorder.prototype.onTabActivated = function (activeInfo) {
     console.log("[DEBUG-REC] onTabActivated:", activeInfo);
     if (this.win_id != activeInfo.windowId) {
-        console.warn("[DEBUG-REC] Window ID mismatch. Recorder:", this.win_id, "Event:", activeInfo.windowId, " - Ignored for testing");
-        // return;
+        console.warn("[DEBUG-REC] Window ID mismatch. Recorder:", this.win_id, "Event:", activeInfo.windowId, " - Ignored");
+        return;
     }
     var recorder = this;
     getTab(activeInfo.tabId).then(function (tab) {
@@ -990,8 +994,8 @@ Recorder.prototype.onNavigation = function (details) {
             return;
         }
         if (tab.windowId != recorder.win_id) {
-            console.warn(`[DEBUG-REC] onNavigation: Window ID mismatch (Recorder: ${recorder.win_id}, Tab: ${tab.windowId}). Mismatch ignored for testing.`);
-            // return; // TEMPORARILY DISABLED for debugging
+            console.warn(`[DEBUG-REC] onNavigation: Window ID mismatch (Recorder: ${recorder.win_id}, Tab: ${tab.windowId}). Mismatch ignored.`);
+            return;
         }
 
         if (details.transitionQualifiers.length &&

@@ -10,7 +10,16 @@ var _localStorageData = Object.create(null);
 // Namespace prefix to avoid conflicts with other chrome.storage.local data
 var _LOCALSTORAGE_PREFIX = '__imacros_ls__:';
 
-if (typeof localStorage === "undefined" || localStorage === null || localStorage.__isMinimalLocalStorageShim || localStorage.__isInMemoryShim) {
+// Check if localStorage needs polyfill - use try-catch to safely handle ReferenceError in Service Workers
+var _needsLocalStoragePolyfill = false;
+try {
+    _needsLocalStoragePolyfill = (typeof localStorage === "undefined" || localStorage === null || localStorage.__isMinimalLocalStorageShim || localStorage.__isInMemoryShim);
+} catch (e) {
+    // ReferenceError in strict Service Worker environment
+    _needsLocalStoragePolyfill = true;
+}
+
+if (_needsLocalStoragePolyfill) {
     // Define properly on global scope
     var _global = typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : {});
 
@@ -25,7 +34,7 @@ if (typeof localStorage === "undefined" || localStorage === null || localStorage
             if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
                 var item = {};
                 item[_LOCALSTORAGE_PREFIX + key] = String(value);
-                chrome.storage.local.set(item, function() {
+                chrome.storage.local.set(item, function () {
                     if (chrome.runtime && chrome.runtime.lastError) {
                         console.warn('[localStorage polyfill] Failed to persist:', key, chrome.runtime.lastError);
                     }
@@ -36,7 +45,7 @@ if (typeof localStorage === "undefined" || localStorage === null || localStorage
             delete _localStorageData[key];
             // Remove from chrome.storage.local as well (with namespace prefix)
             if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-                chrome.storage.local.remove(_LOCALSTORAGE_PREFIX + key, function() {
+                chrome.storage.local.remove(_LOCALSTORAGE_PREFIX + key, function () {
                     if (chrome.runtime && chrome.runtime.lastError) {
                         console.warn('[localStorage polyfill] Failed to remove:', key, chrome.runtime.lastError);
                     }
@@ -45,21 +54,21 @@ if (typeof localStorage === "undefined" || localStorage === null || localStorage
         },
         clear: function () {
             // Clear in-memory data without breaking object reference
-            Object.keys(_localStorageData).forEach(function(key) {
+            Object.keys(_localStorageData).forEach(function (key) {
                 delete _localStorageData[key];
             });
             // Remove only namespaced keys from chrome.storage.local (not ALL extension data)
             if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-                chrome.storage.local.get(null, function(items) {
+                chrome.storage.local.get(null, function (items) {
                     if (chrome.runtime && chrome.runtime.lastError) {
                         console.warn('[localStorage polyfill] Failed to list keys for clear:', chrome.runtime.lastError);
                         return;
                     }
-                    var keysToRemove = Object.keys(items || {}).filter(function(k) {
+                    var keysToRemove = Object.keys(items || {}).filter(function (k) {
                         return k.indexOf(_LOCALSTORAGE_PREFIX) === 0;
                     });
                     if (keysToRemove.length === 0) return;
-                    chrome.storage.local.remove(keysToRemove, function() {
+                    chrome.storage.local.remove(keysToRemove, function () {
                         if (chrome.runtime && chrome.runtime.lastError) {
                             console.warn('[localStorage polyfill] Failed to clear:', chrome.runtime.lastError);
                         }
