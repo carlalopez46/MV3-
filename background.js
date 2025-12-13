@@ -399,12 +399,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     globalPanelId = panelWin.id;
 
                     // Notify Offscreen Document that panel was created
-                    const transitioned = await transitionState('editing', { panelId: panelWin.id, windowId: win_id }, 'panel creation');
-                    if (!transitioned) {
-                        if (respond) respond({ success: false, error: 'State transition failed during panel creation' });
-                        return;
-                    }
                     try {
+                        const transitioned = await transitionState('editing', { panelId: panelWin.id, windowId: win_id }, 'panel creation');
+                        if (!transitioned) {
+                            throw new Error('State transition failed during panel creation');
+                        }
+
                         await forwardToOffscreen({
                             command: "panelCreated",
                             win_id: win_id,
