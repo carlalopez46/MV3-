@@ -28,9 +28,17 @@ try {
                 return;
             }
             if (items && typeof _localStorageData !== 'undefined') {
-                // Merge stored data into the polyfill's backing store
-                Object.assign(_localStorageData, items);
-                console.log('[iMacros SW] localStorage polyfill hydrated with', Object.keys(items).length, 'items');
+                // Only hydrate keys with the localStorage namespace prefix
+                // This avoids polluting localStorage with unrelated extension data
+                var prefix = (typeof _LOCALSTORAGE_PREFIX === 'string') ? _LOCALSTORAGE_PREFIX : '__imacros_ls__:';
+                var hydratedCount = 0;
+                Object.keys(items).forEach(function(storageKey) {
+                    if (storageKey.indexOf(prefix) !== 0) return;
+                    var key = storageKey.slice(prefix.length);
+                    _localStorageData[key] = String(items[storageKey]);
+                    hydratedCount++;
+                });
+                console.log('[iMacros SW] localStorage polyfill hydrated with', hydratedCount, 'items');
             }
         });
     }
