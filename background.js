@@ -33,71 +33,74 @@ const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
 
 const sessionStorage = chrome.storage ? chrome.storage.session : null;
 const localStorage = chrome.storage ? chrome.storage.local : null;
-const sessionOrLocalStorage = sessionStorage || localStorage;
+const storageCandidates = [sessionStorage, localStorage].filter(Boolean);
 
 function removeFromSessionOrLocal(keys) {
-    return new Promise((resolve, reject) => {
-        if (!sessionOrLocalStorage || typeof sessionOrLocalStorage.remove !== 'function') {
-            reject(new Error('Storage not available'));
-            return;
-        }
-        try {
-            sessionOrLocalStorage.remove(keys, () => {
-                if (chrome.runtime && chrome.runtime.lastError) {
-                    reject(chrome.runtime.lastError);
-                    return;
-                }
-                resolve(true);
-            });
-        } catch (error) {
-            reject(error);
-        }
-    });
+    if (!storageCandidates.length) return Promise.reject(new Error('Storage not available'));
+    return performStorageWithFallback('remove', keys);
 }
 
 function setInSessionOrLocal(items) {
-    return new Promise((resolve, reject) => {
-        if (!sessionOrLocalStorage || typeof sessionOrLocalStorage.set !== 'function') {
-            reject(new Error('Storage not available'));
-            return;
-        }
-        try {
-            sessionOrLocalStorage.set(items, () => {
-                if (chrome.runtime && chrome.runtime.lastError) {
-                    reject(chrome.runtime.lastError);
-                    return;
-                }
-                resolve(true);
-            });
-        } catch (error) {
-            reject(error);
-        }
-    });
+    if (!storageCandidates.length) return Promise.reject(new Error('Storage not available'));
+    return performStorageWithFallback('set', items);
 }
 
 function getFromSessionOrLocal(keys) {
-    return new Promise((resolve, reject) => {
-        if (!sessionOrLocalStorage || typeof sessionOrLocalStorage.get !== 'function') {
-            reject(new Error('Storage not available'));
-            return;
-        }
-        try {
-            sessionOrLocalStorage.get(keys, (result) => {
-                if (chrome.runtime && chrome.runtime.lastError) {
-                    reject(chrome.runtime.lastError);
-                    return;
-                }
-                resolve(result || {});
-            });
-        } catch (error) {
-            reject(error);
-        }
-    });
+    if (!storageCandidates.length) return Promise.reject(new Error('Storage not available'));
+    return performStorageWithFallback('get', keys);
 }
 
-const executionStateStorage = sessionOrLocalStorage;
+async function performStorageWithFallback(method, payload) {
+    let lastError = null;
+    for (const storage of storageCandidates) {
+        if (!storage || typeof storage[method] !== 'function') continue;
+        try {
+            if (method === 'get') {
+                return await new Promise((resolve, reject) => {
+                    storage.get(payload, (result) => {
+                        if (chrome.runtime && chrome.runtime.lastError) {
+                            reject(chrome.runtime.lastError);
+                            return;
+                        }
+                        resolve(result || {});
+                    });
+                });
+            }
+
+            await new Promise((resolve, reject) => {
+                storage[method](payload, () => {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        reject(chrome.runtime.lastError);
+                        return;
+                    }
+                    resolve(true);
+                });
+            });
+            return true;
+        } catch (error) {
+            console.warn(`[iMacros SW] Storage ${method} failed on preferred backend, attempting fallback:`, error);
+            lastError = error;
+        }
+    }
+    throw lastError || new Error(`Storage ${method} failed`);
+}
+
+const executionStateStorage = sessionStorage || localStorage;
 const clearStaleExecutionState = executionStateStorage === localStorage
-    ? removeFromSessionOrLocal(['executionState']).catch((error) => {
+    ? Promise.allSettled([
+        removeFromSessionOrLocal(['executionState']),
+        sessionStorage && typeof sessionStorage.remove === 'function'
+            ? new Promise((resolve, reject) => {
+                sessionStorage.remove(['executionState'], () => {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        reject(chrome.runtime.lastError);
+                        return;
+                    }
+                    resolve(true);
+                });
+            })
+            : Promise.resolve(true)
+    ]).catch((error) => {
         console.warn('[iMacros SW] Failed to clear persisted execution state on startup:', error);
     })
     : Promise.resolve(true);
