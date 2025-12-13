@@ -9,6 +9,16 @@
         updatedAt: Date.now()
     });
 
+    /**
+     * ExecutionStateMachine persists and manages lifecycle phases (idle/playing/editing/recording)
+     * for the MV3 service worker, with periodic heartbeat persistence to tolerate restarts.
+     *
+     * @param {Object} options
+     * @param {chrome.storage.StorageArea} [options.storage] - Storage area for state persistence.
+     * @param {chrome.alarms.AlarmNamespace} [options.alarmNamespace] - Alarms API for heartbeats.
+     * @param {string} [options.heartbeatName] - Alarm name used for heartbeat scheduling.
+     * @param {number} [options.heartbeatMinutes] - Heartbeat interval (minutes).
+     */
     class ExecutionStateMachine {
         constructor(options = {}) {
             this.storage = options.storage || null;

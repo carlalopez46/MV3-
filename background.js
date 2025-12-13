@@ -87,20 +87,7 @@ async function performStorageWithFallback(method, payload) {
 
 const executionStateStorage = sessionStorage || localStorage;
 const clearStaleExecutionState = executionStateStorage === localStorage
-    ? Promise.all([
-        removeFromSessionOrLocal(['executionState']),
-        sessionStorage && typeof sessionStorage.remove === 'function'
-            ? new Promise((resolve, reject) => {
-                sessionStorage.remove(['executionState'], () => {
-                    if (chrome.runtime && chrome.runtime.lastError) {
-                        reject(chrome.runtime.lastError);
-                        return;
-                    }
-                    resolve(true);
-                });
-            })
-            : Promise.resolve(true)
-    ]).catch((error) => {
+    ? removeFromSessionOrLocal(['executionState']).catch((error) => {
         console.warn('[iMacros SW] Failed to clear persisted execution state on startup:', error);
     })
     : Promise.resolve(true);
@@ -126,6 +113,21 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 function logForwardingError(context, error) {
     const message = error && error.message ? error.message : String(error);
     console.warn(`[iMacros SW] ${context} forwarding failed:`, message, error);
+}
+
+function removeWindowWithLog(windowId, context) {
+    return new Promise((resolve) => {
+        if (!chrome.windows || typeof chrome.windows.remove !== 'function') {
+            resolve();
+            return;
+        }
+        chrome.windows.remove(windowId, () => {
+            if (chrome.runtime && chrome.runtime.lastError) {
+                console.warn(`[iMacros SW] Failed to remove ${context} window during cleanup:`, chrome.runtime.lastError);
+            }
+            resolve();
+        });
+    });
 }
 
 async function transitionState(phase, meta, context) {
@@ -455,7 +457,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                         } catch (storageError) {
                             console.warn('[iMacros SW] Failed to clear panel ids during rollback:', storageError);
                         }
-                        chrome.windows.remove(panelWin.id, () => { /* best effort cleanup */ });
+                        await removeWindowWithLog(panelWin.id, 'panel');
                         if (respond) respond({ success: false, error: error && error.message ? error.message : String(error) });
                         return;
                     }
@@ -499,14 +501,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     try {
                         const transitioned = await transitionState('editing', { windowId: win.id, source: 'editor' }, 'editor creation');
                         if (!transitioned) {
-                            chrome.windows.remove(win.id, () => { /* best effort cleanup */ });
+                            await removeWindowWithLog(win.id, 'editor');
                             sendResponse({ success: false, error: 'State transition failed during editor creation' });
                             return;
                         }
                         sendResponse({ success: true, windowId: win.id });
                     } catch (error) {
                         console.error('[iMacros SW] Editor state transition failed:', error);
-                        chrome.windows.remove(win.id, () => { /* best effort cleanup */ });
+                        await removeWindowWithLog(win.id, 'editor');
                         sendResponse({ success: false, error: error && error.message ? error.message : String(error) });
                     }
                 }

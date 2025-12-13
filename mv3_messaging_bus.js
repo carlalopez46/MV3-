@@ -10,6 +10,14 @@
         ackTimeoutMs: 500
     };
 
+    /**
+     * MessagingBus provides resilient runtime/tab messaging with retry, backoff, and acknowledgment
+     * handling for MV3 service workers and offscreen documents.
+     *
+     * @param {chrome.runtime} runtime - chrome.runtime messaging API (required).
+     * @param {chrome.tabs} tabs - chrome.tabs API for tab-targeted messaging (optional but recommended).
+     * @param {Object} options - Optional configuration ({ maxRetries, backoffMs, ackTimeoutMs }).
+     */
     class MessagingBus {
         constructor(runtime, tabs, options = {}) {
             if (!runtime || typeof runtime !== 'object') {
