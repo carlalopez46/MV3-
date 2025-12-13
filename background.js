@@ -9,7 +9,9 @@ try {
         'errorLogger.js',
         'VirtualFileService.js',
         'variable-manager.js',
-        'AsyncFileIO.js'
+        'AsyncFileIO.js',
+        'mv3_messaging_bus.js',
+        'mv3_state_machine.js'
     );
 } catch (e) {
     console.error('Failed to import scripts:', e);
@@ -18,6 +20,44 @@ try {
 // Background Service Worker for iMacros MV3
 // Handles Offscreen Document lifecycle and event forwarding
 
+
+// ---------------------------------------------------------
+// MV3 infrastructure (message bus + state machine)
+// ---------------------------------------------------------
+const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
+    maxRetries: 3,
+    backoffMs: 150,
+    ackTimeoutMs: 500
+});
+
+const executionState = new ExecutionStateMachine({
+    storage: chrome.storage.session || chrome.storage.local,
+    alarmNamespace: chrome.alarms,
+    heartbeatMinutes: 1 // Chrome MV3 periodic alarms clamp below 1 minute
+});
+
+executionState.hydrate().catch((error) => {
+    console.warn('[iMacros SW] Failed to hydrate execution state:', error);
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+    executionState.handleAlarm(alarm).catch((error) => {
+        console.warn('[iMacros SW] Heartbeat persistence failed:', error);
+    });
+});
+
+function logForwardingError(context, error) {
+    const message = error && error.message ? error.message : String(error);
+    console.warn(`[iMacros SW] ${context} forwarding failed:`, message);
+}
+
+function forwardToOffscreen(payload, contextLabel) {
+    return messagingBus
+        .sendRuntime({ target: 'offscreen', ...payload })
+        .catch((error) => {
+            logForwardingError(contextLabel || payload?.type || payload?.command || 'offscreen', error);
+        });
+}
 
 // Create Offscreen Document
 // Lock to prevent concurrent Offscreen creation attempts
@@ -118,11 +158,11 @@ function persistEditorLaunchData(editorData) {
 // Forward action click to Offscreen
 chrome.action.onClicked.addListener(async (tab) => {
     await createOffscreen();
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    executionState.transition('playing', { source: 'action_click', tabId: tab?.id }).catch(() => { });
+    forwardToOffscreen({
         command: 'actionClicked',
         tab: tab
-    });
+    }, 'actionClicked');
 });
 
 // Global panel ID - ensure only one panel is open at a time
@@ -152,15 +192,13 @@ chrome.windows.onRemoved.addListener((windowId) => {
         console.log('[iMacros SW] Panel window closed:', windowId);
         globalPanelId = null;
         chrome.storage.session.remove(['globalPanelId']);
+        executionState.transition('idle', { source: 'panelClosed', windowId }).catch(() => { });
 
         // Notify Offscreen Document that panel was closed
-        chrome.runtime.sendMessage({
-            target: 'offscreen',
+        forwardToOffscreen({
             command: 'panelClosed',
             panelId: windowId
-        }).catch(() => {
-            // Ignore errors if offscreen is not available
-        });
+        }, 'panelClosed');
     }
 });
 
@@ -168,65 +206,58 @@ chrome.windows.onRemoved.addListener((windowId) => {
 // The Offscreen Document does not receive chrome.tabs events, so we must forward them.
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_UPDATED',
         tabId: tabId,
         changeInfo: changeInfo,
         tab: tab
-    }).catch(() => { }); // Ignore if offscreen not listening/ready
+    }, 'TAB_UPDATED');
 });
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_ACTIVATED',
         activeInfo: activeInfo
-    }).catch(() => { });
+    }, 'TAB_ACTIVATED');
 });
 
 chrome.tabs.onCreated.addListener((tab) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_CREATED',
         tab: tab
-    }).catch(() => { });
+    }, 'TAB_CREATED');
 });
 
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_REMOVED',
         tabId: tabId,
         removeInfo: removeInfo
-    }).catch(() => { });
+    }, 'TAB_REMOVED');
 });
 
 chrome.tabs.onMoved.addListener((tabId, moveInfo) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_MOVED',
         tabId: tabId,
         moveInfo: moveInfo
-    }).catch(() => { });
+    }, 'TAB_MOVED');
 });
 
 chrome.tabs.onAttached.addListener((tabId, attachInfo) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_ATTACHED',
         tabId: tabId,
         attachInfo: attachInfo
-    }).catch(() => { });
+    }, 'TAB_ATTACHED');
 });
 
 chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_DETACHED',
         tabId: tabId,
         detachInfo: detachInfo
-    }).catch(() => { });
+    }, 'TAB_DETACHED');
 });
 
 
@@ -235,6 +266,16 @@ chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.keepAlive) {
         sendResponse({ alive: true });
+        return true;
+    }
+
+    if (msg.command === 'UPDATE_EXECUTION_STATE' && msg.state) {
+        executionState.transition(msg.state, msg.meta || {}).then((snapshot) => {
+            sendResponse({ success: true, state: snapshot });
+        }).catch((error) => {
+            console.error('[iMacros SW] Failed to update execution state:', error);
+            sendResponse({ success: false, error: error && error.message ? error.message : String(error) });
+        });
         return true;
     }
 
@@ -327,12 +368,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     globalPanelId = panelWin.id;
 
                     // Notify Offscreen Document that panel was created
-                    chrome.runtime.sendMessage({
-                        target: "offscreen",
+                    executionState.transition('editing', { panelId: panelWin.id, windowId: win_id }).catch(() => { });
+                    forwardToOffscreen({
                         command: "panelCreated",
                         win_id: win_id,
                         panelId: panelWin.id
-                    }).catch(() => { /* ignore if offscreen not ready */ });
+                    }, 'panelCreated');
 
                     // Store in session storage for persistence
                     chrome.storage.session.set({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
@@ -363,6 +404,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     sendResponse({ success: false, error: chrome.runtime.lastError.message });
                 } else {
                     console.log('[iMacros SW] Editor window created:', win.id);
+                    executionState.transition('editing', { windowId: win.id, source: 'editor' }).catch(() => { });
                     sendResponse({ success: true, windowId: win.id });
                 }
             });
@@ -1108,7 +1150,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'QUERY_STATE') {
         const targetWin = msg.win_id;
         sendMessageToOffscreen({
-            target: 'offscreen',
             type: 'QUERY_STATE',
             win_id: targetWin
         }).then((response) => {
@@ -1157,11 +1198,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 chrome.notifications.onClicked.addListener(function (n_id) {
     console.log('[iMacros SW] Notification clicked:', n_id);
     // Forward click event to Offscreen Document to handle logic (e.g. open editor)
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         command: 'notificationClicked',
         notificationId: n_id
-    });
+    }, 'notificationClicked');
 });
 
 // =============================================================================
@@ -1174,7 +1214,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SET_DIALOG_RESULT') {
         console.log('[iMacros SW] Forwarding SET_DIALOG_RESULT for window:', msg.windowId);
         sendMessageToOffscreen({
-            target: 'offscreen',
             type: 'SET_DIALOG_RESULT',
             windowId: msg.windowId,
             response: msg.response
@@ -1191,7 +1230,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'GET_DIALOG_ARGS') {
         console.log('[iMacros SW] Forwarding GET_DIALOG_ARGS for window:', msg.windowId);
         sendMessageToOffscreen({
-            target: 'offscreen',
             type: 'GET_DIALOG_ARGS',
             windowId: msg.windowId
         }).then(result => {
@@ -1212,40 +1250,10 @@ async function ensureOffscreenDocument() {
 // --- [復元] Offscreen へメッセージを安全に送る関数 ---
 // --- [復元] Offscreen へメッセージを安全に送る関数 ---
 async function sendMessageToOffscreen(msg) {
-    if (!msg.target) msg.target = 'offscreen';
+    const payload = { target: 'offscreen', ...msg };
 
-    // Helper to send message
-    const send = async () => {
-        await ensureOffscreenDocument();
-        return new Promise((resolve, reject) => {
-            chrome.runtime.sendMessage(msg, (response) => {
-                if (chrome.runtime.lastError) {
-                    reject(chrome.runtime.lastError);
-                } else {
-                    resolve(response);
-                }
-            });
-        });
-    };
-
-    try {
-        return await send();
-    } catch (e) {
-        console.warn("[iMacros SW] Msg to offscreen failed, retrying once...", e.message);
-        // Maybe Offscreen crashed or isn't ready. Wait a bit and force check.
-        await new Promise(r => setTimeout(r, 100));
-        // Force offscreen recreation could be too aggressive here if it's just 'Closing', 
-        // but 'Receiving end does not exist' means it's gone.
-        // creatingOffscreen is null, so ensureOffscreenDocument will check chrome.offscreen.hasDocument()
-
-        try {
-            return await send();
-        } catch (e2) {
-            console.error("[iMacros SW] Msg to offscreen failed permanently:", e2.message);
-            // Resolve null to prevent unhandled rejections in caller, but log error
-            return null;
-        }
-    }
+    await ensureOffscreenDocument();
+    return messagingBus.sendRuntime(payload, { expectAck: true });
 }
 
 // =============================================================================
@@ -1280,7 +1288,6 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
 
             // Send message to offscreen to execute the macro
             await sendMessageToOffscreen({
-                target: 'offscreen',
                 command: 'runMacroByUrl',
                 macroPath: macroPath,
                 windowId: windowId,
@@ -1313,7 +1320,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.command === 'runMacroByUrl' && msg.target === 'background') {
         // Forward to offscreen document
         sendMessageToOffscreen({
-            target: 'offscreen',
             command: 'runMacroByUrl',
             macroPath: msg.macroPath,
             windowId: msg.windowId,
