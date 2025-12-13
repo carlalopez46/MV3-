@@ -9,15 +9,146 @@ try {
         'errorLogger.js',
         'VirtualFileService.js',
         'variable-manager.js',
-        'AsyncFileIO.js'
+        'AsyncFileIO.js',
+        'mv3_messaging_bus.js',
+        'mv3_state_machine.js'
     );
 } catch (e) {
     console.error('Failed to import scripts:', e);
+    throw e;
 }
 
 // Background Service Worker for iMacros MV3
 // Handles Offscreen Document lifecycle and event forwarding
 
+
+// ---------------------------------------------------------
+// MV3 infrastructure (message bus + state machine)
+// ---------------------------------------------------------
+const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
+    maxRetries: 3,
+    backoffMs: 150,
+    ackTimeoutMs: 500
+});
+
+const sessionStorage = chrome.storage ? chrome.storage.session : null;
+const localStorage = chrome.storage ? chrome.storage.local : null;
+const storageCandidates = [sessionStorage, localStorage].filter(Boolean);
+
+function removeFromSessionOrLocal(keys) {
+    if (!storageCandidates.length) return Promise.reject(new Error('Storage not available'));
+    return performStorageWithFallback('remove', keys);
+}
+
+function setInSessionOrLocal(items) {
+    if (!storageCandidates.length) return Promise.reject(new Error('Storage not available'));
+    return performStorageWithFallback('set', items);
+}
+
+function getFromSessionOrLocal(keys) {
+    if (!storageCandidates.length) return Promise.reject(new Error('Storage not available'));
+    return performStorageWithFallback('get', keys);
+}
+
+async function performStorageWithFallback(method, payload) {
+    let lastError = null;
+    for (const storage of storageCandidates) {
+        if (!storage || typeof storage[method] !== 'function') continue;
+        try {
+            if (method === 'get') {
+                return await new Promise((resolve, reject) => {
+                    storage.get(payload, (result) => {
+                        if (chrome.runtime && chrome.runtime.lastError) {
+                            reject(chrome.runtime.lastError);
+                            return;
+                        }
+                        resolve(result || {});
+                    });
+                });
+            }
+
+            await new Promise((resolve, reject) => {
+                storage[method](payload, () => {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        reject(chrome.runtime.lastError);
+                        return;
+                    }
+                    resolve(true);
+                });
+            });
+            return true;
+        } catch (error) {
+            console.warn(`[iMacros SW] Storage ${method} failed on preferred backend, attempting fallback:`, error);
+            lastError = error;
+        }
+    }
+    throw lastError || new Error(`Storage ${method} failed`);
+}
+
+const executionStateStorage = sessionStorage || localStorage;
+const clearStaleExecutionState = executionStateStorage === localStorage
+    ? removeFromSessionOrLocal(['executionState']).catch((error) => {
+        console.warn('[iMacros SW] Failed to clear persisted execution state on startup:', error);
+    })
+    : Promise.resolve(true);
+
+const executionState = new ExecutionStateMachine({
+    storage: executionStateStorage,
+    alarmNamespace: chrome.alarms,
+    heartbeatMinutes: 1 // Chrome MV3 periodic alarms clamp values below 1 minute up to 1 minute
+});
+
+clearStaleExecutionState.finally(() => {
+    executionState.hydrate().catch((error) => {
+        console.warn('[iMacros SW] Failed to hydrate execution state:', error);
+    });
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+    executionState.handleAlarm(alarm).catch((error) => {
+        console.warn('[iMacros SW] Heartbeat persistence failed:', error);
+    });
+});
+
+function logForwardingError(context, error) {
+    const message = error && error.message ? error.message : String(error);
+    console.warn(`[iMacros SW] ${context} forwarding failed:`, message, error);
+}
+
+function removeWindowWithLog(windowId, context) {
+    return new Promise((resolve) => {
+        if (!chrome.windows || typeof chrome.windows.remove !== 'function') {
+            resolve();
+            return;
+        }
+        chrome.windows.remove(windowId, () => {
+            if (chrome.runtime && chrome.runtime.lastError) {
+                console.warn(`[iMacros SW] Failed to remove ${context} window during cleanup:`, chrome.runtime.lastError);
+            }
+            resolve();
+        });
+    });
+}
+
+async function transitionState(phase, meta, context) {
+    try {
+        await executionState.transition(phase, meta);
+        return true;
+    } catch (error) {
+        console.warn(`[iMacros SW] State transition failed during ${context}:`, error);
+        return false;
+    }
+}
+
+async function forwardToOffscreen(payload) {
+    try {
+        await ensureOffscreenDocument();
+    } catch (error) {
+        console.warn('[iMacros SW] Failed to ensure offscreen document before forwarding:', error);
+        throw error;
+    }
+    return messagingBus.sendRuntime({ target: 'offscreen', ...payload });
+}
 
 // Create Offscreen Document
 // Lock to prevent concurrent Offscreen creation attempts
@@ -71,58 +202,28 @@ chrome.runtime.onStartup.addListener(createOffscreen);
 chrome.runtime.onInstalled.addListener(createOffscreen);
 
 function persistEditorLaunchData(editorData) {
-    return new Promise((resolve, reject) => {
-        if (!chrome.storage) {
-            reject(new Error('chrome.storage not available for editor launch'));
-            return;
-        }
-
-        if (editorData === null || typeof editorData !== 'object' || Array.isArray(editorData)) {
-            reject(new Error('Editor launch payload must be an object'));
-            return;
-        }
-
-        const sessionStorage = chrome.storage.session;
-        const localStorage = chrome.storage.local;
-        const primaryStorage = sessionStorage || localStorage;
-        const fallbackStorage = primaryStorage === sessionStorage ? localStorage : null;
-
-        if (!primaryStorage) {
-            reject(new Error('No storage backend available for editor launch'));
-            return;
-        }
-
-        const persistToStorage = (targetStorage, onFailure) => {
-            targetStorage.set(editorData, () => {
-                if (chrome.runtime.lastError) {
-                    onFailure(chrome.runtime.lastError);
-                    return;
-                }
-                resolve();
-            });
-        };
-
-        persistToStorage(primaryStorage, (primaryError) => {
-            if (fallbackStorage) {
-                console.warn('[iMacros SW] Session storage failed, falling back to local storage:', primaryError);
-                persistToStorage(fallbackStorage, (fallbackError) => {
-                    reject(new Error(fallbackError && fallbackError.message ? fallbackError.message : String(fallbackError)));
-                });
-            } else {
-                reject(new Error(primaryError && primaryError.message ? primaryError.message : String(primaryError)));
-            }
-        });
-    });
+    if (editorData === null || typeof editorData !== 'object' || Array.isArray(editorData)) {
+        return Promise.reject(new Error('Editor launch payload must be an object'));
+    }
+    return setInSessionOrLocal(editorData);
 }
 
 // Forward action click to Offscreen
 chrome.action.onClicked.addListener(async (tab) => {
     await createOffscreen();
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
-        command: 'actionClicked',
-        tab: tab
-    });
+    try {
+        const transitioned = await transitionState('playing', { source: 'action_click', tabId: tab?.id }, 'action click');
+        if (!transitioned) {
+            console.warn('[iMacros SW] actionClicked: state transition failed');
+            return;
+        }
+        await forwardToOffscreen({
+            command: 'actionClicked',
+            tab: tab
+        });
+    } catch (error) {
+        logForwardingError('actionClicked', error);
+    }
 });
 
 // Global panel ID - ensure only one panel is open at a time
@@ -130,37 +231,47 @@ let globalPanelId = null;
 // Flag to prevent multiple panel creations
 let isCreatingPanel = false;
 
-// Restore globalPanelId from session storage on startup
-chrome.storage.session.get(['globalPanelId'], (result) => {
+// Restore globalPanelId from storage on startup
+getFromSessionOrLocal(['globalPanelId']).then((result) => {
     if (result.globalPanelId) {
         // Verify the panel still exists
         chrome.windows.get(result.globalPanelId, (panelWin) => {
             if (!chrome.runtime.lastError && panelWin) {
                 globalPanelId = result.globalPanelId;
-                console.log('[iMacros SW] Restored globalPanelId from session:', globalPanelId);
+                console.log('[iMacros SW] Restored globalPanelId from storage:', globalPanelId);
             } else {
-                // Panel no longer exists, clear from session storage
-                chrome.storage.session.remove(['globalPanelId']);
+                // Panel no longer exists, clear from storage
+                removeFromSessionOrLocal(['globalPanelId']).catch((storageError) => {
+                    console.warn('[iMacros SW] Failed to clear stale globalPanelId from storage:', storageError);
+                });
             }
         });
     }
+}).catch((error) => {
+    console.warn('[iMacros SW] Failed to read globalPanelId from storage:', error);
 });
 
 // Listen for window removal to clear globalPanelId
-chrome.windows.onRemoved.addListener((windowId) => {
+chrome.windows.onRemoved.addListener(async (windowId) => {
     if (windowId === globalPanelId) {
         console.log('[iMacros SW] Panel window closed:', windowId);
         globalPanelId = null;
-        chrome.storage.session.remove(['globalPanelId']);
+        try {
+            await removeFromSessionOrLocal(['globalPanelId']);
+        } catch (error) {
+            console.warn('[iMacros SW] Failed to remove panel id from storage:', error);
+        }
+        await transitionState('idle', { source: 'panelClosed', windowId }, 'panel close');
 
         // Notify Offscreen Document that panel was closed
-        chrome.runtime.sendMessage({
-            target: 'offscreen',
-            command: 'panelClosed',
-            panelId: windowId
-        }).catch(() => {
-            // Ignore errors if offscreen is not available
-        });
+        try {
+            await forwardToOffscreen({
+                command: 'panelClosed',
+                panelId: windowId
+            });
+        } catch (error) {
+            logForwardingError('panelClosed', error);
+        }
     }
 });
 
@@ -168,65 +279,58 @@ chrome.windows.onRemoved.addListener((windowId) => {
 // The Offscreen Document does not receive chrome.tabs events, so we must forward them.
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_UPDATED',
         tabId: tabId,
         changeInfo: changeInfo,
         tab: tab
-    }).catch(() => { }); // Ignore if offscreen not listening/ready
+    }).catch((error) => logForwardingError('TAB_UPDATED', error));
 });
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_ACTIVATED',
         activeInfo: activeInfo
-    }).catch(() => { });
+    }).catch((error) => logForwardingError('TAB_ACTIVATED', error));
 });
 
 chrome.tabs.onCreated.addListener((tab) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_CREATED',
         tab: tab
-    }).catch(() => { });
+    }).catch((error) => logForwardingError('TAB_CREATED', error));
 });
 
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_REMOVED',
         tabId: tabId,
         removeInfo: removeInfo
-    }).catch(() => { });
+    }).catch((error) => logForwardingError('TAB_REMOVED', error));
 });
 
 chrome.tabs.onMoved.addListener((tabId, moveInfo) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_MOVED',
         tabId: tabId,
         moveInfo: moveInfo
-    }).catch(() => { });
+    }).catch((error) => logForwardingError('TAB_MOVED', error));
 });
 
 chrome.tabs.onAttached.addListener((tabId, attachInfo) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_ATTACHED',
         tabId: tabId,
         attachInfo: attachInfo
-    }).catch(() => { });
+    }).catch((error) => logForwardingError('TAB_ATTACHED', error));
 });
 
 chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         type: 'TAB_DETACHED',
         tabId: tabId,
         detachInfo: detachInfo
-    }).catch(() => { });
+    }).catch((error) => logForwardingError('TAB_DETACHED', error));
 });
 
 
@@ -235,6 +339,16 @@ chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.keepAlive) {
         sendResponse({ alive: true });
+        return true;
+    }
+
+    if (msg.command === 'UPDATE_EXECUTION_STATE' && typeof msg.state === 'string') {
+        executionState.transition(msg.state, msg.meta || {}).then((snapshot) => {
+            sendResponse({ success: true, state: snapshot });
+        }).catch((error) => {
+            console.error('[iMacros SW] Failed to update execution state:', error);
+            sendResponse({ success: false, error: error && error.message ? error.message : String(error) });
+        });
         return true;
     }
 
@@ -278,7 +392,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     // Panel no longer exists, clear the ID and create new one
                     console.log('[iMacros SW] Global panel not found, creating new one');
                     globalPanelId = null;
-                    chrome.storage.session.remove(['globalPanelId']);
+                    removeFromSessionOrLocal(['globalPanelId']).catch((error) => {
+                        console.warn('[iMacros SW] Failed to clear stale globalPanelId during recreation:', error);
+                    });
                     createPanel(win_id, sendResponse);
                 }
             });
@@ -313,7 +429,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     height: height,
                     left: left,
                     top: top
-                }, (panelWin) => {
+                }, async (panelWin) => {
                     isCreatingPanel = false; // Reset flag
                     if (chrome.runtime.lastError) {
                         console.error('[iMacros SW] Failed to create panel:', chrome.runtime.lastError);
@@ -327,15 +443,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     globalPanelId = panelWin.id;
 
                     // Notify Offscreen Document that panel was created
-                    chrome.runtime.sendMessage({
-                        target: "offscreen",
-                        command: "panelCreated",
-                        win_id: win_id,
-                        panelId: panelWin.id
-                    }).catch(() => { /* ignore if offscreen not ready */ });
+                    try {
+                        const transitioned = await transitionState('editing', { panelId: panelWin.id, windowId: win_id }, 'panel creation');
+                        if (!transitioned) {
+                            throw new Error('State transition failed during panel creation');
+                        }
 
-                    // Store in session storage for persistence
-                    chrome.storage.session.set({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
+                        await forwardToOffscreen({
+                            command: "panelCreated",
+                            win_id: win_id,
+                            panelId: panelWin.id
+                        });
+                    } catch (error) {
+                        logForwardingError('panelCreated', error);
+                        await transitionState('idle', { source: 'panelCreateRollback', windowId: win_id }, 'panel creation rollback');
+                        globalPanelId = null;
+                        try {
+                            await removeFromSessionOrLocal(['globalPanelId', `panel_${win_id}`]);
+                        } catch (storageError) {
+                            console.warn('[iMacros SW] Failed to clear panel ids during rollback:', storageError);
+                        }
+                        await removeWindowWithLog(panelWin.id, 'panel');
+                        if (respond) respond({ success: false, error: error && error.message ? error.message : String(error) });
+                        return;
+                    }
+
+                    // Store in storage for persistence
+                    try {
+                        await setInSessionOrLocal({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
+                    } catch (error) {
+                        console.warn('[iMacros SW] Exception while persisting panel ID to storage:', error);
+                    }
 
                     if (respond) respond({ success: true, panelId: panelWin.id });
                 });
@@ -357,13 +495,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 type: "popup",
                 width: 640,
                 height: 480
-            }, (win) => {
+            }, async (win) => {
                 if (chrome.runtime.lastError) {
                     console.error('[iMacros SW] Failed to create editor window:', chrome.runtime.lastError);
                     sendResponse({ success: false, error: chrome.runtime.lastError.message });
                 } else {
                     console.log('[iMacros SW] Editor window created:', win.id);
-                    sendResponse({ success: true, windowId: win.id });
+                    try {
+                        const transitioned = await transitionState('editing', { windowId: win.id, source: 'editor' }, 'editor creation');
+                        if (!transitioned) {
+                            await transitionState('idle', { source: 'editor rollback' }, 'editor creation rollback');
+                            await removeWindowWithLog(win.id, 'editor');
+                            sendResponse({ success: false, error: 'State transition failed during editor creation' });
+                            return;
+                        }
+                        sendResponse({ success: true, windowId: win.id });
+                    } catch (error) {
+                        console.error('[iMacros SW] Editor state transition failed:', error);
+                        await transitionState('idle', { source: 'editor rollback' }, 'editor creation rollback');
+                        await removeWindowWithLog(win.id, 'editor');
+                        sendResponse({ success: false, error: error && error.message ? error.message : String(error) });
+                    }
                 }
             });
         }).catch((error) => {
@@ -788,10 +940,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 win_id: win_id
             }).then(result => {
                 console.log("[iMacros SW] startRecording result:", result);
-                if (result === null) {
-                    sendResponse({ success: false, error: "Offscreen unavailable" });
-                    return;
-                }
                 if (result && typeof result.success !== 'undefined') {
                     sendResponse(result);
                 } else {
@@ -825,10 +973,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 win_id: win_id
             }).then(result => {
                 console.log("[iMacros SW] stop result:", result);
-                if (result === null) {
-                    sendResponse({ success: false, error: "Offscreen unavailable" });
-                    return;
-                }
                 if (result && typeof result.success !== 'undefined') {
                     sendResponse(result);
                 } else {
@@ -862,10 +1006,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 win_id: win_id
             }).then(result => {
                 console.log("[iMacros SW] pause result:", result);
-                if (result === null) {
-                    sendResponse({ success: false, error: "Offscreen unavailable" });
-                    return;
-                }
                 if (result && typeof result.success !== 'undefined') {
                     sendResponse(result);
                 } else {
@@ -945,7 +1085,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // 1. メッセージに含まれるwin_idをチェック
         if (msgWinId) {
             // パネルウィンドウのIDの場合、親ウィンドウを探す
-            const sessionData = await chrome.storage.session.get(null);
+            let sessionData = {};
+            try {
+                sessionData = await getFromSessionOrLocal(null);
+            } catch (error) {
+                console.warn('[iMacros SW] Failed to read panel mapping from storage:', error);
+                return null;
+            }
 
             // panel_XXX形式のキーから逆引き
             for (const [key, value] of Object.entries(sessionData)) {
@@ -1001,10 +1147,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 args: [msg.file_path, msg.loop || 1]
             }).then(result => {
                 console.log("[iMacros SW] playFile result:", result);
-                if (result === null) {
-                    sendResponse({ success: false, error: "Offscreen unavailable" });
-                    return;
-                }
                 if (result && typeof result.success !== 'undefined') {
                     sendResponse(result);
                 } else {
@@ -1108,7 +1250,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'QUERY_STATE') {
         const targetWin = msg.win_id;
         sendMessageToOffscreen({
-            target: 'offscreen',
             type: 'QUERY_STATE',
             win_id: targetWin
         }).then((response) => {
@@ -1157,11 +1298,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 chrome.notifications.onClicked.addListener(function (n_id) {
     console.log('[iMacros SW] Notification clicked:', n_id);
     // Forward click event to Offscreen Document to handle logic (e.g. open editor)
-    chrome.runtime.sendMessage({
-        target: 'offscreen',
+    forwardToOffscreen({
         command: 'notificationClicked',
         notificationId: n_id
-    });
+    }).catch((error) => logForwardingError('notificationClicked', error));
 });
 
 // =============================================================================
@@ -1174,7 +1314,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SET_DIALOG_RESULT') {
         console.log('[iMacros SW] Forwarding SET_DIALOG_RESULT for window:', msg.windowId);
         sendMessageToOffscreen({
-            target: 'offscreen',
             type: 'SET_DIALOG_RESULT',
             windowId: msg.windowId,
             response: msg.response
@@ -1191,7 +1330,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'GET_DIALOG_ARGS') {
         console.log('[iMacros SW] Forwarding GET_DIALOG_ARGS for window:', msg.windowId);
         sendMessageToOffscreen({
-            target: 'offscreen',
             type: 'GET_DIALOG_ARGS',
             windowId: msg.windowId
         }).then(result => {
@@ -1209,42 +1347,26 @@ async function ensureOffscreenDocument() {
     return createOffscreen();
 }
 
-// --- [復元] Offscreen へメッセージを安全に送る関数 ---
-// --- [復元] Offscreen へメッセージを安全に送る関数 ---
+// --- Offscreen へメッセージを安全に送る関数 ---
 async function sendMessageToOffscreen(msg) {
-    if (!msg.target) msg.target = 'offscreen';
+    const payload = { target: 'offscreen', ...msg };
 
-    // Helper to send message
-    const send = async () => {
-        await ensureOffscreenDocument();
-        return new Promise((resolve, reject) => {
-            chrome.runtime.sendMessage(msg, (response) => {
-                if (chrome.runtime.lastError) {
-                    reject(chrome.runtime.lastError);
-                } else {
-                    resolve(response);
-                }
-            });
-        });
-    };
-
+    await ensureOffscreenDocument();
     try {
-        return await send();
-    } catch (e) {
-        console.warn("[iMacros SW] Msg to offscreen failed, retrying once...", e.message);
-        // Maybe Offscreen crashed or isn't ready. Wait a bit and force check.
-        await new Promise(r => setTimeout(r, 100));
-        // Force offscreen recreation could be too aggressive here if it's just 'Closing', 
-        // but 'Receiving end does not exist' means it's gone.
-        // creatingOffscreen is null, so ensureOffscreenDocument will check chrome.offscreen.hasDocument()
-
-        try {
-            return await send();
-        } catch (e2) {
-            console.error("[iMacros SW] Msg to offscreen failed permanently:", e2.message);
-            // Resolve null to prevent unhandled rejections in caller, but log error
-            return null;
+        return await messagingBus.sendRuntime(payload, { expectAck: true });
+    } catch (err) {
+        const genericPatterns = ['No ack received on channel', 'Ack timeout'];
+        const isGeneric = genericPatterns.some(pat => err && err.message && err.message.includes(pat));
+        if (isGeneric) {
+            const context = [];
+            if (msg.type) context.push(`type=${msg.type}`);
+            if (msg.command) context.push(`command=${msg.command}`);
+            if (msg.windowId !== undefined) context.push(`windowId=${msg.windowId}`);
+            if (msg.tabId !== undefined) context.push(`tabId=${msg.tabId}`);
+            const contextStr = context.length ? ` [${context.join(', ')}]` : '';
+            throw new Error(`${err.message}${contextStr}`, { cause: err });
         }
+        throw err;
     }
 }
 
@@ -1279,13 +1401,16 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
             const windowId = tab.windowId;
 
             // Send message to offscreen to execute the macro
-            await sendMessageToOffscreen({
-                target: 'offscreen',
-                command: 'runMacroByUrl',
-                macroPath: macroPath,
-                windowId: windowId,
-                tabId: details.tabId
-            });
+            try {
+                await sendMessageToOffscreen({
+                    command: 'runMacroByUrl',
+                    macroPath: macroPath,
+                    windowId: windowId,
+                    tabId: details.tabId
+                });
+            } catch (error) {
+                console.error('[iMacros SW] Failed to trigger macro from imacros:// URL:', error);
+            }
 
             // Navigate back or to a blank page to prevent the error page
             try {
@@ -1313,7 +1438,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.command === 'runMacroByUrl' && msg.target === 'background') {
         // Forward to offscreen document
         sendMessageToOffscreen({
-            target: 'offscreen',
             command: 'runMacroByUrl',
             macroPath: msg.macroPath,
             windowId: msg.windowId,
