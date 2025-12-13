@@ -705,6 +705,7 @@ MacroPlayer.prototype.startTimer = function(type, timeout, msg, callback) {
         if (elapsedTime > timeout) {
             mplayer.stopTimer(type);
             typeof(callback) == "function" && callback();
+            return; // Stop processing after timeout to prevent badge/panel updates
         }
         // change panel/badge text
         notifyPanelStatLine(mplayer.win_id,

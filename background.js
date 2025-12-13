@@ -18,6 +18,24 @@ try {
     throw e;
 }
 
+// Hydrate localStorage polyfill from chrome.storage.local
+// This is critical for MV3 Service Workers where localStorage is not available
+(function hydrateLocalStoragePolyfill() {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(null, function(items) {
+            if (chrome.runtime.lastError) {
+                console.warn('[iMacros SW] Failed to hydrate localStorage polyfill:', chrome.runtime.lastError);
+                return;
+            }
+            if (items && typeof _localStorageData !== 'undefined') {
+                // Merge stored data into the polyfill's backing store
+                Object.assign(_localStorageData, items);
+                console.log('[iMacros SW] localStorage polyfill hydrated with', Object.keys(items).length, 'items');
+            }
+        });
+    }
+})();
+
 // Background Service Worker for iMacros MV3
 // Handles Offscreen Document lifecycle and event forwarding
 

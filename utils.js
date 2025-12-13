@@ -5,8 +5,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // Some utility functions
 // Some utility functions
 // MV3 Service Worker Polyfill for localStorage
+// _localStorageData is exposed globally so it can be hydrated from chrome.storage.local
+var _localStorageData = {};
 if (typeof localStorage === "undefined" || localStorage === null) {
-    var _localStorageData = {};
     // Define properly on global scope
     var _global = typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : {});
 
@@ -16,12 +17,38 @@ if (typeof localStorage === "undefined" || localStorage === null) {
         },
         setItem: function (key, value) {
             _localStorageData[key] = String(value);
+            // Persist to chrome.storage.local for MV3 Service Worker persistence
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                var item = {};
+                item[key] = String(value);
+                chrome.storage.local.set(item, function() {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[localStorage polyfill] Failed to persist:', key, chrome.runtime.lastError);
+                    }
+                });
+            }
         },
         removeItem: function (key) {
             delete _localStorageData[key];
+            // Remove from chrome.storage.local as well
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.remove(key, function() {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[localStorage polyfill] Failed to remove:', key, chrome.runtime.lastError);
+                    }
+                });
+            }
         },
         clear: function () {
             _localStorageData = {};
+            // Clear chrome.storage.local as well
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.clear(function() {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[localStorage polyfill] Failed to clear:', chrome.runtime.lastError);
+                    }
+                });
+            }
         },
         key: function (i) {
             var keys = Object.keys(_localStorageData);
