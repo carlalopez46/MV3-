@@ -1690,36 +1690,8 @@ if (chrome.notifications && chrome.notifications.onClicked) {
     console.log("[iMacros] chrome.notifications API not available in Offscreen Document");
 }
 
-function showInfo(args) {
-    var win_id = args.win_id;
-
-    // Ensure context is initialized before showing info
-    var contextPromise = context[win_id] && context[win_id]._initialized
-        ? Promise.resolve(context[win_id])
-        : context.init(win_id);
-
-    contextPromise.then(function (ctx) {
-        ctx.info_args = args;
-        // MV3: Send message to panel instead of direct access
-        // We check if panelId exists, but we can't check if window is actually open/closed synchronously
-        if (ctx.panelId) {
-            chrome.runtime.sendMessage({
-                type: 'PANEL_SHOW_INFO',
-                panelWindowId: ctx.panelId,
-                data: { args: args }
-            }, function (response) {
-                if (chrome.runtime.lastError || !response || !response.success) {
-                    // Panel might be closed or not listening, fall back to notification
-                    showNotification(win_id, args);
-                }
-            });
-        } else {
-            showNotification(win_id, args);
-        }
-    }).catch(err => {
-        logError("Failed to initialize context in showInfo: " + err.message, { win_id: win_id });
-    });
-}
+// NOTE: showInfo function is already defined above (around line 980)
+// Do not duplicate it here
 
 // MV3 Note: Service workers don't have "unload" events.
 // nm_connector.stopServer() doesn't need explicit calling in service workers.

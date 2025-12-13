@@ -40,6 +40,32 @@ try {
     throw e;
 }
 
+// Hydrate localStorage polyfill from chrome.storage.local
+// This is critical for MV3 Service Workers where localStorage is not available
+(function hydrateLocalStoragePolyfill() {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(null, function(items) {
+            if (chrome.runtime.lastError) {
+                console.warn('[iMacros SW] Failed to hydrate localStorage polyfill:', chrome.runtime.lastError);
+                return;
+            }
+            if (items && typeof _localStorageData !== 'undefined') {
+                // Only hydrate keys with the localStorage namespace prefix
+                // This avoids polluting localStorage with unrelated extension data
+                var prefix = (typeof _LOCALSTORAGE_PREFIX === 'string') ? _LOCALSTORAGE_PREFIX : '__imacros_ls__:';
+                var hydratedCount = 0;
+                Object.keys(items).forEach(function(storageKey) {
+                    if (storageKey.indexOf(prefix) !== 0) return;
+                    var key = storageKey.slice(prefix.length);
+                    _localStorageData[key] = String(items[storageKey]);
+                    hydratedCount++;
+                });
+                console.log('[iMacros SW] localStorage polyfill hydrated with', hydratedCount, 'items');
+            }
+        });
+    }
+})();
+
 // Background Service Worker for iMacros MV3
 // Handles Offscreen Document lifecycle and event forwarding
 
@@ -688,6 +714,81 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         chrome.notifications.create(msg.notificationId, msg.options, (notificationId) => {
             if (chrome.runtime.lastError) {
                 console.error('[iMacros SW] Failed to create notification:', chrome.runtime.lastError);
+            }
+        });
+        return true;
+    }
+
+    // --- UPDATE_BADGE: Proxy badge updates from Offscreen Document ---
+    if (msg.type === 'UPDATE_BADGE') {
+        const { method, winId, arg } = msg;
+        const actionApi = chrome.action || chrome.browserAction;
+
+        if (!actionApi) {
+            console.warn('[iMacros SW] No action API available for badge update');
+            return false;
+        }
+
+        // Helper to iterate all tabs in a window
+        const forAllTabs = (win_id, callback) => {
+            chrome.windows.getAll({ populate: true }, (windows) => {
+                if (chrome.runtime.lastError) {
+                    console.warn('[iMacros SW] Error getting windows:', chrome.runtime.lastError.message);
+                    return;
+                }
+                windows.forEach((win) => {
+                    if (win.id === win_id && Array.isArray(win.tabs)) {
+                        win.tabs.forEach((tab) => callback(tab));
+                    }
+                });
+            });
+        };
+
+        switch (method) {
+            case 'setBackgroundColor':
+                forAllTabs(winId, (tab) => {
+                    try {
+                        actionApi.setBadgeBackgroundColor({ tabId: tab.id, color: arg });
+                    } catch (e) { /* ignore */ }
+                });
+                break;
+            case 'setText':
+                forAllTabs(winId, (tab) => {
+                    try {
+                        actionApi.setBadgeText({ tabId: tab.id, text: arg || '' });
+                    } catch (e) { /* ignore */ }
+                });
+                break;
+            case 'setIcon':
+                forAllTabs(winId, (tab) => {
+                    try {
+                        actionApi.setIcon({ tabId: tab.id, path: arg });
+                    } catch (e) { /* ignore */ }
+                });
+                break;
+            default:
+                console.warn('[iMacros SW] Unknown badge method:', method);
+        }
+        return false; // No response needed
+    }
+
+    // --- SCRIPTING_EXECUTE: Proxy chrome.scripting.executeScript from Offscreen Document ---
+    if (msg.command === 'SCRIPTING_EXECUTE') {
+        const { tabId, func, args } = msg;
+        if (!chrome.scripting || !chrome.scripting.executeScript) {
+            sendResponse({ error: 'chrome.scripting not available' });
+            return true;
+        }
+
+        chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            func: new Function('return (' + func + ')(...arguments)'),
+            args: args || []
+        }, (results) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ success: true, results: results });
             }
         });
         return true;
@@ -1491,126 +1592,4 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // Do NOT add duplicate handler here - it causes panel to open twice
 });
 
-/*
- * MV3 Messaging Bus
- * Provides resilient runtime/tab messaging with retry/backoff semantics
- * to eliminate unchecked runtime.lastError propagation.
- */
-(function (globalScope) {
-    const DEFAULT_OPTIONS = {
-        maxRetries: 3,
-        backoffMs: 150,
-        ackTimeoutMs: 500
-    };
-
-    class MessagingBus {
-        constructor(runtime, tabs, options = {}) {
-            if (!runtime || typeof runtime !== 'object') {
-                throw new Error('MessagingBus: runtime parameter must be a valid object');
-            }
-            if (tabs && typeof tabs !== 'object') {
-                throw new Error('MessagingBus: tabs parameter must be a valid object');
-            }
-            this.runtime = runtime;
-            this.tabs = tabs;
-            this.options = Object.assign({}, DEFAULT_OPTIONS, options);
-        }
-
-        async sendRuntime(message, opts = {}) {
-            if (!this.runtime || typeof this.runtime.sendMessage !== 'function') {
-                throw new Error('chrome.runtime is not available');
-            }
-            return this._retry(async () => {
-                return await this._send((resolve, reject) => {
-                    this.runtime.sendMessage(message, (response) => {
-                        this._resolveWithLastError(resolve, reject, response);
-                    });
-                });
-            }, opts, 'runtime');
-        }
-
-        async sendToTab(tabId, message, opts = {}) {
-            if (!this.tabs || typeof this.tabs.sendMessage !== 'function') {
-                throw new Error('chrome.tabs is not available');
-            }
-            return this._retry(async () => {
-                return await this._send((resolve, reject) => {
-                    this.tabs.sendMessage(tabId, message, (response) => {
-                        this._resolveWithLastError(resolve, reject, response);
-                    });
-                });
-            }, opts, `tab-${tabId}`);
-        }
-
-        async _send(executor) {
-            return new Promise((resolve, reject) => {
-                try {
-                    executor(resolve, reject);
-                } catch (err) {
-                    reject(err);
-                }
-            });
-        }
-
-        async _retry(fn, opts, channelLabel) {
-            const maxRetries = opts.maxRetries ?? this.options.maxRetries;
-            const baseBackoff = opts.backoffMs ?? this.options.backoffMs;
-            const ackTimeout = opts.ackTimeoutMs ?? this.options.ackTimeoutMs;
-            const enforceAck = opts.expectAck === true;
-
-            for (let attempt = 0; attempt <= maxRetries; attempt++) {
-                let timeoutId = null;
-                try {
-                    const fnPromise = fn();
-                    const resultPromise = enforceAck && typeof ackTimeout === 'number'
-                        ? Promise.race([
-                            fnPromise,
-                            new Promise((_, reject) => {
-                                timeoutId = setTimeout(() => reject(new Error(`Ack timeout on ${channelLabel || 'channel'}`)), ackTimeout);
-                            })
-                        ])
-                        : fnPromise;
-                    const result = await resultPromise;
-                    if (timeoutId) clearTimeout(timeoutId);
-                    if (enforceAck && !this._hasAck(result)) {
-                        throw new Error(`No ack received on ${channelLabel || 'channel'}`);
-                    }
-                    return result;
-                } catch (error) {
-                    // Clear any pending timeout if the primary promise rejected first.
-                    if (timeoutId) clearTimeout(timeoutId);
-                    if (attempt >= maxRetries || !this._isTransient(error)) {
-                        throw error;
-                    }
-                    const delay = baseBackoff * Math.pow(2, attempt);
-                    await new Promise((resolve) => setTimeout(resolve, delay));
-                }
-            }
-        }
-
-        _resolveWithLastError(resolve, reject, response) {
-            if (this.runtime && this.runtime.lastError) {
-                reject(this.runtime.lastError);
-            } else {
-                resolve(response);
-            }
-        }
-
-        _isTransient(error) {
-            if (!error || typeof error.message !== 'string') return false;
-            return error.message.includes('Receiving end does not exist') ||
-                error.message.includes('Could not establish connection') ||
-                error.message.includes('The message port closed');
-        }
-
-        _hasAck(response) {
-            if (!response) return false;
-            // Any response containing an explicit ack/success/ok boolean (true or false) counts as an acknowledgment.
-            // This avoids needless retries when a responder returns { success: false, error: ... } while preserving
-            // compatibility with the preferred `ack: true` contract.
-            return typeof response.ack === 'boolean' || typeof response.success === 'boolean' || typeof response.ok === 'boolean';
-        }
-    }
-
-    globalScope.MessagingBus = MessagingBus;
-})(typeof self !== 'undefined' ? self : this);
+// NOTE: MessagingBus class is defined in mv3_messaging_bus.js (imported via importScripts)
