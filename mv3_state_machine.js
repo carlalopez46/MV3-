@@ -23,8 +23,11 @@
         constructor(options = {}) {
             this.storage = options.storage || null;
             this.alarmNamespace = options.alarmNamespace || null;
-            this.heartbeatName = options.heartbeatName || 'imacros-execution-heartbeat';
-            this.heartbeatMinutes = options.heartbeatMinutes || 1; // Chrome clamps MV3 alarm intervals below 1 minute up to 1 minute (effective min: 1)
+            const providedHeartbeat = typeof options.heartbeatName === 'string' ? options.heartbeatName.trim() : '';
+            this.heartbeatName = providedHeartbeat.length > 0
+                ? providedHeartbeat
+                : 'imacros-execution-heartbeat';
+            this.heartbeatMinutes = this._validateHeartbeatInterval(options.heartbeatMinutes); // Chrome clamps MV3 alarm intervals below 1 minute up to 1 minute (effective min: 1)
             this.state = DEFAULT_STATE();
         }
 
@@ -59,6 +62,9 @@
         }
 
         async transition(phase, meta = {}) {
+            if (typeof phase !== 'string' || !phase.trim()) {
+                throw new Error('ExecutionStateMachine: phase must be a non-empty string');
+            }
             this.state = {
                 phase,
                 meta: Object.assign({}, meta),
@@ -124,6 +130,14 @@
                 delayInMinutes: this.heartbeatMinutes,
                 periodInMinutes: this.heartbeatMinutes
             });
+        }
+
+        _validateHeartbeatInterval(value) {
+            if (value === undefined || value === null) return 1;
+            if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+                throw new Error('ExecutionStateMachine: heartbeatMinutes must be a positive number');
+            }
+            return value;
         }
     }
 

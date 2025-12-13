@@ -28,7 +28,7 @@
             }
             this.runtime = runtime;
             this.tabs = tabs;
-            this.options = Object.assign({}, DEFAULT_OPTIONS, options);
+            this.options = this._normalizeOptions(Object.assign({}, DEFAULT_OPTIONS, options));
         }
 
         async sendRuntime(message, opts = {}) {
@@ -67,7 +67,7 @@
             });
         }
 
-        async _retry(fn, opts, channelLabel) {
+        async _retry(fn, opts = {}, channelLabel) {
             const maxRetries = opts.maxRetries ?? this.options.maxRetries;
             const baseBackoff = opts.backoffMs ?? this.options.backoffMs;
             const ackTimeout = opts.ackTimeoutMs ?? this.options.ackTimeoutMs;
@@ -101,6 +101,35 @@
                     await new Promise((resolve) => setTimeout(resolve, delay));
                 }
             }
+        }
+
+        _normalizeOptions(options) {
+            const normalized = { ...options };
+            const isValidNonNegative = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+            if (normalized.maxRetries === undefined || normalized.maxRetries === null) {
+                normalized.maxRetries = DEFAULT_OPTIONS.maxRetries;
+            }
+            if (normalized.backoffMs === undefined || normalized.backoffMs === null) {
+                normalized.backoffMs = DEFAULT_OPTIONS.backoffMs;
+            }
+            if (normalized.ackTimeoutMs === undefined || normalized.ackTimeoutMs === null) {
+                normalized.ackTimeoutMs = DEFAULT_OPTIONS.ackTimeoutMs;
+            }
+
+            if (!Number.isInteger(normalized.maxRetries) || normalized.maxRetries < 0) {
+                throw new Error('MessagingBus: maxRetries must be a non-negative integer');
+            }
+
+            if (!isValidNonNegative(normalized.backoffMs)) {
+                throw new Error('MessagingBus: backoffMs must be a non-negative number');
+            }
+
+            if (!isValidNonNegative(normalized.ackTimeoutMs)) {
+                throw new Error('MessagingBus: ackTimeoutMs must be a non-negative number');
+            }
+
+            return normalized;
         }
 
         _resolveWithLastError(resolve, reject, response) {
