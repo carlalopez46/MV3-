@@ -548,21 +548,29 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
         Storage.setBool("already-installed", true);
         setDefaults();
         // get version number
-        Storage.setChar("version", chrome.runtime.getManifest().version);
+        var manifestVersion = (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.getManifest === 'function')
+            ? chrome.runtime.getManifest().version
+            : '10.1.1';
+        Storage.setChar("version", manifestVersion);
         installSampleBookmarkletMacros().catch(console.error.bind(console));
         // open welcome page
-        chrome.tabs.create({
-            url: getRedirFromString("welcome")
-        }, function (tab) {
-            if (chrome.runtime.lastError) {
-                console.error("Error creating welcome tab:", chrome.runtime.lastError);
-            }
-        });
+        if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.create) {
+            chrome.tabs.create({
+                url: getRedirFromString("welcome")
+            }, function (tab) {
+                if (chrome.runtime && chrome.runtime.lastError) {
+                    console.error("Error creating welcome tab:", chrome.runtime.lastError);
+                }
+            });
+        }
     } else {
-        var version = chrome.runtime.getManifest().version;
+        // Not first run - check if extension was updated
+        var currentVersion = (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.getManifest === 'function')
+            ? chrome.runtime.getManifest().version
+            : '10.1.1';
         // check if macro was updated
-        if (version != Storage.getChar("version")) {
-            Storage.setChar("version", version);
+        if (currentVersion != Storage.getChar("version")) {
+            Storage.setChar("version", currentVersion);
             onUpdate();
         }
     }
@@ -718,18 +726,21 @@ function showNotification(win_id, args) {
 }
 
 // Global notification click listener
-chrome.notifications.onClicked.addListener(function (n_id) {
-    var w_id = parseInt(n_id);
-    if (isNaN(w_id) || !context[w_id] || !context[w_id].info_args)
-        return;
-    var info = context[w_id].info_args;
-    if (info.errorCode == 1)
-        return;    // we have plain Info message; nothing to do
+// Note: chrome.notifications is not available in Offscreen Document
+if (typeof chrome !== 'undefined' && chrome.notifications && chrome.notifications.onClicked) {
+    chrome.notifications.onClicked.addListener(function (n_id) {
+        var w_id = parseInt(n_id);
+        if (isNaN(w_id) || !context[w_id] || !context[w_id].info_args)
+            return;
+        var info = context[w_id].info_args;
+        if (info.errorCode == 1)
+            return;    // we have plain Info message; nothing to do
 
-    // for error messages since we have only one 'button'
-    // we most probably want look at macro code,
-    edit(info.macro, true);
-});
+        // for error messages since we have only one 'button'
+        // we most probably want look at macro code,
+        edit(info.macro, true);
+    });
+}
 
 function showInfo(args) {
     var win_id = args.win_id;
