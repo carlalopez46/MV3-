@@ -396,6 +396,41 @@ chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
     }).catch((error) => logForwardingError('TAB_DETACHED', error));
 });
 
+// Forward download events to Offscreen Document for ONDOWNLOAD command support
+// Track active downloads with correlation data for routing to correct MacroPlayer
+const activeDownloadCorrelation = new Map();
+
+if (chrome.downloads && chrome.downloads.onCreated) {
+    chrome.downloads.onCreated.addListener((downloadItem) => {
+        // Include correlation data if available
+        const correlation = activeDownloadCorrelation.get(downloadItem.id) || {};
+        forwardToOffscreen({
+            type: 'DOWNLOAD_CREATED',
+            downloadItem: downloadItem,
+            win_id: correlation.win_id,
+            tab_id: correlation.tab_id
+        }).catch((error) => logForwardingError('DOWNLOAD_CREATED', error));
+    });
+}
+
+if (chrome.downloads && chrome.downloads.onChanged) {
+    chrome.downloads.onChanged.addListener((downloadDelta) => {
+        // Include correlation data if available
+        const correlation = activeDownloadCorrelation.get(downloadDelta.id) || {};
+        forwardToOffscreen({
+            type: 'DOWNLOAD_CHANGED',
+            downloadDelta: downloadDelta,
+            win_id: correlation.win_id,
+            tab_id: correlation.tab_id
+        }).catch((error) => logForwardingError('DOWNLOAD_CHANGED', error));
+
+        // Clean up correlation data when download completes or is interrupted
+        if (downloadDelta.state && (downloadDelta.state.current === 'complete' || downloadDelta.state.current === 'interrupted')) {
+            activeDownloadCorrelation.delete(downloadDelta.id);
+        }
+    });
+}
+
 
 // Keep-alive logic (optional, but good for stability)
 // If Offscreen sends a keep-alive message, we can respond to keep SW alive
@@ -790,6 +825,152 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             } else {
                 sendResponse({ success: true, results: results });
             }
+        });
+        return true;
+    }
+
+    // --- DEBUGGER_ATTACH: Proxy chrome.debugger.attach from Offscreen Document ---
+    if (msg.command === 'DEBUGGER_ATTACH') {
+        const { tabId, version } = msg;
+        if (!chrome.debugger || !chrome.debugger.attach) {
+            sendResponse({ error: 'chrome.debugger not available' });
+            return true;
+        }
+
+        chrome.debugger.attach({ tabId: tabId }, version || '1.2', () => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ success: true });
+            }
+        });
+        return true;
+    }
+
+    // --- DEBUGGER_SEND_COMMAND: Proxy chrome.debugger.sendCommand from Offscreen Document ---
+    if (msg.command === 'DEBUGGER_SEND_COMMAND') {
+        const { tabId, method, params } = msg;
+        if (!chrome.debugger || !chrome.debugger.sendCommand) {
+            sendResponse({ error: 'chrome.debugger not available' });
+            return true;
+        }
+
+        chrome.debugger.sendCommand({ tabId: tabId }, method, params || {}, (result) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ success: true, result: result });
+            }
+        });
+        return true;
+    }
+
+    // --- DEBUGGER_DETACH: Proxy chrome.debugger.detach from Offscreen Document ---
+    if (msg.command === 'DEBUGGER_DETACH') {
+        const { tabId } = msg;
+        if (!chrome.debugger || !chrome.debugger.detach) {
+            sendResponse({ error: 'chrome.debugger not available' });
+            return true;
+        }
+
+        chrome.debugger.detach({ tabId: tabId }, () => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                sendResponse({ success: true });
+            }
+        });
+        return true;
+    }
+
+    // --- DOWNLOADS_DOWNLOAD: Proxy chrome.downloads.download from Offscreen Document ---
+    if (msg.command === 'DOWNLOADS_DOWNLOAD') {
+        const { options, win_id, tab_id } = msg;
+        if (!chrome.downloads || !chrome.downloads.download) {
+            sendResponse({ error: 'chrome.downloads not available' });
+            return true;
+        }
+
+        chrome.downloads.download(options || {}, (downloadId) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+            } else {
+                // Store correlation data for routing download events to correct MacroPlayer
+                if (downloadId && (win_id || tab_id)) {
+                    activeDownloadCorrelation.set(downloadId, { win_id, tab_id });
+                }
+                sendResponse({ success: true, downloadId: downloadId });
+            }
+        });
+        return true;
+    }
+
+    // --- COOKIES_CLEAR: Proxy chrome.cookies for CLEAR command from Offscreen Document ---
+    if (msg.command === 'COOKIES_CLEAR') {
+        const { details } = msg;
+        if (!chrome.cookies || !chrome.cookies.getAll) {
+            sendResponse({ error: 'chrome.cookies not available' });
+            return true;
+        }
+
+        chrome.cookies.getAll(details || {}, (cookies) => {
+            if (chrome.runtime.lastError) {
+                sendResponse({ error: chrome.runtime.lastError.message });
+                return;
+            }
+
+            if (!cookies || cookies.length === 0) {
+                sendResponse({ success: true, removed: 0 });
+                return;
+            }
+
+            // Use Promise.all with timeout for robust completion tracking
+            const COOKIE_REMOVAL_TIMEOUT_MS = 10000; // 10 second timeout
+            let responded = false;
+
+            const removePromises = cookies.map((cookie) => {
+                return new Promise((resolve) => {
+                    // Strip leading dot from domain (e.g., ".example.com" -> "example.com")
+                    const domain = cookie.domain.startsWith('.') ? cookie.domain.slice(1) : cookie.domain;
+                    const url = (cookie.secure ? "https" : "http") + "://" + domain + cookie.path;
+                    chrome.cookies.remove({ url: url, name: cookie.name }, (details) => {
+                        // Check for errors and resolve with success status
+                        if (chrome.runtime.lastError) {
+                            console.warn('[iMacros SW] Cookie removal failed:', cookie.name, chrome.runtime.lastError.message);
+                            resolve(false);
+                        } else {
+                            resolve(details !== null);
+                        }
+                    });
+                });
+            });
+
+            // Timeout fallback to prevent indefinite waiting
+            const timeoutPromise = new Promise((resolve) => {
+                setTimeout(() => {
+                    resolve({ timeout: true });
+                }, COOKIE_REMOVAL_TIMEOUT_MS);
+            });
+
+            Promise.race([
+                Promise.all(removePromises).then((results) => ({ results })),
+                timeoutPromise
+            ]).then((outcome) => {
+                if (responded) return;
+                responded = true;
+
+                if (outcome.timeout) {
+                    console.warn('[iMacros SW] Cookie removal timed out');
+                    sendResponse({ success: true, removed: -1, warning: 'timeout' });
+                } else {
+                    const removed = outcome.results.filter(Boolean).length;
+                    sendResponse({ success: true, removed: removed });
+                }
+            }).catch((err) => {
+                if (responded) return;
+                responded = true;
+                sendResponse({ error: err && err.message ? err.message : String(err) });
+            });
         });
         return true;
     }
