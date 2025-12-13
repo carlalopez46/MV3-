@@ -15,6 +15,7 @@ try {
     );
 } catch (e) {
     console.error('Failed to import scripts:', e);
+    throw e;
 }
 
 // Background Service Worker for iMacros MV3
@@ -35,75 +36,71 @@ const localStorage = chrome.storage ? chrome.storage.local : null;
 const sessionOrLocalStorage = sessionStorage || localStorage;
 
 function removeFromSessionOrLocal(keys) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         if (!sessionOrLocalStorage || typeof sessionOrLocalStorage.remove !== 'function') {
-            resolve(false);
+            reject(new Error('Storage not available'));
             return;
         }
         try {
             sessionOrLocalStorage.remove(keys, () => {
                 if (chrome.runtime && chrome.runtime.lastError) {
-                    console.warn('[iMacros SW] Failed to remove keys from storage:', chrome.runtime.lastError);
-                    resolve(false);
+                    reject(chrome.runtime.lastError);
                     return;
                 }
                 resolve(true);
             });
         } catch (error) {
-            console.warn('[iMacros SW] Exception removing keys from storage:', error);
-            resolve(false);
+            reject(error);
         }
     });
 }
 
 function setInSessionOrLocal(items) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         if (!sessionOrLocalStorage || typeof sessionOrLocalStorage.set !== 'function') {
-            resolve(false);
+            reject(new Error('Storage not available'));
             return;
         }
         try {
             sessionOrLocalStorage.set(items, () => {
                 if (chrome.runtime && chrome.runtime.lastError) {
-                    console.warn('[iMacros SW] Failed to set storage items:', chrome.runtime.lastError);
-                    resolve(false);
+                    reject(chrome.runtime.lastError);
                     return;
                 }
                 resolve(true);
             });
         } catch (error) {
-            console.warn('[iMacros SW] Exception setting storage items:', error);
-            resolve(false);
+            reject(error);
         }
     });
 }
 
 function getFromSessionOrLocal(keys) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         if (!sessionOrLocalStorage || typeof sessionOrLocalStorage.get !== 'function') {
-            resolve({});
+            reject(new Error('Storage not available'));
             return;
         }
         try {
             sessionOrLocalStorage.get(keys, (result) => {
                 if (chrome.runtime && chrome.runtime.lastError) {
-                    console.warn('[iMacros SW] Failed to get storage items:', chrome.runtime.lastError);
-                    resolve({});
+                    reject(chrome.runtime.lastError);
                     return;
                 }
                 resolve(result || {});
             });
         } catch (error) {
-            console.warn('[iMacros SW] Exception reading storage items:', error);
-            resolve({});
+            reject(error);
         }
     });
 }
 
 const executionStateStorage = sessionOrLocalStorage;
-if (executionStateStorage === localStorage) {
-    removeFromSessionOrLocal(['executionState']);
-}
+const clearStaleExecutionState = executionStateStorage === localStorage
+    ? removeFromSessionOrLocal(['executionState']).catch((error) => {
+        console.warn('[iMacros SW] Failed to clear persisted execution state on startup:', error);
+    })
+    : Promise.resolve(true);
 
 const executionState = new ExecutionStateMachine({
     storage: executionStateStorage,
@@ -111,8 +108,10 @@ const executionState = new ExecutionStateMachine({
     heartbeatMinutes: 1 // Chrome MV3 periodic alarms clamp values below 1 minute up to 1 minute
 });
 
-executionState.hydrate().catch((error) => {
-    console.warn('[iMacros SW] Failed to hydrate execution state:', error);
+clearStaleExecutionState.finally(() => {
+    executionState.hydrate().catch((error) => {
+        console.warn('[iMacros SW] Failed to hydrate execution state:', error);
+    });
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -266,7 +265,9 @@ getFromSessionOrLocal(['globalPanelId']).then((result) => {
                 console.log('[iMacros SW] Restored globalPanelId from storage:', globalPanelId);
             } else {
                 // Panel no longer exists, clear from storage
-                removeFromSessionOrLocal(['globalPanelId']);
+                removeFromSessionOrLocal(['globalPanelId']).catch((storageError) => {
+                    console.warn('[iMacros SW] Failed to clear stale globalPanelId from storage:', storageError);
+                });
             }
         });
     }
@@ -279,7 +280,11 @@ chrome.windows.onRemoved.addListener(async (windowId) => {
     if (windowId === globalPanelId) {
         console.log('[iMacros SW] Panel window closed:', windowId);
         globalPanelId = null;
-        await removeFromSessionOrLocal(['globalPanelId']);
+        try {
+            await removeFromSessionOrLocal(['globalPanelId']);
+        } catch (error) {
+            console.warn('[iMacros SW] Failed to remove panel id from storage:', error);
+        }
         await transitionState('idle', { source: 'panelClosed', windowId }, 'panel close');
 
         // Notify Offscreen Document that panel was closed
@@ -411,7 +416,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     // Panel no longer exists, clear the ID and create new one
                     console.log('[iMacros SW] Global panel not found, creating new one');
                     globalPanelId = null;
-                    removeFromSessionOrLocal(['globalPanelId']);
+                    removeFromSessionOrLocal(['globalPanelId']).catch((error) => {
+                        console.warn('[iMacros SW] Failed to clear stale globalPanelId during recreation:', error);
+                    });
                     createPanel(win_id, sendResponse);
                 }
             });
@@ -473,17 +480,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                         });
                     } catch (error) {
                         logForwardingError('panelCreated', error);
+                        await transitionState('idle', { source: 'panelCreateRollback', windowId: win_id }, 'panel creation rollback');
                         globalPanelId = null;
-                        await removeFromSessionOrLocal(['globalPanelId', `panel_${win_id}`]);
+                        try {
+                            await removeFromSessionOrLocal(['globalPanelId', `panel_${win_id}`]);
+                        } catch (storageError) {
+                            console.warn('[iMacros SW] Failed to clear panel ids during rollback:', storageError);
+                        }
                         chrome.windows.remove(panelWin.id, () => { /* best effort cleanup */ });
                         if (respond) respond({ success: false, error: error && error.message ? error.message : String(error) });
                         return;
                     }
 
                     // Store in storage for persistence
-                    const stored = await setInSessionOrLocal({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
-                    if (!stored) {
-                        console.warn('[iMacros SW] Failed to persist panel ID to storage');
+                    try {
+                        const stored = await setInSessionOrLocal({ [`panel_${win_id}`]: panelWin.id, globalPanelId: panelWin.id });
+                        if (!stored) {
+                            console.warn('[iMacros SW] Failed to persist panel ID to storage');
+                        }
+                    } catch (error) {
+                        console.warn('[iMacros SW] Exception while persisting panel ID to storage:', error);
                     }
 
                     if (respond) respond({ success: true, panelId: panelWin.id });
@@ -947,10 +963,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 win_id: win_id
             }).then(result => {
                 console.log("[iMacros SW] startRecording result:", result);
-                if (result === null) {
-                    sendResponse({ success: false, error: "Offscreen unavailable" });
-                    return;
-                }
                 if (result && typeof result.success !== 'undefined') {
                     sendResponse(result);
                 } else {
@@ -984,10 +996,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 win_id: win_id
             }).then(result => {
                 console.log("[iMacros SW] stop result:", result);
-                if (result === null) {
-                    sendResponse({ success: false, error: "Offscreen unavailable" });
-                    return;
-                }
                 if (result && typeof result.success !== 'undefined') {
                     sendResponse(result);
                 } else {
@@ -1021,10 +1029,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 win_id: win_id
             }).then(result => {
                 console.log("[iMacros SW] pause result:", result);
-                if (result === null) {
-                    sendResponse({ success: false, error: "Offscreen unavailable" });
-                    return;
-                }
                 if (result && typeof result.success !== 'undefined') {
                     sendResponse(result);
                 } else {
@@ -1165,10 +1169,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 args: [msg.file_path, msg.loop || 1]
             }).then(result => {
                 console.log("[iMacros SW] playFile result:", result);
-                if (result === null) {
-                    sendResponse({ success: false, error: "Offscreen unavailable" });
-                    return;
-                }
                 if (result && typeof result.success !== 'undefined') {
                     sendResponse(result);
                 } else {
