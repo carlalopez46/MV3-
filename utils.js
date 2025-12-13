@@ -10,7 +10,7 @@ var _localStorageData = Object.create(null);
 // Namespace prefix to avoid conflicts with other chrome.storage.local data
 var _LOCALSTORAGE_PREFIX = '__imacros_ls__:';
 
-if (typeof localStorage === "undefined" || localStorage === null) {
+if (typeof localStorage === "undefined" || localStorage === null || localStorage.__isMinimalLocalStorageShim || localStorage.__isInMemoryShim) {
     // Define properly on global scope
     var _global = typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : {});
 
@@ -188,16 +188,16 @@ var imns = {
         };
 
         // var values_to_escape = {
-        //         "\\": "\\\\",
-        //         "\0": "\\0",
-        //         "\b": "\\b",
-        //         "\t": "\\t",
-        //         "\n": "\\n",
-        //         "\v": "\\v",
-        //         "\f": "\\f",
-        //         "\r": "\\r",
-        //         "\"": "\\\"",
-        //         "'": "\\'"};
+        //          "\\": "\\\\",
+        //          "\0": "\\0",
+        //          "\b": "\\b",
+        //          "\t": "\\t",
+        //          "\n": "\\n",
+        //          "\v": "\\v",
+        //          "\f": "\\f",
+        //          "\r": "\\r",
+        //          "\"": "\\\"",
+        //          "'": "\\'"};
 
         for (var x in values_to_escape) {
             line = line.replace(new RegExp(x, "g"), values_to_escape[x]);
