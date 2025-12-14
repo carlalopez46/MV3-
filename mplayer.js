@@ -12,6 +12,73 @@ of altering command semantics.
 // An object to encapsulate all operations for parsing
 // and playing macro commands
 
+// Basic logging stub to avoid runtime failures in test harnesses where
+// showInfo is not provided by the UI layer.
+var showInfo = (typeof globalThis.showInfo === 'function')
+    ? globalThis.showInfo
+    : function (message) {
+        try {
+            console.info('[MacroPlayer] Info:', message);
+        } catch (e) {
+            // console may not be available in every embedding context
+        }
+    };
+globalThis.showInfo = showInfo;
+
+// Variable manager wrapper that keeps the legacy MacroPlayer variable
+// storage in sync with the newer VariableManager utility loaded by the
+// test harness.
+if (typeof VariableManager === 'function') {
+    function PlayerVariableManager(player) {
+        VariableManager.call(this);
+        this.player = player;
+        this._syncVarsFromPlayer();
+    }
+
+    PlayerVariableManager.prototype = Object.create(VariableManager.prototype);
+    PlayerVariableManager.prototype.constructor = PlayerVariableManager;
+
+    PlayerVariableManager.prototype._syncVarsFromPlayer = function () {
+        if (!this.player || !Array.isArray(this.player.vars)) {
+            return;
+        }
+        for (let i = 0; i < this.player.vars.length; i++) {
+            if (typeof this.player.vars[i] !== 'undefined') {
+                this.globalVars.set('VAR' + i, this.player.vars[i]);
+            }
+        }
+    };
+
+    PlayerVariableManager.prototype.setVar = function (name, value) {
+        name = String(name ?? '').replace(/^!/, '');
+        VariableManager.prototype.setVar.call(this, name, value);
+
+        if (/^VAR\d+$/i.test(name)) {
+            const idx = parseInt(name.slice(3), 10);
+            this.player.vars[idx] = value;
+        }
+
+        if (name === 'LOOP') {
+            const loop = parseInt(value, 10);
+            this.player.currentLoop = Number.isFinite(loop) && loop > 0 ? loop : 1;
+        }
+    };
+
+    PlayerVariableManager.prototype.resetLocalContext = function (currentLoop) {
+        const loopSeed = parseInt(currentLoop ?? (this.localContext && this.localContext.LOOP), 10);
+        const loopValue = Number.isFinite(loopSeed) && loopSeed > 0 ? loopSeed : 1;
+        VariableManager.prototype.resetLocalContext.call(this);
+        this.localContext.LOOP = loopValue;
+        this.player.currentLoop = loopValue;
+    };
+
+    PlayerVariableManager.prototype.clearGlobalVars = function () {
+        VariableManager.prototype.clearGlobalVars.call(this);
+        this.player.vars = new Array();
+    };
+}
+
+// MacroPlayer implementation
 function MacroPlayer(win_id) {
     this.win_id = win_id;
     this.tab_id = null;
@@ -19,6 +86,7 @@ function MacroPlayer(win_id) {
     this.userVars = new Map();
     this.ports = new Object();
     this._ActionTable = new Object();
+    this.callStack = new Array();
     this.compileExpressions();
 
     this._onScriptError = this.onErrorOccurred.bind(this);
@@ -57,6 +125,10 @@ function MacroPlayer(win_id) {
     // listeners for download events
     this._onDownloadCreated = this.onDownloadCreated.bind(this);
     this._onDownloadChanged = this.onDownloadChanged.bind(this);
+
+    if (typeof VariableManager === 'function' && typeof PlayerVariableManager === 'function') {
+        this.varManager = new PlayerVariableManager(this);
+    }
 }
 
 // Helpers to work across Service Worker / Offscreen contexts
@@ -835,6 +907,18 @@ MacroPlayer.prototype.stopTimer = function (type) {
     timer = null;
 };
 
+/**
+ * Removes and returns the top frame from the internal call stack.
+ * Used by the test harness to keep legacy macro execution stacks in sync.
+ * @returns {*} the removed frame or undefined when the stack is empty
+ */
+MacroPlayer.prototype._popFrame = function () {
+    if (this.callStack && this.callStack.length) {
+        return this.callStack.pop();
+    }
+    return undefined;
+};
+
 
 MacroPlayer.prototype.clearRetryInterval = function () {
     if (this.retryInterval) {
@@ -1002,9 +1086,17 @@ MacroPlayer.prototype.ActionTable["add"] = function (cmd) {
         var num = imns.s2i(m[1]);
         var n1 = imns.s2i(this.getVar(num)), n2 = imns.s2i(param);
         if (!isNaN(n1) && !isNaN(n2)) {
-            this.vars[num] = (n1 + n2).toString();
+            if (this.varManager && typeof this.varManager.setVar === 'function') {
+                this.varManager.setVar('VAR' + num, (n1 + n2).toString());
+            } else {
+                this.vars[num] = (n1 + n2).toString();
+            }
         } else {
-            this.vars[num] = this.getVar(num) + param;
+            if (this.varManager && typeof this.varManager.setVar === 'function') {
+                this.varManager.setVar('VAR' + num, this.getVar(num) + param);
+            } else {
+                this.vars[num] = this.getVar(num) + param;
+            }
         }
     } else if ((arr = cmd[1].match(/^!extract$/i))) {
         this.addExtractData(param);
@@ -2333,7 +2425,12 @@ MacroPlayer.prototype.onPromptComplete = function (data) {
     if (data && typeof (data.varname) != "undefined") {
         this.setUserVar(data.varname, data.value);
     } else if (data && typeof (data.varnum) != "undefined") {
-        this.vars[imns.s2i(data.varnum)] = data.value;
+        const idx = imns.s2i(data.varnum);
+        if (this.varManager && typeof this.varManager.setVar === 'function') {
+            this.varManager.setVar('VAR' + idx, data.value);
+        } else {
+            this.vars[idx] = data.value;
+        }
     }
     this.next("PROMPT");
 };
@@ -2869,18 +2966,19 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
             this.dataSourceFolder = afio.openNode(param);
             this.dataSourceFolder.exists().then(exists => {
                 if (!exists) {
-                    throw new RuntimeError(
+                    this.handleError(new RuntimeError(
                         "can not write to FOLDER_DATASOURCE: " +
                         param + " does not exist or not accessible.", 732
-                    );
+                    ));
+                    return Promise.reject(new Error("datasource folder missing"));
                 }
             }).then(() => {
                 this.next("SET");
             }).catch(err => {
-                throw new RuntimeError(
+                this.handleError(new RuntimeError(
                     "can not open FOLDER_DATASOURCE: " +
-                    param + ", error " + err.message, 732
-                );
+                    param + ", error " + (err && err.message ? err.message : err), 732
+                ));
             });
             return;
         case "!folder_download":
@@ -2892,18 +2990,19 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
             this.defDownloadFolder = afio.openNode(param);
             this.defDownloadFolder.exists().then(exists => {
                 if (!exists) {
-                    throw new RuntimeError(
+                    this.handleError(new RuntimeError(
                         "can not write to FOLDER_DOWNLOAD: " +
                         param + " does not exist or not accessible.", 732
-                    );
+                    ));
+                    return Promise.reject(new Error("download folder missing"));
                 }
             }).then(() => {
                 this.next("SET");
             }).catch(err => {
-                throw new RuntimeError(
+                this.handleError(new RuntimeError(
                     "can not open FOLDER_DOWNLOAD: " +
-                    param + ", error " + err.message, 732
-                );
+                    param + ", error " + (err && err.message ? err.message : err), 732
+                ));
             });
             return;
         case "!timeout": case "!timeout_page":
@@ -3039,7 +3138,12 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
             break;
         default:
             if (this.limits.varsRe.test(cmd[1])) {
-                this.vars[imns.s2i(RegExp.$1)] = param;
+                const idx = imns.s2i(RegExp.$1);
+                if (this.varManager && typeof this.varManager.setVar === 'function') {
+                    this.varManager.setVar('VAR' + idx, param);
+                } else {
+                    this.vars[idx] = param;
+                }
             } else if (/^!\S+$/.test(cmd[1])) {
                 throw new BadParameter("Unsupported variable " + cmd[1]);
             } else {
@@ -3775,6 +3879,10 @@ MacroPlayer.prototype.reset = function () {
     this.encryptionType = typ;
 
     this.waitingForPassword = false;
+
+    if (this.varManager && typeof this.varManager.resetLocalContext === 'function') {
+        this.varManager.resetLocalContext(this.currentLoop || 1);
+    }
 
     // downloads state
     this.activeDownloads = new Map();
@@ -4665,6 +4773,19 @@ MacroPlayer.prototype.getColumnData = function (col) {
 
 // functions to access built-in VARiables
 MacroPlayer.prototype.getVar = function (idx) {
+    if (this.varManager && typeof this.varManager.getVar === 'function') {
+        let name = idx;
+        if (typeof idx === 'string' && /^VAR\d+$/i.test(idx)) {
+            name = idx;
+        } else if (typeof idx === 'number' || (typeof idx === 'string' && /^\d+$/.test(idx))) {
+            name = 'VAR' + imns.s2i(idx);
+        }
+        const value = this.varManager.getVar(name);
+        if (typeof value !== 'undefined') {
+            return value === null ? "" : value;
+        }
+    }
+
     var num = typeof idx === "string" ? imns.s2i(idx) : idx;
     return this.vars[num] || "";
 };
