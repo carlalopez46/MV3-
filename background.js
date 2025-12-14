@@ -204,8 +204,8 @@ async function performStorageWithFallback(method, payload) {
     throw lastError || new Error(`Storage ${method} failed`);
 }
 
-const executionStateStorage = sessionStorage || localStorage;
-const clearStaleExecutionState = executionStateStorage === localStorage
+const executionStateStorage = sessionStorage || localStorageBackend;
+const clearStaleExecutionState = executionStateStorage === localStorageBackend
     ? removeFromSessionOrLocal(['executionState']).catch((error) => {
         console.warn('[iMacros SW] Failed to clear persisted execution state on startup:', error);
     })
