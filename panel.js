@@ -45,7 +45,8 @@ function initWindowId() {
         const winIdParam = urlParams.get('win_id');
 
         if (winIdParam) {
-            currentWindowId = parseInt(winIdParam);
+            // 安全のため基数10を指定 (Main側の記述を採用)
+            currentWindowId = parseInt(winIdParam, 10);
             console.log("[Panel] Current window ID from URL:", currentWindowId);
             resolve(currentWindowId);
             return;
