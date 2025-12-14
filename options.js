@@ -456,7 +456,7 @@ window.addEventListener("load", async function () {
     })
     $("#temp-password-box").on("input", function () {
         // MV3: Send message to background to set temp password
-        var tempPassword = $("#temp-password-box").val();
+        const tempPassword = $("#temp-password-box").val();
         chrome.runtime.sendMessage({
             type: 'SET_TEMP_PASSWORD',
             password: tempPassword
@@ -490,13 +490,13 @@ window.addEventListener("load", async function () {
     };
 
     // record modes
-    var record_modes = ["conventional", "event"];
-    var record_radio = $("#record-mode-" + Storage.getChar("record-mode"));
+    const record_modes = ["conventional", "event"];
+    const record_radio = $("#record-mode-" + Storage.getChar("record-mode"));
     if (!record_radio) {
         alert("Unknown record mode type: " + Storage.getChar("record-mode"))
     } else {
         record_radio.prop("checked", true)
-        for (let r of record_modes) {
+        for (const r of record_modes) {
             $("#record-mode-" + r).change(function (e) {
                 Storage.setChar("record-mode", e.target.id.substring(12))
             });

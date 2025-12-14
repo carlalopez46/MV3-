@@ -26,6 +26,7 @@ This document tracks the refactoring of `var` to `const`/`let`, conversion of ca
 | `panel.js` | ✅ Already modern | Uses let/const throughout |
 | `treeView.js` | ✅ Complete | Converted var to const/let, added chrome.runtime.lastError handling |
 | `errorLogger.js` | ✅ Already modern | Uses const/let throughout |
+| `options.js` | ✅ Complete | Converted remaining var to const |
 
 ### Phase 2: Error Handling Improvements
 
