@@ -37,9 +37,11 @@ var Editor = {
         var doc = window.frames["editbox"].contentDocument;
         // send notification to EditArea
         var bypass = doc.getElementById("bypass");
+        console.log("[iMacros Editor] completeLoad - file_id:", file.file_id);
         bypass.setAttribute("filename", file.name || "");
         bypass.setAttribute("bookmark_id", file.bookmark_id || "");
         bypass.setAttribute("file_id", file.file_id || "");
+        console.log("[iMacros Editor] bypass setAttribute file_id:", bypass.getAttribute("file_id"));
         bypass.setAttribute("content", file.source);
         bypass.setAttribute("syntax", file.type || "imacro");
         var evt = doc.createEvent("Events");
@@ -172,6 +174,7 @@ var Editor = {
         var name = bypass.getAttribute("filename");
         var bookmark_id = bypass.getAttribute("bookmark_id");
         var file_id = bypass.getAttribute("file_id");
+        console.log("[iMacros Editor] getEditAreaData - retrieved file_id:", file_id);
         var syntax = bypass.getAttribute("syntax");
 
         return {
@@ -268,7 +271,15 @@ var Editor = {
     listen: function (evt) {
         if (evt.type == "iMacrosEditorSaveEvent") {
             var content = evt.target.getAttribute("content");
-            this.saveFileAs(evt);
+            var r = this.getEditAreaData();
+            // If we have a file_id, overwrite directly. Otherwise open Save As dialog.
+            if (r.file_id) {
+                this.saveFile().catch(function (err) {
+                    console.error("[iMacros] Save failed in event handler:", err);
+                });
+            } else {
+                this.saveFileAs();
+            }
         } else if (evt.type == "iMacrosEditorLoadEvent") {
             this.loadFile(evt);
         }
