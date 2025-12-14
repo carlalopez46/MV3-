@@ -174,7 +174,12 @@ window.addEventListener("load", function () {
         if (file_type) {
             document.getElementById("radio-files-tree").checked = true;
         } else {
-            document.getElementById("radio-bookmarks-tree").checked = true;
+            // Default to Files if available, otherwise Bookmarks
+            if (typeof afio !== 'undefined' && afio.getBackendType() !== 'none') {
+                document.getElementById("radio-files-tree").checked = true;
+            } else {
+                document.getElementById("radio-bookmarks-tree").checked = true;
+            }
         }
 
         // Add directory selection functionality
