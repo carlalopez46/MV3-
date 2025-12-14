@@ -981,7 +981,7 @@ MacroPlayer.prototype.clearRetryInterval = function () {
         clearInterval(this.retryInterval);
         delete this.retryInterval;
     }
-}
+};
 
 MacroPlayer.prototype.retry = function (onerror, msg, caller_id, timeout) {
     if (!this.playing)
@@ -3910,6 +3910,7 @@ MacroPlayer.prototype.reset = function () {
     this.playing = false;
     this.paused = false;
     this.pauseIsPending = false;
+    this.loopStack = [];
 
     // last error code and message
     this.errorCode = 1;
@@ -4011,6 +4012,12 @@ MacroPlayer.prototype.unpause = function () {
 MacroPlayer.prototype.resolveMacroPath = async function (macroPath) {
     if (!macroPath)
         throw new RuntimeError("Macro path is empty", 610);
+
+    // Check for hidden files (start with dot but no extension after)
+    const lastSegment = macroPath.split(/[\/\\]/).pop();
+    if (lastSegment && lastSegment.charAt(0) === '.' && !/\.\w+$/.test(lastSegment)) {
+        throw new RuntimeError("Hidden macro files are not supported", 611);
+    }
 
     const looksAbsolute = /^(?:[a-zA-Z]:\\|\/)/.test(macroPath);
     if (looksAbsolute)
