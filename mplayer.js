@@ -82,6 +82,7 @@ function MacroPlayer(win_id) {
     this.ports = new Object();
     this._ActionTable = new Object();
     this.callStack = [];
+    this.loopStack = [];
     this.compileExpressions();
 
     this._onScriptError = this.onErrorOccurred.bind(this);
@@ -914,7 +915,7 @@ MacroPlayer.prototype.clearRetryInterval = function () {
         clearInterval(this.retryInterval);
         delete this.retryInterval;
     }
-}
+};
 
 MacroPlayer.prototype.retry = function (onerror, msg, caller_id, timeout) {
     if (!this.playing)
@@ -3841,6 +3842,7 @@ MacroPlayer.prototype.reset = function () {
     this.playing = false;
     this.paused = false;
     this.pauseIsPending = false;
+    this.loopStack = [];
 
     // last error code and message
     this.errorCode = 1;
@@ -3943,6 +3945,12 @@ MacroPlayer.prototype.resolveMacroPath = async function (macroPath) {
     if (!macroPath)
         throw new RuntimeError("Macro path is empty", 610);
 
+    // Check for hidden files (start with dot but no extension after)
+    const lastSegment = macroPath.split(/[\/\\]/).pop();
+    if (lastSegment && lastSegment.charAt(0) === '.' && !/\.\w+$/.test(lastSegment)) {
+        throw new RuntimeError("Hidden macro files are not supported", 611);
+    }
+
     const looksAbsolute = /^(?:[a-zA-Z]:\\|\/)/.test(macroPath);
     if (looksAbsolute)
         return macroPath;
@@ -3998,7 +4006,51 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
     macro.name = macro.name || macroPath;
     macro.file_id = macro.file_id || resolvedPath;
 
-    this.play(macro, this.limits);
+    const frame = {
+        actions: this.actions,
+        action_stack: this.action_stack,
+        source: this.source,
+        currentMacro: this.currentMacro,
+        file_id: this.file_id,
+        bookmark_id: this.bookmark_id,
+        client_id: this.client_id,
+        callback: this.callback,
+        limits: this.limits,
+        times: this.times,
+        currentLoop: this.currentLoop,
+        cycledReplay: this.cycledReplay,
+        firstLoop: this.firstLoop,
+        loopStack: this.loopStack ? (typeof structuredClone === "function"
+            ? structuredClone(this.loopStack)
+            : JSON.parse(JSON.stringify(this.loopStack))) : []
+    };
+
+    this.callStack.push(frame);
+    this.loopStack = [];
+
+    try {
+        await new Promise((resolve) => {
+            this.play(macro, this.limits, resolve);
+        });
+    } finally {
+        const previous = this.callStack.pop();
+        if (previous) {
+            this.actions = previous.actions;
+            this.action_stack = previous.action_stack;
+            this.source = previous.source;
+            this.currentMacro = previous.currentMacro;
+            this.file_id = previous.file_id;
+            this.bookmark_id = previous.bookmark_id;
+            this.client_id = previous.client_id;
+            this.callback = previous.callback;
+            this.limits = previous.limits;
+            this.times = previous.times;
+            this.currentLoop = previous.currentLoop;
+            this.cycledReplay = previous.cycledReplay;
+            this.firstLoop = previous.firstLoop;
+            this.loopStack = previous.loopStack;
+        }
+    }
 };
 
 
