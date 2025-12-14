@@ -66,7 +66,11 @@ window.addEventListener("load", function () {
             args = result[dialogKey];
 
             // Clean up the session storage
-            storage.remove([dialogKey]);
+            storage.remove([dialogKey], function() {
+                if (chrome.runtime.lastError) {
+                    console.warn("[iMacros] Failed to clean up dialog key:", chrome.runtime.lastError);
+                }
+            });
 
             initializeWithAfio();
         });
@@ -187,7 +191,13 @@ window.addEventListener("load", function () {
 
 function ok() {
     var macro_name = document.getElementById("macro-name");
-    args.save_data.name = macro_name.value;
+    try {
+        args.save_data.name = normalizeMacroName(macro_name.value);
+    } catch (e) {
+        alert(e.message || e);
+        macro_name.focus();
+        return;
+    }
 
     var overwrite = false;
 
@@ -260,8 +270,45 @@ function ok() {
                     alert("Save failed: " + err);
                 });
             }).catch(console.error.bind(console));
+        }).catch(function (err) {
+            console.error("[iMacros] Failed to resolve directory:", err);
+            alert("Error accessing directory: " + (err.message || err));
         });
     });
+}
+
+function normalizeMacroName(rawName) {
+    var trimmed = String(rawName || "").trim();
+
+    if (!trimmed) {
+        throw new Error("Macro name cannot be empty");
+    }
+
+    // Replace characters invalid on common filesystems, filter control chars, and drop trailing dots/spaces
+    var sanitized = trimmed
+        .replace(/[\\/:*?"<>|\u0000-\u001F\u007F]/g, "_")
+        .replace(/[. ]+$/, "");
+
+    if (!sanitized) {
+        throw new Error("Macro name contains only invalid characters");
+    }
+
+    // Windows reserved device names (base name only)
+    var baseName = sanitized.split('.')[0];
+
+    var reservedNames = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
+    if (reservedNames.test(baseName)) {
+        throw new Error("Invalid macro name: '" + baseName + "' is a reserved system name");
+    }
+
+    // Account for filename component limits; reserve room for .iim if absent
+    var hasIimExt = /\.iim$/i.test(sanitized);
+    var MAX_MACRO_BASENAME = hasIimExt ? 255 : 251;
+    if (sanitized.length > MAX_MACRO_BASENAME) {
+        throw new Error("Macro name is too long (maximum " + MAX_MACRO_BASENAME + " characters)");
+    }
+
+    return sanitized;
 }
 
 // Helper: send save request to background service worker

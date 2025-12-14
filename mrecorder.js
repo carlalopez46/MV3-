@@ -180,8 +180,9 @@ Recorder.prototype.start = function () {
                 recordMode: recordMode
             }
         }, recorder.win_id);
-        // save intial commands
-        recorder.recordAction("VERSION BUILD=" + Storage.getChar("version").replace(/\./g, "") + " RECORDER=CR");
+        // save initial commands
+        const versionHeader = "VERSION BUILD=" + Storage.getChar("version").replace(/\./g, "") + " RECORDER=CR";
+        recorder.recordAction(versionHeader);
         recorder.recordAction("TAB T=1");
         if (!/^chrome:\/\//.test(tabs[0].url)) {
             console.log("[iMacros MV3 Recorder] Recording initial URL: " + tabs[0].url);
@@ -643,6 +644,12 @@ Recorder.prototype.packKeyUpEvent = function (extra) {
 Recorder.prototype.packKeyPressEvent = function (extra) {
     if (!(this.encryptKeypressEvent = extra.encrypt))
         return  // do nothing
+
+    if (!this.password || !this.canEncrypt) {
+        console.warn("Skipping encryption for keypress: password not set or encryption disabled");
+        this.encryptKeypressEvent = false;
+        return;
+    }
 
     const ch_re = new RegExp("^event type=keypress selector=\"([^\"]+)\"" +
         " char=\"([^\"]+)\"", "i")

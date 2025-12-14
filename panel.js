@@ -1,10 +1,10 @@
 /* panel.js - MV3対応版 */
 
 // 選択中のマクロ情報を保持する変数
-var selectedMacro = null;
+let selectedMacro = null;
 
 // パネルの状態をキャッシュ
-var panelState = {
+const panelState = {
     isRecording: false,
     isPlaying: false,
     currentMacro: null
@@ -35,7 +35,7 @@ function getMacroPathAndName(macro) {
 }
 
 // パネルのウィンドウIDを保持
-var currentWindowId = null;
+let currentWindowId = null;
 
 // ウィンドウIDを取得
 function initWindowId() {
@@ -45,7 +45,8 @@ function initWindowId() {
         const winIdParam = urlParams.get('win_id');
 
         if (winIdParam) {
-            currentWindowId = parseInt(winIdParam);
+            const parsed = parseInt(winIdParam, 10);
+            currentWindowId = Number.isFinite(parsed) ? parsed : null;
             console.log("[Panel] Current window ID from URL:", currentWindowId);
             resolve(currentWindowId);
             return;
@@ -383,8 +384,8 @@ function updatePanelState(state) {
     console.log("[Panel] Update state:", state);
     let stateName = state;
     if (state && typeof state === 'object') {
-        panelState = state;
-        stateName = state.isRecording ? 'recording' : state.isPlaying ? 'playing' : 'idle';
+        Object.assign(panelState, state);
+        stateName = panelState.isRecording ? 'recording' : panelState.isPlaying ? 'playing' : 'idle';
     }
     const setCollapsed = (id, collapsed) => {
         const el = document.getElementById(id);
@@ -628,8 +629,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 document.addEventListener("DOMContentLoaded", () => {
     console.log("[Panel] DOMContentLoaded");
 
-    // ウィンドウIDを初期化
-    windowIdReadyPromise = initWindowId();
+    // Kick off lazy window ID resolution and cache the promise
+    windowIdReadyPromise = ensureWindowId();
 
     // イベントリスナーの登録
     const addListener = (id, handler) => {
