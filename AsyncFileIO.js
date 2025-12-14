@@ -427,6 +427,10 @@ var afio = (function () {
                         reject(error);
                     } else if (result.error) {
                         const error = new Error(result.error);
+                        error.nativeOperationError = true;
+                        if (result.code) {
+                            error.nativeErrorCode = result.code;
+                        }
                         if (typeof GlobalErrorLogger !== 'undefined') {
                             GlobalErrorLogger.logFileError('AsyncFileIO.callNative.nativeError', error, {
                                 errorCode: GlobalErrorLogger.FILE_ERROR_CODES ? GlobalErrorLogger.FILE_ERROR_CODES.FILE_BACKEND_ERROR : undefined,
@@ -678,6 +682,9 @@ var afio = (function () {
             try {
                 return await callNative(payload);
             } catch (err) {
+                if (err && err.nativeOperationError) {
+                    throw err;
+                }
                 console.warn('Native host call failed, trying File System Access API', err);
 
                 // File System Access APIにフォールバック
