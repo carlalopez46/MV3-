@@ -320,21 +320,39 @@ Recorder.prototype.recordEncryptionType = function () {
         "stored": "SET !ENCRYPTION STOREDKEY",
         "tmpkey": "SET !ENCRYPTION TMPKEY"
     }
-    let password_promise = null
-    if (typ == "no") {
-        password_promise = Promise.resolve({ canceled: true });
-    } else if (typ == "stored") {
+
+    // Fast path: Handle synchronous password retrieval to avoid race conditions
+    if (typ == "stored") {
         let pwd = Storage.getChar("stored-password")
-        // stored password is base64 encoded
-        pwd = decodeURIComponent(atob(pwd))
-        password_promise = Promise.resolve({ password: pwd })
-    } else if (typ == "tmpkey") {
-        password_promise = Rijndael.tempPassword ?
-            Promise.resolve({
-                password: Rijndael.tempPassword
-            }) : dialogUtils.openDialog("passwordDialog.html",
-                "iMacros Password Dialog",
-                { type: "askPassword" })
+        if (pwd) {
+            try {
+                // stored password is base64 encoded
+                this.password = decodeURIComponent(atob(pwd))
+                this.recordAction(enc_types["stored"])
+                return;
+            } catch (e) {
+                console.error("Failed to decode stored password", e);
+            }
+        }
+    } else if (typ == "tmpkey" && Rijndael.tempPassword) {
+        this.password = Rijndael.tempPassword;
+        this.recordAction(enc_types["tmpkey"]);
+        return;
+    } else if (typ == "no") {
+        this.canEncrypt = false;
+        this.recordAction(enc_types["no"]);
+        return;
+    }
+
+    // Slow path: Need to open dialog (async)
+    let password_promise = null
+    if (typ == "tmpkey") {
+        password_promise = dialogUtils.openDialog("passwordDialog.html",
+            "iMacros Password Dialog",
+            { type: "askPassword" })
+    } else {
+        // Fallback for unexpected types
+        password_promise = Promise.resolve({ canceled: true });
     }
 
     password_promise.then(response => {
@@ -648,6 +666,11 @@ Recorder.prototype.packKeyPressEvent = function (extra) {
     if (!(this.encryptKeypressEvent = extra.encrypt))
         return  // do nothing
 
+    if (!this.password || !this.canEncrypt) {
+        console.warn("Skipping encryption for keypress: password not set or encryption disabled");
+        return;
+    }
+
     const ch_re = new RegExp("^event type=keypress selector=\"([^\"]+)\"" +
         " char=\"([^\"]+)\"", "i")
     let cur = this.popLastAction()
@@ -687,7 +710,14 @@ Recorder.prototype.encryptTagCommand = function () {
             " has no CONTENT")
         return
     }
-    let cyphertext = this.canEncrypt ?
+
+    if (!this.password && this.canEncrypt) {
+        console.warn("encryptTagCommand: Password not set, skipping encryption");
+        this.recordAction(cmd); // Put back original command
+        return;
+    }
+
+    let cyphertext = (this.canEncrypt && this.password) ?
         Rijndael.encryptString(m[1], this.password) : m[1]
     let updated_cmd = cmd.replace(/(content)=(\S+)\s*$/i, "$1=" + cyphertext)
     this.recordAction(updated_cmd)
