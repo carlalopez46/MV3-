@@ -98,9 +98,11 @@ async function initializeLocalStoragePolyfill() {
                 cache[key] = String(items[storageKey]);
                 hydratedCount++;
             });
-            console.log(`[iMacros SW] localStorage cache loaded synchronously: ${hydratedCount} items`);
+            console.log(`[iMacros SW] localStorage cache loaded asynchronously: ${hydratedCount} items`);
         } catch (err) {
             console.error('[iMacros SW] Failed to hydrate localStorage cache:', err);
+            // Optional: Throwing here would prevent starting with an empty cache if that is critical
+            // throw err;
         }
     }
 
@@ -149,8 +151,8 @@ const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
 });
 
 const sessionStorage = chrome.storage ? chrome.storage.session : null;
-const localStorage = chrome.storage ? chrome.storage.local : null;
-const storageCandidates = [sessionStorage, localStorage].filter(Boolean);
+const localStorageBackend = chrome.storage ? chrome.storage.local : null;
+const storageCandidates = [sessionStorage, localStorageBackend].filter(Boolean);
 
 function removeFromSessionOrLocal(keys) {
     if (!storageCandidates.length) return Promise.reject(new Error('Storage not available'));
@@ -202,8 +204,8 @@ async function performStorageWithFallback(method, payload) {
     throw lastError || new Error(`Storage ${method} failed`);
 }
 
-const executionStateStorage = sessionStorage || localStorage;
-const clearStaleExecutionState = executionStateStorage === localStorage
+const executionStateStorage = sessionStorage || localStorageBackend;
+const clearStaleExecutionState = executionStateStorage === localStorageBackend
     ? removeFromSessionOrLocal(['executionState']).catch((error) => {
         console.warn('[iMacros SW] Failed to clear persisted execution state on startup:', error);
     })
