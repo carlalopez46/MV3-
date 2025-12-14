@@ -578,6 +578,19 @@ window.addEventListener("message", (event) => {
     }
 });
 
+// --- Extension Reload Detection ---
+// Establish a long-lived connection to detect when the extension context is invalidated (reloaded/updated)
+try {
+    const port = chrome.runtime.connect({ name: "panel-lifecycle" });
+    port.onDisconnect.addListener(() => {
+        console.log("[Panel] Extension reloaded/disconnected. Reloading panel...");
+        // Reloading the page re-initiates the connection to the new background script
+        window.location.reload();
+    });
+} catch (e) {
+    console.error("[Panel] Failed to connect to background:", e);
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.target === 'panel' && message.type === 'PANEL_STATE_UPDATE') {
         if (message.state) updatePanelState(message.state);
