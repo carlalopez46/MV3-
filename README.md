@@ -83,3 +83,105 @@ If you see `AfioTestSuite is not defined` error:
 Console spam about native messaging errors has been reduced. The extension will:
 - Silently fall back to virtual filesystem when native host is unavailable
 - Only show warnings for actual connection issues (not expected failures)
+
+---
+
+## Development
+
+### Prerequisites
+
+- Node.js 18+ 
+- npm
+
+### Setup
+
+```bash
+# Install dependencies
+npm install
+```
+
+### Scripts
+
+```bash
+# Run tests
+npm test
+
+# Run ESLint
+npm run lint
+
+# Auto-fix ESLint issues
+npm run lint:fix
+
+# Run MV3 policy audit (checks for CSP violations)
+npm run audit:mv3
+```
+
+### MV3 Policy Audit
+
+The `audit:mv3` script scans the codebase for MV3 policy violations:
+
+- `eval()` / `new Function()` outside sandbox pages
+- MV2 API usage (deprecated APIs)
+- Service Worker incompatibilities
+- Manifest configuration issues
+
+All errors must be resolved before the extension can be loaded in Chrome.
+
+### Loading the Extension in Chrome
+
+1. Open Chrome and navigate to `chrome://extensions`
+2. Enable "Developer mode" in the top right
+3. Click "Load unpacked" and select the repository directory
+4. Check the console for any errors (should be 0 errors)
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Service Worker                          │
+│                    (background.js)                          │
+│  - Event handling                                           │
+│  - chrome.* API access                                      │
+│  - Offscreen document lifecycle                             │
+└─────────────────────┬───────────────────────────────────────┘
+                      │ chrome.runtime messaging
+┌─────────────────────┴───────────────────────────────────────┐
+│                  Offscreen Document                          │
+│                   (offscreen.html)                           │
+│  - DOM operations                                            │
+│  - Macro player/recorder logic                               │
+│  - Bridge to sandbox                                         │
+└─────────────────────┬───────────────────────────────────────┘
+                      │ postMessage
+┌─────────────────────┴───────────────────────────────────────┐
+│                     Sandbox Page                             │
+│              (sandbox.html / eval_executor.js)               │
+│  - eval() / new Function() allowed here                      │
+│  - No chrome.* API access                                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Files
+
+| File | Description |
+|------|-------------|
+| `manifest.json` | Extension manifest (MV3) |
+| `background.js` | Service Worker entry point |
+| `offscreen.html/js` | Offscreen document for DOM operations |
+| `sandbox.html/js` | Sandbox for eval operations |
+| `mplayer.js` | Macro player engine |
+| `mrecorder.js` | Macro recorder |
+| `ERROR_AUDIT.md` | MV3 migration audit results |
+
+### Testing
+
+Tests are located in the `tests/` directory:
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test suite
+npm run test:fsaccess  # File system access tests
+npm run test:afio      # AsyncFileIO tests
+```

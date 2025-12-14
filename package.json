@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "iMacros MV3 Chrome Extension",
   "engines": {
-    "node": ">=15.7.0"
+    "node": ">=18.0.0"
   },
   "scripts": {
     "test": "node tests/run_tests_cli.js",
@@ -11,9 +11,15 @@
     "test:fsaccess": "node tests/run_tests_cli.js --suite=fsaccess",
     "test:afio": "node tests/run_tests_cli.js --suite=afio",
     "test:watch": "node tests/run_tests_cli.js --watch",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "audit:mv3": "node scripts/audit-mv3.js",
     "check:conflicts": "git grep -n '^<<<<<<<' -- ."
   },
   "keywords": ["imacros", "chrome-extension", "automation"],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "eslint": "^8.57.0"
+  }
 }
