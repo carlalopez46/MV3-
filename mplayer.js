@@ -2970,11 +2970,15 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
                         "can not write to FOLDER_DATASOURCE: " +
                         param + " does not exist or not accessible.", 732
                     ));
-                    return Promise.reject(new Error("datasource folder missing"));
+                    return Promise.reject({ handled: true });
                 }
+                return true;
             }).then(() => {
                 this.next("SET");
             }).catch(err => {
+                if (err && err.handled) {
+                    return;
+                }
                 this.handleError(new RuntimeError(
                     "can not open FOLDER_DATASOURCE: " +
                     param + ", error " + (err && err.message ? err.message : err), 732
@@ -2994,11 +2998,15 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
                         "can not write to FOLDER_DOWNLOAD: " +
                         param + " does not exist or not accessible.", 732
                     ));
-                    return Promise.reject(new Error("download folder missing"));
+                    return Promise.reject({ handled: true });
                 }
+                return true;
             }).then(() => {
                 this.next("SET");
             }).catch(err => {
+                if (err && err.handled) {
+                    return;
+                }
                 this.handleError(new RuntimeError(
                     "can not open FOLDER_DOWNLOAD: " +
                     param + ", error " + (err && err.message ? err.message : err), 732
@@ -4774,12 +4782,7 @@ MacroPlayer.prototype.getColumnData = function (col) {
 // functions to access built-in VARiables
 MacroPlayer.prototype.getVar = function (idx) {
     if (this.varManager && typeof this.varManager.getVar === 'function') {
-        let name = idx;
-        if (typeof idx === 'string' && /^VAR\d+$/i.test(idx)) {
-            name = idx;
-        } else if (typeof idx === 'number' || (typeof idx === 'string' && /^\d+$/.test(idx))) {
-            name = 'VAR' + imns.s2i(idx);
-        }
+        const name = /^VAR\d+$/i.test(String(idx)) ? idx : 'VAR' + imns.s2i(idx);
         const value = this.varManager.getVar(name);
         if (typeof value !== 'undefined') {
             return value === null ? "" : value;
