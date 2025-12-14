@@ -268,7 +268,15 @@ var Editor = {
     listen: function (evt) {
         if (evt.type == "iMacrosEditorSaveEvent") {
             var content = evt.target.getAttribute("content");
-            this.saveFileAs(evt);
+            var r = this.getEditAreaData();
+            // If we have a file_id, overwrite directly. Otherwise open Save As dialog.
+            if (r.file_id) {
+                this.saveFile().catch(function (err) {
+                    console.error("[iMacros] Save failed in event handler:", err);
+                });
+            } else {
+                this.saveFileAs();
+            }
         } else if (evt.type == "iMacrosEditorLoadEvent") {
             this.loadFile(evt);
         }

@@ -1207,10 +1207,17 @@ function detach_debugger(tab_id) {
         // Direct access (Service Worker context)
         return new Promise(function (resolve, reject) {
             chrome.debugger.detach({ tabId: tab_id }, function () {
-                if (chrome.runtime.lastError)
-                    reject(chrome.runtime.lastError);
-                else
+                if (chrome.runtime.lastError) {
+                    if (chrome.runtime.lastError.message &&
+                        chrome.runtime.lastError.message.includes("Debugger is not attached")) {
+                        // Ignore if already detached
+                        resolve();
+                    } else {
+                        reject(chrome.runtime.lastError);
+                    }
+                } else {
                     resolve();
+                }
             });
         });
     } else {
@@ -1223,7 +1230,13 @@ function detach_debugger(tab_id) {
                 if (chrome.runtime.lastError) {
                     reject(chrome.runtime.lastError);
                 } else if (response && response.error) {
-                    reject(new Error(response.error));
+                    // Ignore if already detached
+                    const errorMessage = typeof response.error === 'string' ? response.error : String(response.error);
+                    if (errorMessage.includes("Debugger is not attached")) {
+                        resolve();
+                    } else {
+                        reject(new Error(errorMessage));
+                    }
                 } else {
                     resolve();
                 }
