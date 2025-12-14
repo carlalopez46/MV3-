@@ -70,19 +70,14 @@ Communicator.prototype.handleMessage = function (msg, tab_id, sendResponse) {
     if (msg.topic in this.handlers) {
         // tab_id が有効な場合のみタブ情報を取得
         if (tab_id !== -1 && chrome.tabs) {
-            try {
-                chrome.tabs.get(tab_id, (tab) => {
-                    if (chrome.runtime.lastError || !tab) {
-                        // タブが見つからない、またはコンテキストが違う場合は直接実行
-                        this._execHandlers(msg, tab_id, null, sendResponse);
-                        return;
-                    }
-                    this._execHandlers(msg, tab_id, tab.windowId, sendResponse);
-                });
-            } catch (err) {
-                console.error('[Communicator] Error getting tab:', err);
-                this._execHandlers(msg, tab_id, null, sendResponse);
-            }
+            chrome.tabs.get(tab_id, (tab) => {
+                if (chrome.runtime.lastError || !tab) {
+                    // タブが見つからない、またはコンテキストが違う場合は直接実行
+                    this._execHandlers(msg, tab_id, null, sendResponse);
+                    return;
+                }
+                this._execHandlers(msg, tab_id, tab.windowId, sendResponse);
+            });
         } else {
             this._execHandlers(msg, tab_id, null, sendResponse);
         }
@@ -105,12 +100,12 @@ Communicator.prototype._execHandlers = function (msg, tab_id, win_id, sendRespon
         if (x.win_id && win_id && x.win_id == win_id) {
             handled = true;
             x.handler(msg.data, tab_id, sendResponse);
-            break;
+            // Continue to allow multiple handlers to process the message
         } else if (!x.win_id) {
             // browser-wide message handler
             handled = true;
             x.handler(msg.data, tab_id, sendResponse);
-            break;
+            // Continue to allow multiple handlers to process the message
         }
     }
     // If no handler matched (e.g., win_id mismatch), still send a response to close the channel
@@ -209,25 +204,21 @@ Communicator.prototype.broadcastMessage = function (topic, data, win_id) {
         // Direct access (Service Worker or extension page)
         const queryInfo = win_id ? { windowId: win_id } : {};
 
-        try {
-            chrome.tabs.query(queryInfo, (tabs) => {
-                if (chrome.runtime.lastError) {
-                    console.warn('[Communicator] broadcastMessage query error:', chrome.runtime.lastError.message);
-                    return;
-                }
-                if (!tabs) return;
-                for (const tab of tabs) {
-                    chrome.tabs.sendMessage(tab.id, { topic: topic, data: data }, () => {
-                        // Ignore errors for individual tabs
-                        if (chrome.runtime.lastError) {
-                            // Tab may not have content script
-                        }
-                    });
-                }
-            });
-        } catch (err) {
-            console.error('[Communicator] broadcastMessage error:', err);
-        }
+        chrome.tabs.query(queryInfo, (tabs) => {
+            if (chrome.runtime.lastError) {
+                console.warn('[Communicator] broadcastMessage query error:', chrome.runtime.lastError.message);
+                return;
+            }
+            if (!tabs) return;
+            for (const tab of tabs) {
+                chrome.tabs.sendMessage(tab.id, { topic: topic, data: data }, () => {
+                    // Ignore errors for individual tabs
+                    if (chrome.runtime.lastError) {
+                        // Tab may not have content script
+                    }
+                });
+            }
+        });
     } else {
         // Proxy through Service Worker (Offscreen Document)
         chrome.runtime.sendMessage({

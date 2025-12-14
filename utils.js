@@ -276,7 +276,7 @@ var imns = {
             } else if (s == "\\\"") {
                 return "\u0022";
             } else if (s == "\\\'") {
-                return "\u0027"
+                return "\u0027";
             } else {
                 // function to replace \x|u sequence
                 const replaceChar = function (match_str, char_code) {
