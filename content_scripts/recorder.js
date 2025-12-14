@@ -1123,6 +1123,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
     // EVENT mode methods
     // ------------------
     CSRecorder.prototype.escapeIdForSelector = function (id) {
+        // Ensure id is a string (SVG elements might return object)
+        id = String(id);
+
         // HTML5 lessen restrictions on possible id values,
         // Based on the article http://mathiasbynens.be/notes/css-escapes
 
@@ -1246,8 +1249,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             window.addEventListener("mousemove", this.onMouseMoveEvent, false);
         }
         var modifiers = this.getModifiers(event);
+        var escapedSelector = selector.replace(/"/g, '\\"');
         this.saveAction(
-            "EVENT TYPE=MOUSEDOWN SELECTOR=\"" + selector + "\"" +
+            "EVENT TYPE=MOUSEDOWN SELECTOR=\"" + escapedSelector + "\"" +
             " BUTTON=" + event.button +
             (modifiers.length ? " MODIFIERS=\"" + modifiers + "\"" : "")
         );
@@ -1270,8 +1274,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
     CSRecorder.prototype.onMouseMove = function (event) {
         var selector = this.getSelectorForElement(event.target);
         var modifiers = this.getModifiers(event);
+        var escapedSelector = selector.replace(/"/g, '\\"');
         this.saveAction(
-            "EVENT TYPE=MOUSEMOVE SELECTOR=\"" + selector + "\"" +
+            "EVENT TYPE=MOUSEMOVE SELECTOR=\"" + escapedSelector + "\"" +
             " POINT=\"(" + event.pageX + "," + event.pageY + ")\"" +
             (modifiers.length ? " MODIFIERS=\"" + modifiers + "\"" : ""),
             {
@@ -1287,8 +1292,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             return;
         var selector = this.getSelectorForElement(event.target);
         var modifiers = this.getModifiers(event);
+        var escapedSelector = selector.replace(/"/g, '\\"');
         this.saveAction(
-            "EVENT TYPE=CLICK SELECTOR=\"" + selector + "\"" +
+            "EVENT TYPE=CLICK SELECTOR=\"" + escapedSelector + "\"" +
             " BUTTON=" + event.button +
             (modifiers.length ? " MODIFIERS=\"" + modifiers + "\"" : ""),
             { pack_type: "click", selector: selector }
@@ -1302,8 +1308,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             return;
         var selector = this.getSelectorForElement(event.target);
         var modifiers = this.getModifiers(event);
+        var escapedSelector = selector.replace(/"/g, '\\"');
         this.saveAction(
-            "EVENT TYPE=DBLCLICK SELECTOR=\"" + selector + "\"" +
+            "EVENT TYPE=DBLCLICK SELECTOR=\"" + escapedSelector + "\"" +
             " BUTTON=" + event.button +
             (modifiers.length ? " MODIFIERS=\"" + modifiers + "\"" : ""),
             { pack_type: "dblclick", selector: selector }
@@ -1316,9 +1323,10 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         var selector = this.getSelectorForElement(event.target);
         var modifiers = this.getModifiers(event);
         var key = event.keyCode;
+        var escapedSelector = selector.replace(/"/g, '\\"');
 
         this.saveAction(
-            "EVENT TYPE=KEYDOWN SELECTOR=\"" + selector + "\"" +
+            "EVENT TYPE=KEYDOWN SELECTOR=\"" + escapedSelector + "\"" +
             " KEY=" + key +
             (modifiers.length ? " MODIFIERS=\"" + modifiers + "\"" : "")
             ,
@@ -1336,9 +1344,10 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         var selector = this.getSelectorForElement(event.target);
         var modifiers = this.getModifiers(event);
         var key = event.keyCode;
+        var escapedSelector = selector.replace(/"/g, '\\"');
 
         this.saveAction(
-            "EVENT TYPE=KEYUP SELECTOR=\"" + selector + "\"" +
+            "EVENT TYPE=KEYUP SELECTOR=\"" + escapedSelector + "\"" +
             " KEY=" + key +
             (modifiers.length ? " MODIFIERS=\"" + modifiers + "\"" : "")
             ,
@@ -1362,8 +1371,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             key = event.keyCode;
 
         var is_encryptable = event.target.type == "password" && use_char;
+        var escapedSelector = selector.replace(/"/g, '\\"');
         this.saveAction(
-            "EVENT TYPE=KEYPRESS SELECTOR=\"" + selector + "\"" +
+            "EVENT TYPE=KEYPRESS SELECTOR=\"" + escapedSelector + "\"" +
             (use_char ? " CHAR=\"" + StrUtils.escapeLine(char) + "\"" :
                 (" KEY=" + key +
                     (modifiers.length ? " MODIFIERS=\"" + modifiers + "\"" : "")
@@ -1400,8 +1410,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             for (let i = 0; i < options.length; i++) {
                 if (options[i].selected) {
                     let selector = this.getSelectorForElement(options[i])
+                    let escapedSelector = selector.replace(/"/g, '\\"');
                     this.saveAction(
-                        "EVENT TYPE=CLICK SELECTOR=\"" + selector + "\"",
+                        "EVENT TYPE=CLICK SELECTOR=\"" + escapedSelector + "\"",
                         { pack_type: "select", selector: selector }
                     )
                     return
@@ -1522,8 +1533,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         clearTimeout(this.scrollTimeout);
         var self = this;
         this.scrollTimeout = setTimeout(function () {
+            var escapedSelector = selector.replace(/"/g, '\\"');
             self.saveAction(
-                "EVENT TYPE=SCROLL SELECTOR=\"" + selector + "\" X=" + scrollX + " Y=" + scrollY,
+                "EVENT TYPE=SCROLL SELECTOR=\"" + escapedSelector + "\" X=" + scrollX + " Y=" + scrollY,
                 { pack_type: "scroll", selector: selector, x: scrollX, y: scrollY }
             );
         }, 300); // Wait 300ms after last scroll
@@ -1548,8 +1560,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             var tagName = target.tagName.toLowerCase();
             if (['a', 'button', 'div', 'span', 'li', 'img'].includes(tagName)) {
                 var selector = self.getSelectorForElement(target);
+                var escapedSelector = selector.replace(/"/g, '\\"');
                 self.saveAction(
-                    "EVENT TYPE=HOVER SELECTOR=\"" + selector + "\"",
+                    "EVENT TYPE=HOVER SELECTOR=\"" + escapedSelector + "\"",
                     { pack_type: "hover", selector: selector }
                 );
                 self.lastHoveredElement = target;
@@ -1567,8 +1580,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         if (!target || !target.tagName) return;
 
         var selector = this.getSelectorForElement(target);
+        var escapedSelector = selector.replace(/"/g, '\\"');
         this.saveAction(
-            "EVENT TYPE=RIGHTCLICK SELECTOR=\"" + selector + "\" X=" + event.pageX + " Y=" + event.pageY,
+            "EVENT TYPE=RIGHTCLICK SELECTOR=\"" + escapedSelector + "\" X=" + event.pageX + " Y=" + event.pageY,
             { pack_type: "contextmenu", selector: selector, x: event.pageX, y: event.pageY }
         );
     };
@@ -1583,8 +1597,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         if (!target || target.tagName.toLowerCase() !== 'form') return;
 
         var selector = this.getSelectorForElement(target);
+        var escapedSelector = selector.replace(/"/g, '\\"');
         this.saveAction(
-            "EVENT TYPE=SUBMIT SELECTOR=\"" + selector + "\"",
+            "EVENT TYPE=SUBMIT SELECTOR=\"" + escapedSelector + "\"",
             { pack_type: "submit", selector: selector }
         );
     };

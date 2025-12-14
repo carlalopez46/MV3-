@@ -8,7 +8,7 @@ worker via explicit messaging.
 
 //
 // Config
-/* global FileSyncBridge, afio, communicator */
+/* global FileSyncBridge, afio, communicator, dialogUtils */
 "use strict";
 
 //
@@ -102,7 +102,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (request.target !== 'offscreen') return;
 
     const msgLabel = request.type || request.command;
-    console.log('[iMacros Offscreen] Received message:', msgLabel, request);
+    if (msgLabel !== 'QUERY_STATE' && msgLabel !== 'TAB_UPDATED') {
+        console.log('[iMacros Offscreen] Received message:', msgLabel, request);
+    }
 
     // Handle quick state query from Service Worker or panel
     if (request.type === 'QUERY_STATE') {
@@ -110,7 +112,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         const ctx = (typeof context !== 'undefined' && context) ? context[winId] : null;
 
         let state = 'idle';
-        const response = { state };
+        const response = { state, success: true };
 
         if (ctx) {
             if (ctx.recorder && ctx.recorder.recording) {
@@ -243,8 +245,21 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 communicator._execHandlers(msg, tab_id, win_id, sendResponse);
             } else {
                 console.debug('[iMacros Offscreen] No handler for forwarded message:', topic);
-                if (sendResponse) sendResponse({ success: false, error: 'No handler found' });
+                // Return state: 'idle' to satisfy CSRecorder.onQueryStateCompleted
+                if (sendResponse) sendResponse({
+                    success: true, // ACKNOWLEDGE the message to stop retries, even if not handled
+                    state: 'idle',
+                    error: 'No handler found',
+                    notHandled: true
+                });
             }
+        } else {
+            // Communicator not ready
+            if (sendResponse) sendResponse({
+                success: false,
+                state: 'idle',
+                error: 'Communicator not available'
+            });
         }
         return true;
     }
@@ -816,7 +831,66 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     sendResponse({ success: true, result: result });
                 });
             } catch (err) {
+                console.error("Error saving macro:", err);
                 sendResponse({ success: false, error: err.message || String(err) });
+            }
+            return true;
+        }
+
+        // Handle GET_DIALOG_ARGS from background (forwarded from dialog window)
+        if (request.type === 'GET_DIALOG_ARGS') {
+            const winId = parseInt(request.windowId, 10);
+            if (!Number.isInteger(winId) || winId <= 0) {
+                console.error("[Offscreen] Invalid windowId for GET_DIALOG_ARGS:", request.windowId);
+                sendResponse({ success: false, error: "Invalid windowId" });
+                return true;
+            }
+
+            // Function to attempt retrieving args with retries
+            const tryGetArgs = (attemptsLeft) => {
+                if (typeof dialogUtils === 'undefined') {
+                    console.error("[Offscreen] dialogUtils is undefined (utils.js not loaded?)");
+                    sendResponse({ success: false, error: "dialogUtils undefined" });
+                    return;
+                }
+                try {
+                    const args = dialogUtils.getDialogArgs(winId);
+                    sendResponse({ success: true, args: args });
+                } catch (e) {
+                    if (attemptsLeft > 0) {
+                        // Retry after a short delay (race condition handling)
+                        console.log(`[Offscreen] waiting for dialog args (winId: ${winId}), attempts left: ${attemptsLeft}`);
+                        setTimeout(() => tryGetArgs(attemptsLeft - 1), 200);
+                    } else {
+                        console.error("[Offscreen] GET_DIALOG_ARGS error after retries:", e);
+                        sendResponse({ success: false, error: e.message });
+                    }
+                }
+            };
+
+            tryGetArgs(30); // Try for ~6 seconds
+            return true;
+        }
+
+        // Handle SET_DIALOG_RESULT from background (forwarded from dialog window)
+        if (request.type === 'SET_DIALOG_RESULT') {
+            try {
+                if (typeof dialogUtils === 'undefined') {
+                    console.error("[Offscreen] dialogUtils is undefined (utils.js not loaded?)");
+                    sendResponse({ success: false, error: "dialogUtils undefined" });
+                    return true;
+                }
+                const winId = parseInt(request.windowId, 10);
+                if (!Number.isInteger(winId) || winId <= 0) {
+                    console.error("[Offscreen] Invalid windowId for SET_DIALOG_RESULT:", request.windowId);
+                    sendResponse({ success: false, error: "Invalid windowId" });
+                    return true;
+                }
+                dialogUtils.setDialogResult(winId, request.response);
+                sendResponse({ success: true });
+            } catch (e) {
+                console.error("[Offscreen] SET_DIALOG_RESULT error:", e);
+                sendResponse({ success: false, error: e.message });
             }
             return true;
         }
@@ -1835,28 +1909,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         return true; // async response
     }
 
-    // Handle dialog interactions (PROMPT, etc.)
-    if (request.type === 'SET_DIALOG_RESULT') {
-        try {
-            dialogUtils.setDialogResult(request.windowId, request.response);
-            sendResponse({ success: true });
-        } catch (e) {
-            console.error('[iMacros MV3] Error setting dialog result:', e);
-            sendResponse({ success: false, error: e.toString() });
-        }
-        return true;
-    }
 
-    if (request.type === 'GET_DIALOG_ARGS') {
-        try {
-            var args = dialogUtils.getArgs(request.windowId);
-            sendResponse({ success: true, args: args });
-        } catch (e) {
-            console.error('[iMacros MV3] Error getting dialog args:', e);
-            sendResponse({ success: false, error: e.toString() });
-        }
-        return true;
-    }
 
     // Handle panel initialization
     if (request.type === 'PANEL_LOADED') {
