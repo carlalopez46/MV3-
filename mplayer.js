@@ -126,9 +126,6 @@ function MacroPlayer(win_id) {
     if (typeof VariableManager === 'function') {
         this.varManager = new PlayerVariableManager(this);
     }
-    
-    // Track RUN nesting level for nested macro calls
-    this.runNestLevel = 0;
 }
 
 /**
@@ -148,7 +145,7 @@ MacroPlayer.prototype._buildMacroCandidates = function (macroPath) {
     // Check for hidden files (start with dot but no extension after)
     const lastSegment = macroPath.split(/[\/\\]/).pop();
     if (lastSegment.startsWith('.') && !/\.\w+$/.test(lastSegment)) {
-        return [lastSegment];
+        return [macroPath];
     }
     
     // Try with default .iim extension first, then raw name
@@ -4060,7 +4057,7 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
     const candidates = this._buildMacroCandidates(macroPath);
     
     // Increment nesting level
-    this.runNestLevel = (this.runNestLevel || 0) + 1;
+    this.runNestLevel++;
     
     let source = null;
     let resolvedPath = null;
