@@ -1,39 +1,122 @@
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
-// Minimal localStorage shim to prevent ReferenceErrors during early importScripts
-// execution in the MV3 service worker environment. A more complete polyfill is
-// provided in utils.js, but we need this guard so that utils.js itself can load
-// without the platform-provided localStorage API.
-(function () {
-    var needsShim = false;
+const _LOCALSTORAGE_PREFIX = '__imacros_ls__:';
+
+function createLocalStoragePolyfill(cache, prefix) {
+    return {
+        getItem: function (key) {
+            return Object.prototype.hasOwnProperty.call(cache, key) ? cache[key] : null;
+        },
+        setItem: function (key, value) {
+            cache[key] = String(value);
+
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                const payload = {};
+                payload[prefix + key] = String(value);
+                chrome.storage.local.set(payload, function () {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[iMacros SW] Failed to persist localStorage key:', key, chrome.runtime.lastError);
+                    }
+                });
+            }
+        },
+        removeItem: function (key) {
+            delete cache[key];
+
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.remove(prefix + key, function () {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[iMacros SW] Failed to remove localStorage key:', key, chrome.runtime.lastError);
+                    }
+                });
+            }
+        },
+        clear: function () {
+            Object.keys(cache).forEach(function (k) {
+                delete cache[k];
+            });
+
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.get(null, function (items) {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[iMacros SW] Failed to enumerate localStorage keys for clear:', chrome.runtime.lastError);
+                        return;
+                    }
+
+                    const keysToRemove = Object.keys(items || {}).filter(function (storageKey) {
+                        return storageKey.indexOf(prefix) === 0;
+                    });
+                    if (!keysToRemove.length) return;
+
+                    chrome.storage.local.remove(keysToRemove, function () {
+                        if (chrome.runtime && chrome.runtime.lastError) {
+                            console.warn('[iMacros SW] Failed to clear localStorage keys:', chrome.runtime.lastError);
+                        }
+                    });
+                });
+            }
+        },
+        key: function (index) {
+            return Object.keys(cache)[index] || null;
+        },
+        get length() {
+            return Object.keys(cache).length;
+        }
+    };
+}
+
+async function initializeLocalStoragePolyfill() {
+    let needsPolyfill = false;
     try {
-        // Check if localStorage exists and is accessible
-        needsShim = (typeof localStorage === 'undefined' || localStorage === null);
-    } catch (e) {
-        // ReferenceError in strict Service Worker environment
-        needsShim = true;
+        needsPolyfill = (typeof localStorage === 'undefined' || localStorage === null || localStorage.__isMinimalLocalStorageShim || localStorage.__isInMemoryShim);
+    } catch (err) {
+        needsPolyfill = true;
     }
 
-    if (needsShim) {
-        var memoryStore = new Map();
-        var shim = {
-            getItem: function (key) { return memoryStore.has(key) ? memoryStore.get(key) : null; },
-            setItem: function (key, value) { memoryStore.set(key, String(value)); },
-            removeItem: function (key) { memoryStore.delete(key); },
-            clear: function () { memoryStore.clear(); },
-            key: function (index) { return Array.from(memoryStore.keys())[index] || null; },
-            get length() { return memoryStore.size; },
-            __isMinimalLocalStorageShim: true,
-            __isInMemoryShim: true
-        };
-
-        // Set on all possible global scopes
-        if (typeof globalThis !== 'undefined') globalThis.localStorage = shim;
-        if (typeof self !== 'undefined') self.localStorage = shim;
+    if (!needsPolyfill) {
+        return;
     }
-})();
 
+    const cache = Object.create(null);
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        try {
+            const items = await new Promise((resolve, reject) => {
+                chrome.storage.local.get(null, (result) => {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        reject(chrome.runtime.lastError);
+                        return;
+                    }
+                    resolve(result || {});
+                });
+            });
+
+            let hydratedCount = 0;
+            Object.keys(items).forEach((storageKey) => {
+                if (storageKey.indexOf(_LOCALSTORAGE_PREFIX) !== 0) return;
+                const key = storageKey.slice(_LOCALSTORAGE_PREFIX.length);
+                cache[key] = String(items[storageKey]);
+                hydratedCount++;
+            });
+            console.log(`[iMacros SW] localStorage cache loaded synchronously: ${hydratedCount} items`);
+        } catch (err) {
+            console.error('[iMacros SW] Failed to hydrate localStorage cache:', err);
+        }
+    }
+
+    const polyfill = createLocalStoragePolyfill(cache, _LOCALSTORAGE_PREFIX);
+    polyfill.__isHydratedPolyfill = true;
+
+    if (typeof globalThis !== 'undefined') {
+        globalThis.localStorage = polyfill;
+        globalThis._localStorageData = cache;
+        globalThis._LOCALSTORAGE_PREFIX = _LOCALSTORAGE_PREFIX;
+    }
+}
+
+const localStorageInitPromise = initializeLocalStoragePolyfill();
+globalThis.localStorageInitPromise = localStorageInitPromise;
+await localStorageInitPromise;
 
 try {
     importScripts(
@@ -51,32 +134,6 @@ try {
     console.error('Failed to import scripts:', e);
     throw e;
 }
-
-// Hydrate localStorage polyfill from chrome.storage.local
-// This is critical for MV3 Service Workers where localStorage is not available
-(function hydrateLocalStoragePolyfill() {
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(null, function (items) {
-            if (chrome.runtime.lastError) {
-                console.warn('[iMacros SW] Failed to hydrate localStorage polyfill:', chrome.runtime.lastError);
-                return;
-            }
-            if (items && typeof _localStorageData !== 'undefined') {
-                // Only hydrate keys with the localStorage namespace prefix
-                // This avoids polluting localStorage with unrelated extension data
-                var prefix = (typeof _LOCALSTORAGE_PREFIX === 'string') ? _LOCALSTORAGE_PREFIX : '__imacros_ls__:';
-                var hydratedCount = 0;
-                Object.keys(items).forEach(function (storageKey) {
-                    if (storageKey.indexOf(prefix) !== 0) return;
-                    var key = storageKey.slice(prefix.length);
-                    _localStorageData[key] = String(items[storageKey]);
-                    hydratedCount++;
-                });
-                console.log('[iMacros SW] localStorage polyfill hydrated with', hydratedCount, 'items');
-            }
-        });
-    }
-})();
 
 // Background Service Worker for iMacros MV3
 // Handles Offscreen Document lifecycle and event forwarding
