@@ -672,6 +672,7 @@ Recorder.prototype.packKeyPressEvent = function (extra) {
 
     if (!this.password || !this.canEncrypt) {
         console.warn("Skipping encryption for keypress: password not set or encryption disabled");
+        this.encryptKeypressEvent = false;
         return;
     }
 
