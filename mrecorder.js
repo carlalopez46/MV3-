@@ -671,14 +671,17 @@ Recorder.prototype.packKeyPressEvent = function (extra) {
     if (!(this.encryptKeypressEvent = extra.encrypt))
         return  // do nothing
 
-    if (!this.password || !this.canEncrypt) {
+    if (!this.password) {
         // Only warn once per session when password is missing
-        if (!this.keypressEncryptWarningShown && !this.password) {
+        if (!this.keypressEncryptWarningShown) {
             console.warn("Skipping encryption for keypress: password not set");
             this.keypressEncryptWarningShown = true;
         }
-        // Disable encryption for subsequent events to prevent repeated warnings/prompts
-        this.canEncrypt = false;
+        this.encryptKeypressEvent = false;
+        return;
+    }
+
+    if (!this.canEncrypt) {
         return;
     }
 
