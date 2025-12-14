@@ -1697,7 +1697,7 @@ MacroPlayer.prototype.ActionTable["events"] = function (cmd) {
                 () => this.dispatchKeyboardEvent(details)
             ), Promise.resolve())
         } else {
-            throw RuntimeError("Can not process event type " + type, 711)
+            throw new RuntimeError("Can not process event type " + type, 711)
         }
     }).then(
         () => this.next("EVENTS")
@@ -2847,18 +2847,18 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
             this.dataSourceFolder = afio.openNode(param);
             this.dataSourceFolder.exists().then(exists => {
                 if (!exists) {
-                    this.handleError(new RuntimeError(
+                    throw new RuntimeError(
                         "can not write to FOLDER_DATASOURCE: " +
                         param + " does not exist or not accessible.", 732
-                    ));
+                    );
                 }
             }).then(() => {
                 this.next("SET");
             }).catch(err => {
-                this.handleError(new RuntimeError(
+                throw new RuntimeError(
                     "can not open FOLDER_DATASOURCE: " +
                     param + ", error " + err.message, 732
-                ));
+                );
             });
             return;
         case "!folder_download":
@@ -2870,18 +2870,18 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
             this.defDownloadFolder = afio.openNode(param);
             this.defDownloadFolder.exists().then(exists => {
                 if (!exists) {
-                    this.handleError(new RuntimeError(
+                    throw new RuntimeError(
                         "can not write to FOLDER_DOWNLOAD: " +
                         param + " does not exist or not accessible.", 732
-                    ));
+                    );
                 }
             }).then(() => {
                 this.next("SET");
             }).catch(err => {
-                this.handleError(new RuntimeError(
+                throw new RuntimeError(
                     "can not open FOLDER_DOWNLOAD: " +
                     param + ", error " + err.message, 732
-                ));
+                );
             });
             return;
         case "!timeout": case "!timeout_page":

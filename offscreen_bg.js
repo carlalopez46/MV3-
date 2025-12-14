@@ -846,6 +846,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
             // Function to attempt retrieving args with retries
             const tryGetArgs = (attemptsLeft) => {
+                if (typeof dialogUtils === 'undefined') {
+                    console.error("[Offscreen] dialogUtils is undefined (utils.js not loaded?)");
+                    sendResponse({ success: false, error: "dialogUtils undefined" });
+                    return;
+                }
                 try {
                     const args = dialogUtils.getDialogArgs(winId);
                     sendResponse({ success: true, args: args });
@@ -868,6 +873,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         // Handle SET_DIALOG_RESULT from background (forwarded from dialog window)
         if (request.type === 'SET_DIALOG_RESULT') {
             try {
+                if (typeof dialogUtils === 'undefined') {
+                    console.error("[Offscreen] dialogUtils is undefined (utils.js not loaded?)");
+                    sendResponse({ success: false, error: "dialogUtils undefined" });
+                    return true;
+                }
                 const winId = parseInt(request.windowId, 10);
                 if (!Number.isInteger(winId) || winId <= 0) {
                     console.error("[Offscreen] Invalid windowId for SET_DIALOG_RESULT:", request.windowId);

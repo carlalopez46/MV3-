@@ -1984,25 +1984,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // NOTE: openPanel command is handled by the main handler above (lines 221-302)
     // Do NOT add duplicate handler here - it causes panel to open twice
 
-    // Forward topic-based messages to Offscreen (e.g. from content scripts)
-    // This handles query-state, record-action, etc. preventing "Unknown command" errors
-    const forwardTopics = ['query-state', 'record-action', 'password-element-focused', 'on-rclick', 'save'];
-    if (msg.topic && forwardTopics.includes(msg.topic)) {
-        sendMessageToOffscreen({
-            command: 'FORWARD_MESSAGE',
-            topic: msg.topic,
-            data: msg.data,
-            tab_id: sender.tab ? sender.tab.id : null,
-            win_id: sender.tab ? sender.tab.windowId : null
-        }).then(response => {
-            sendResponse(response);
-        }).catch(err => {
-            console.error("[iMacros SW] Failed to forward topic " + msg.topic + " to offscreen:", err);
-            // Return idle state to prevent 'missing state' errors in recorder.js
-            sendResponse({ success: false, error: err.message, state: 'idle' });
-        });
-        return true;
-    }
+
 
     return false;
 });
