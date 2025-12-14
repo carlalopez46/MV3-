@@ -102,7 +102,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (request.target !== 'offscreen') return;
 
     const msgLabel = request.type || request.command;
-    console.log('[iMacros Offscreen] Received message:', msgLabel, request);
+    if (msgLabel !== 'QUERY_STATE' && msgLabel !== 'TAB_UPDATED') {
+        console.log('[iMacros Offscreen] Received message:', msgLabel, request);
+    }
 
     // Handle quick state query from Service Worker or panel
     if (request.type === 'QUERY_STATE') {

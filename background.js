@@ -210,6 +210,16 @@ async function forwardToOffscreen(payload) {
     return messagingBus.sendRuntime({ target: 'offscreen', ...payload });
 }
 
+// Handle long-lived connections (e.g. from panel.js for lifecycle management)
+chrome.runtime.onConnect.addListener((port) => {
+    if (port.name === 'panel-lifecycle') {
+        console.log('[iMacros SW] Panel connected for lifecycle monitoring');
+        port.onDisconnect.addListener(() => {
+            console.log('[iMacros SW] Panel disconnected');
+        });
+    }
+});
+
 // Create Offscreen Document
 // Lock to prevent concurrent Offscreen creation attempts
 let creatingOffscreen = null;
