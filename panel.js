@@ -1,10 +1,10 @@
 /* panel.js - MV3対応版 */
 
 // 選択中のマクロ情報を保持する変数
-var selectedMacro = null;
+let selectedMacro = null;
 
 // パネルの状態をキャッシュ
-var panelState = {
+let panelState = {
     isRecording: false,
     isPlaying: false,
     currentMacro: null
