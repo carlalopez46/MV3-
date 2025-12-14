@@ -23,7 +23,9 @@ var showInfo = (typeof globalThis.showInfo === 'function')
             // console may not be available in every embedding context
         }
     };
-globalThis.showInfo = showInfo;
+if (typeof globalThis.showInfo !== 'function') {
+    globalThis.showInfo = showInfo;
+}
 
 // Variable manager wrapper that keeps the legacy MacroPlayer variable
 // storage in sync with the newer VariableManager utility loaded by the
@@ -55,6 +57,10 @@ if (typeof VariableManager === 'function') {
 
         if (/^VAR\d+$/i.test(name)) {
             const idx = parseInt(name.slice(3), 10);
+            if (idx < 0 || idx > 9999) {
+                console.warn('[PlayerVariableManager] Variable index out of range:', idx);
+                return;
+            }
             this.player.vars[idx] = value;
         }
 
@@ -74,7 +80,7 @@ if (typeof VariableManager === 'function') {
 
     PlayerVariableManager.prototype.clearGlobalVars = function () {
         VariableManager.prototype.clearGlobalVars.call(this);
-        this.player.vars = new Array();
+        this.player.vars.length = 0;
     };
 }
 
