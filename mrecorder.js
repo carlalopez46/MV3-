@@ -89,8 +89,8 @@ Recorder.prototype.start = function () {
     // console.info("start recording");
     this.writeEncryptionType = true;
     this.password = null;
-    this.canEncrypt = true
-    this.keypressEncryptWarningShown = false
+    this.canEncrypt = true;
+    this.keypressEncryptWarningShown = false;
     context.updateState(this.win_id, "recording");
     // MV3: Send message to panel
     try {
@@ -672,8 +672,13 @@ Recorder.prototype.packKeyPressEvent = function (extra) {
         return  // do nothing
 
     if (!this.password || !this.canEncrypt) {
-        console.warn("Skipping encryption for keypress: password not set or encryption disabled");
-        this.encryptKeypressEvent = false;
+        // Only warn once per session when password is missing
+        if (!this.keypressEncryptWarningShown && !this.password) {
+            console.warn("Skipping encryption for keypress: password not set or encryption disabled");
+            this.keypressEncryptWarningShown = true;
+        }
+        // Disable encryption for subsequent events to prevent repeated warnings/prompts
+        this.canEncrypt = false;
         return;
     }
 
