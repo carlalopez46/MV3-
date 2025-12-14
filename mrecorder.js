@@ -89,8 +89,8 @@ Recorder.prototype.start = function () {
     // console.info("start recording");
     this.writeEncryptionType = true;
     this.password = null;
-    this.canEncrypt = true
-    this.keypressEncryptWarningShown = false
+    this.canEncrypt = true;
+    this.keypressEncryptWarningShown = false;
     context.updateState(this.win_id, "recording");
     // MV3: Send message to panel
     try {
@@ -181,8 +181,12 @@ Recorder.prototype.start = function () {
                 recordMode: recordMode
             }
         }, recorder.win_id);
-        // save intial commands
-        recorder.recordAction("VERSION BUILD=" + Storage.getChar("version").replace(/\./g, "") + " RECORDER=CR");
+        // save initial commands
+        const versionHeader = "VERSION BUILD=" + Storage.getChar("version").replace(/\./g, "") + " RECORDER=CR";
+        const headerPattern = /^\s*VERSION BUILD=/i;
+        if (!recorder.actions.length || !headerPattern.test(recorder.actions[0])) {
+            recorder.recordAction(versionHeader);
+        }
         recorder.recordAction("TAB T=1");
         if (!/^chrome:\/\//.test(tabs[0].url)) {
             console.log("[iMacros MV3 Recorder] Recording initial URL: " + tabs[0].url);
@@ -667,12 +671,17 @@ Recorder.prototype.packKeyPressEvent = function (extra) {
     if (!(this.encryptKeypressEvent = extra.encrypt))
         return  // do nothing
 
-    if (!this.password || !this.canEncrypt) {
+    if (!this.password) {
+        // Only warn once per session when password is missing
         if (!this.keypressEncryptWarningShown) {
-            console.warn("Skipping encryption for keypress: password not set or encryption disabled");
+            console.warn("Skipping encryption for keypress: password not set");
             this.keypressEncryptWarningShown = true;
         }
-        this.canEncrypt = false;
+        this.encryptKeypressEvent = false;
+        return;
+    }
+
+    if (!this.canEncrypt) {
         return;
     }
 

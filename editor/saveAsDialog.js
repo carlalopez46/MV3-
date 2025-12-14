@@ -6,10 +6,9 @@ let args;
 let dialogWindowId = null;
 
 window.addEventListener("load", function () {
-    // Primary MV3 path: request dialog args from background
     // Primary MV3 path: request dialog args from background with retry
     // Check for key in URL first (MV3/Offscreen compatibility)
-    var urlParams = new URLSearchParams(window.location.search);
+    const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.has('key')) {
         fallbackToSessionStorage();
         return;
@@ -95,7 +94,11 @@ window.addEventListener("load", function () {
             args = result[dialogKey];
 
             // Clean up the session storage
-            storage.remove([dialogKey]);
+            storage.remove([dialogKey], function() {
+                if (chrome.runtime.lastError) {
+                    console.warn("[iMacros] Failed to clean up dialog key:", chrome.runtime.lastError);
+                }
+            });
 
             initializeWithAfio();
         });
@@ -177,26 +180,11 @@ window.addEventListener("load", function () {
         if (file_type) {
             filesRadioEl.checked = true;
         } else {
-            bookmarksRadioEl.checked = true;
-
-            var afioCandidate = (typeof afio !== 'undefined' && afio) ? afio : (typeof window !== 'undefined' ? window.afio : undefined);
-
-            var selectFilesIfAvailable = function () {
-                if (typeof afioCandidate !== 'undefined' && afioCandidate && typeof afioCandidate.getBackendType === 'function') {
-                    var backendType = afioCandidate.getBackendType();
-                    if (backendType && backendType !== 'none') {
-                        filesRadioEl.checked = true;
-                        bookmarksRadioEl.checked = false;
-                    }
-                }
-            };
-
-            if (afioCandidate && afioCandidate._initPromise && typeof afioCandidate._initPromise.then === 'function') {
-                afioCandidate._initPromise.then(selectFilesIfAvailable).catch(function (err) {
-                    console.error('[iMacros] afio initialization failed while setting default storage:', err);
-                });
+            // Default to Files if available, otherwise Bookmarks
+            if (typeof afio !== 'undefined' && afio.getBackendType() !== 'none') {
+                document.getElementById("radio-files-tree").checked = true;
             } else {
-                selectFilesIfAvailable();
+                document.getElementById("radio-bookmarks-tree").checked = true;
             }
         }
 

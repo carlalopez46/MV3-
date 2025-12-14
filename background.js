@@ -66,7 +66,7 @@ function createLocalStoragePolyfill(cache, prefix) {
     };
 }
 
-function initializeLocalStoragePolyfill() {
+async function initializeLocalStoragePolyfill() {
     let needsPolyfill = false;
     try {
         needsPolyfill = (typeof localStorage === 'undefined' || localStorage === null || localStorage.__isMinimalLocalStorageShim || localStorage.__isInMemoryShim);
@@ -75,58 +75,55 @@ function initializeLocalStoragePolyfill() {
     }
 
     if (!needsPolyfill) {
-        return Promise.resolve();
+        return;
     }
 
     const cache = Object.create(null);
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        try {
+            const items = await new Promise((resolve, reject) => {
+                chrome.storage.local.get(null, (result) => {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        reject(chrome.runtime.lastError);
+                        return;
+                    }
+                    resolve(result || {});
+                });
+            });
+
+            let hydratedCount = 0;
+            Object.keys(items).forEach((storageKey) => {
+                if (storageKey.indexOf(_LOCALSTORAGE_PREFIX) !== 0) return;
+                const key = storageKey.slice(_LOCALSTORAGE_PREFIX.length);
+                cache[key] = String(items[storageKey]);
+                hydratedCount++;
+            });
+            console.log(`[iMacros SW] localStorage cache loaded asynchronously: ${hydratedCount} items`);
+        } catch (err) {
+            console.error('[iMacros SW] Failed to hydrate localStorage cache:', err);
+            // Optional: Throwing here would prevent starting with an empty cache if that is critical
+            // throw err;
+        }
+    }
+
     const polyfill = createLocalStoragePolyfill(cache, _LOCALSTORAGE_PREFIX);
+    polyfill.__isHydratedPolyfill = true;
 
     if (typeof globalThis !== 'undefined') {
         globalThis.localStorage = polyfill;
         globalThis._localStorageData = cache;
         globalThis._LOCALSTORAGE_PREFIX = _LOCALSTORAGE_PREFIX;
     }
-
-    return (async () => {
-        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-            try {
-                const items = await new Promise((resolve, reject) => {
-                    chrome.storage.local.get(null, (result) => {
-                        if (chrome.runtime && chrome.runtime.lastError) {
-                            reject(chrome.runtime.lastError);
-                            return;
-                        }
-                        resolve(result || {});
-                    });
-                });
-
-                let hydratedCount = 0;
-                Object.keys(items).forEach((storageKey) => {
-                    if (storageKey.indexOf(_LOCALSTORAGE_PREFIX) !== 0) return;
-                    const key = storageKey.slice(_LOCALSTORAGE_PREFIX.length);
-                    cache[key] = String(items[storageKey]);
-                    hydratedCount++;
-                });
-                console.log(`[iMacros SW] localStorage cache loaded synchronously: ${hydratedCount} items`);
-            } catch (err) {
-                console.error('[iMacros SW] Failed to hydrate localStorage cache:', err);
-            }
-        }
-
-        polyfill.__isHydratedPolyfill = true;
-    })();
 }
 
 const localStorageInitPromise = initializeLocalStoragePolyfill();
 globalThis.localStorageInitPromise = localStorageInitPromise;
-(function bootstrapBackground() {
-    localStorageInitPromise.catch((err) => {
-        console.error('[iMacros SW] localStorage polyfill initialization failed:', err);
-    });
+await localStorageInitPromise;
 
 try {
     importScripts(
         'utils.js',
+        'bg_common.js',
         'badge.js',
         'promise-utils.js',
         'errorLogger.js',
@@ -156,8 +153,8 @@ const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
 });
 
 const sessionStorage = chrome.storage ? chrome.storage.session : null;
-const localStorage = chrome.storage ? chrome.storage.local : null;
-const storageCandidates = [sessionStorage, localStorage].filter(Boolean);
+const localStorageBackend = chrome.storage ? chrome.storage.local : null;
+const storageCandidates = [sessionStorage, localStorageBackend].filter(Boolean);
 
 function removeFromSessionOrLocal(keys) {
     if (!storageCandidates.length) return Promise.reject(new Error('Storage not available'));
@@ -209,8 +206,8 @@ async function performStorageWithFallback(method, payload) {
     throw lastError || new Error(`Storage ${method} failed`);
 }
 
-const executionStateStorage = sessionStorage || localStorage;
-const clearStaleExecutionState = executionStateStorage === localStorage
+const executionStateStorage = sessionStorage || localStorageBackend;
+const clearStaleExecutionState = executionStateStorage === localStorageBackend
     ? removeFromSessionOrLocal(['executionState']).catch((error) => {
         console.warn('[iMacros SW] Failed to clear persisted execution state on startup:', error);
     })
@@ -1773,6 +1770,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse({ success: true });
         });
 
+        return true;
+    }
+
+    // --- 保存 (save) ---
+    if (msg.command === "save") {
+        console.log("[iMacros SW] Save request for:", msg.data && msg.data.name);
+        try {
+            // Use sharedSave from bg_common.js
+            sharedSave(msg.data, msg.overwrite, function (result) {
+                if (result && result.error) {
+                    sendResponse({ success: false, error: result.error });
+                } else {
+                    sendResponse({ success: true, result: result });
+                }
+            });
+        } catch (e) {
+            console.error("[iMacros SW] Save error:", e);
+            sendResponse({ success: false, error: e.message });
+        }
         return true;
     }
 
