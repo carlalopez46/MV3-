@@ -76,7 +76,7 @@ function Recorder(win_id) {
 Recorder.prototype.checkForFrameChange = function (frame) {
     if (frame.number != this.currentFrameNumber) {
         this.currentFrameNumber = frame.number;
-        if (0 && frame.name) {
+        if (frame.name) {
             this.recordAction("FRAME NAME=\"" + frame.name + "\"");
         } else {
             this.recordAction("FRAME F=" + frame.number.toString());
@@ -1148,6 +1148,33 @@ Recorder.prototype.onAuthRequired = function (details, callback) {
     if (!typ.length)
         typ = "no";
 
+    const openLoginDialog = (cypherData) => {
+        dialogUtils.openDialog(
+            "loginDialog.html",
+            "iMacros Login Dialog",
+            {
+                cypherData: cypherData,
+                details: details,
+                callback: callback,
+                recorder: this
+            },
+            { width: 350, height: 170 }
+        ).then((response) => {
+            if (typeof callback === "function") {
+                if (response && (response.cancelled || response.canceled)) {
+                    callback({ cancel: true });
+                } else {
+                    callback(response);
+                }
+            }
+        }).catch((err) => {
+            console.error("[iMacros] Failed to open login dialog:", err);
+            if (typeof callback === "function") {
+                callback({ cancel: true });
+            }
+        });
+    };
+
     switch (typ) {
         case "no":
             enc.encrypt = false;
@@ -1175,19 +1202,25 @@ Recorder.prototype.onAuthRequired = function (details, callback) {
             }
 
             if (!Rijndael.tempPassword) {    // ask password now
-                var features = "titlebar=no,menubar=no,location=no," +
-                    "resizable=yes,scrollbars=no,status=no," +
-                    "width=350,height=170";
-                var win = window.open("passwordDialog.html",
-                    "iMacros Password Dialog", features);
-                win.args = {
-                    shouldProceed: true,
-                    type: "loginDialog",
-                    // CHEAT: passwordDialog will call auth callback
-                    // with false user/pwd pair so next time onAuthRequired
-                    // will have temp password
-                    callback: callback
-                };
+                dialogUtils.openDialog(
+                    "passwordDialog.html",
+                    "iMacros Password Dialog",
+                    { shouldProceed: true, type: "loginDialog" },
+                    { width: 350, height: 170 }
+                ).then((response) => {
+                    if (response && !response.canceled && response.password) {
+                        Rijndael.tempPassword = response.password;
+                        enc.key = Rijndael.tempPassword;
+                        openLoginDialog(enc);
+                    } else if (typeof callback === "function") {
+                        callback({ cancel: true });
+                    }
+                }).catch((err) => {
+                    console.error("[iMacros] Failed to open password dialog:", err);
+                    if (typeof callback === "function") {
+                        callback({ cancel: true });
+                    }
+                });
                 return;
             } else {
                 enc.key = Rijndael.tempPassword;
@@ -1195,17 +1228,7 @@ Recorder.prototype.onAuthRequired = function (details, callback) {
             break;
     }
 
-    var features = "titlebar=no,menubar=no,location=no," +
-        "resizable=yes,scrollbars=no,status=no," +
-        "width=350,height=170";
-    var win = window.open("loginDialog.html",
-        "iMacros Login Dialog", features);
-    win.args = {
-        cypherData: enc,
-        details: details,
-        callback: callback,
-        recorder: this
-    };
+    openLoginDialog(enc);
 };
 
 
@@ -1263,12 +1286,34 @@ Recorder.prototype.addListeners = function () {
     }
 
     if (chrome.contextMenus && chrome.contextMenus.onClicked) {
-        chrome.contextMenus.onClicked.addListener(this._onContextMenu);
+        if (!chrome.contextMenus.onClicked.hasListener(this._onContextMenu)) {
+            chrome.contextMenus.onClicked.addListener(this._onContextMenu);
+        }
         const cm_title = "Automate Save As command";
         // Generate unique ID for context menu item (required in MV3)
         const cm_id = `imacros-save-as-${this.win_id}`;
         this.cm_id = chrome.contextMenus.create(
-            { id: cm_id, title: cm_title, contexts: ["link", "audio", "video", "image"] }
+            { id: cm_id, title: cm_title, contexts: ["link", "audio", "video", "image"] },
+            () => {
+                if (chrome.runtime.lastError) {
+                    if (chrome.runtime.lastError.message &&
+                        chrome.runtime.lastError.message.includes("duplicate id")) {
+                        chrome.contextMenus.update(
+                            cm_id,
+                            { title: cm_title, contexts: ["link", "audio", "video", "image"] },
+                            () => {
+                                if (chrome.runtime.lastError) {
+                                    console.debug("[Recorder] Context menu update error:", chrome.runtime.lastError.message);
+                                    this.cm_id = null;
+                                }
+                            }
+                        );
+                    } else {
+                        console.debug("[Recorder] Context menu create error:", chrome.runtime.lastError.message);
+                        this.cm_id = null;
+                    }
+                }
+            }
         );
     }
 
