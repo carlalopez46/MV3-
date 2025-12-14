@@ -289,7 +289,7 @@ var imns = {
             }
         };
 
-        const esc_re = new RegExp("\\\\(?:[0btnvfr\"\'\\\\]|x[\da-fA-F]{2}|u[\da-fA-F]{4})", "g");
+        const esc_re = /\\(?:[0btnvfr"'\\]|x[\da-fA-F]{2}|u[\da-fA-F]{4})/g;
 
         if (m = line.match(line_re)) {
             line = m[1];        // 'unquote' the line

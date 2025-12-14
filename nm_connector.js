@@ -304,11 +304,9 @@ const nm_connector = {
     handleCommand: function (clientId, cmd) {
         let request;
         try {
-            // console.debug("handleCommand %s for clientId %d", cmd, clientId);
             request = JSON.parse(cmd);
         } catch (e) {
-            console.error(e);
-            // should never happen
+            console.error("Failed to parse command:", e);
             this.sendResponse(clientId,
                 "Can not parse request \"" + cmd + "\"", -1);
             return;
