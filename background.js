@@ -218,17 +218,14 @@ async function createOffscreen() {
     if (creatingOffscreen) return creatingOffscreen;
 
     creatingOffscreen = (async () => {
-        try {
-            // Check if offscreen document already exists
-            const hasDocument = await chrome.offscreen.hasDocument();
-            if (hasDocument) {
-                // verify if it's responding? (Optional optimization)
-                // console.log('[iMacros SW] Offscreen document already exists');
+
+        // Check if offscreen document already exists using clients API (Service Worker)
+        if (self.clients) {
+            const clients = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+            const exists = clients.some(c => c.url.endsWith('offscreen.html'));
+            if (exists) {
                 return;
             }
-        } catch (e) {
-            console.error('[iMacros SW] Error checking offscreen document:', e);
-            // If check fails, we proceed to try creating it.
         }
 
         try {
@@ -443,6 +440,45 @@ if (chrome.downloads && chrome.downloads.onChanged) {
     });
 }
 
+// Helper function to execute clipboard write in a tab
+async function executeClipboardWrite(tab, text, sendResponse) {
+    // Skip restricted URLs - return success since clipboard is non-critical
+    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:')) {
+        console.warn('[iMacros SW] Cannot write clipboard on restricted URL:', tab.url);
+        sendResponse({ success: true, warning: 'Restricted URL skipped' });
+        return;
+    }
+
+    try {
+        // Use chrome.scripting.executeScript to write to clipboard in the tab's context
+        const results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: (textToWrite) => {
+                return navigator.clipboard.writeText(textToWrite)
+                    .then(() => ({ success: true }))
+                    .catch(err => ({ success: false, error: err.message }));
+            },
+            args: [text]
+        });
+
+        if (results && results[0] && results[0].result) {
+            const result = results[0].result;
+            if (result.success) {
+                console.log('[iMacros SW] Clipboard write successful via tab');
+                sendResponse({ success: true });
+            } else {
+                console.warn('[iMacros SW] Clipboard write failed in tab:', result.error);
+                sendResponse({ success: false, error: result.error });
+            }
+        } else {
+            sendResponse({ success: false, error: 'No result from script' });
+        }
+    } catch (err) {
+        console.error('[iMacros SW] executeScript failed for clipboard:', err);
+        sendResponse({ success: false, error: err.message });
+    }
+}
+
 
 // Keep-alive logic (optional, but good for stability)
 // If Offscreen sends a keep-alive message, we can respond to keep SW alive
@@ -456,6 +492,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     const isValidTabId = (value) => Number.isInteger(value) && value >= 0;
     const isValidObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
+
+    // Debug: Log all messages with command or type
+    if (msg.command || msg.type) {
+        console.log('[iMacros SW] Message received:', {
+            command: msg.command,
+            type: msg.type,
+            sender: sender.url || sender.id
+        });
+    }
 
     if (msg.keepAlive) {
         sendResponse({ alive: true });
@@ -731,6 +776,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // Handle openDialog request (proxy for Offscreen)
     if (msg.command === "openDialog") {
+        console.log('[iMacros SW] Received openDialog request:', msg);
         const createData = {
             url: msg.url.indexOf('://') === -1 ? chrome.runtime.getURL(msg.url) : msg.url,
             type: "popup",
@@ -766,6 +812,62 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
+    // Handle clipboard write request from Offscreen Document
+    // Offscreen Document cannot access clipboard, so we proxy through the active tab
+    if (msg.command === "CLIPBOARD_WRITE") {
+        const textToWrite = msg.text;
+
+        // Helper to check if a tab is usable for clipboard operations
+        const isUsableTab = (tab) => {
+            return tab && tab.url &&
+                !tab.url.startsWith('chrome://') &&
+                !tab.url.startsWith('chrome-extension://') &&
+                !tab.url.startsWith('about:') &&
+                !tab.url.startsWith('devtools://');
+        };
+
+        // Helper to find a usable tab from a list
+        const findUsableTab = (tabs) => {
+            if (!tabs || tabs.length === 0) return null;
+            return tabs.find(isUsableTab) || null;
+        };
+
+        // First, try to find an active web page tab in any window
+        chrome.tabs.query({ active: true }, (activeTabs) => {
+            if (chrome.runtime.lastError) {
+                console.error('[iMacros SW] CLIPBOARD_WRITE query error:', chrome.runtime.lastError);
+                sendResponse({ success: false, error: chrome.runtime.lastError.message });
+                return;
+            }
+
+            const usableActiveTab = findUsableTab(activeTabs);
+            if (usableActiveTab) {
+                executeClipboardWrite(usableActiveTab, textToWrite, sendResponse);
+                return;
+            }
+
+            // No usable active tab found - try to find any web page tab
+            chrome.tabs.query({}, (allTabs) => {
+                if (chrome.runtime.lastError) {
+                    console.warn('[iMacros SW] CLIPBOARD_WRITE fallback query error:', chrome.runtime.lastError);
+                    sendResponse({ success: false, error: 'No usable tab found' });
+                    return;
+                }
+
+                const usableTab = findUsableTab(allTabs);
+                if (usableTab) {
+                    console.log('[iMacros SW] Using fallback tab for clipboard:', usableTab.url);
+                    executeClipboardWrite(usableTab, textToWrite, sendResponse);
+                } else {
+                    console.warn('[iMacros SW] No web page tab found for clipboard write');
+                    // Return success anyway - clipboard is non-critical
+                    sendResponse({ success: true, warning: 'No web page tab available' });
+                }
+            });
+        });
+        return true;
+    }
+
     // Handle notification display request from Offscreen Document
     if (msg.command === "showNotification") {
         chrome.notifications.create(msg.notificationId, msg.options, (notificationId) => {
@@ -775,6 +877,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
         return true;
     }
+
+
 
     // --- UPDATE_BADGE: Proxy badge updates from Offscreen Document ---
     if (msg.type === 'UPDATE_BADGE') {
@@ -1671,6 +1775,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
         return true; // Keep channel open for async response
     }
+
+    // --- Forward messages from Content Scripts (Connector) to Offscreen ---
+    // Content Scripts use connector.postMessage which sends { topic: "...", data: ... }
+    // These need to be forwarded to Offscreen where the backend logic (communicator handlers) resides.
+    if (msg.topic && !msg.command && !msg.type && !msg.keepAlive) {
+        // Forward to Offscreen Document via FORWARD_MESSAGE command
+        // This maps to Offscreen's onMessage -> FORWARD_MESSAGE -> communicator._execHandlers
+        forwardToOffscreen({
+            command: 'FORWARD_MESSAGE',
+            topic: msg.topic,
+            data: msg.data,
+            tab_id: sender.tab ? sender.tab.id : null,
+            win_id: sender.tab ? sender.tab.windowId : null
+        }).then(response => {
+            sendResponse(response);
+        }).catch(error => {
+            // Suppress errors for common noise like channel closing during page unload
+            const isNoise = error && error.message && (
+                error.message.includes("closed") ||
+                error.message.includes("receiving end does not exist")
+            );
+            if (!isNoise) {
+                console.warn('[iMacros SW] Failed to forward generic topic message:', msg.topic, error);
+            }
+            sendResponse({
+                error: error ? error.message : "Forwarding failed",
+                state: 'idle'
+            });
+        });
+        return true; // Keep channel open
+    }
 });
 
 // Forward tab update events to Offscreen Document for macro player
@@ -1816,6 +1951,8 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
 
 // Handle the runMacroByUrl command in the message listener
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+
+
     if (msg.command === 'runMacroByUrl' && msg.target === 'background') {
         // Forward to offscreen document
         sendMessageToOffscreen({
@@ -1831,8 +1968,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
+    if (msg.command === 'INSTALL_SAMPLE_BOOKMARKLETS') {
+        if (typeof globalScope !== 'undefined' && globalScope.installSampleBookmarkletMacros) {
+            console.log("[iMacros SW] Installing sample bookmarklets command received");
+            globalScope.installSampleBookmarkletMacros().catch(err => {
+                console.warn("[iMacros SW] Failed to install sample bookmarklets:", err);
+            });
+        }
+        // Respond immediately as installation is async and not critical for response
+        sendResponse({ success: true });
+        return false;
+    }
+
+
     // NOTE: openPanel command is handled by the main handler above (lines 221-302)
     // Do NOT add duplicate handler here - it causes panel to open twice
+
+
+
+    return false;
 });
 
 // NOTE: MessagingBus class is defined in mv3_messaging_bus.js (imported via importScripts)

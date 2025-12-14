@@ -35,8 +35,11 @@ window.addEventListener("message", function (event) {
         }
 
         // Create a function with variables as parameters and evaluate the expression
-        // This injects all macro variables into the eval scope
-        var evalFunc = Function.apply(null, paramNames.concat('return (' + event.data.expression + ')'));
+        // We use eval() inside the function to support both simple expressions and multi-statement scripts
+        // and to automatically return the result of the last expression, mimicking standard eval() behavior.
+        // The expression is stringified to safely pass it into the generated function's source.
+        var functionBody = 'return eval(' + JSON.stringify(event.data.expression) + ');';
+        var evalFunc = Function.apply(null, paramNames.concat(functionBody));
         response.result = evalFunc.apply(null, paramValues);
     } catch (e) {
         console.error("[iMacros Sandbox Error]", e.message || e);

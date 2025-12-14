@@ -599,19 +599,51 @@ var imns = {
         },
 
         _writeClipboardFallback: function (str) {
+            var self = this;
+
+            // Check if we're in an Offscreen Document context (no focus, clipboard fails)
+            var isOffscreenContext = (typeof document !== 'undefined' &&
+                document.location &&
+                document.location.pathname.includes('offscreen'));
+
+            // If in Offscreen Document, proxy through Service Worker -> Content Script
+            if (isOffscreenContext) {
+                console.log("[iMacros] Clipboard write: proxying through content script");
+                return new Promise(function (resolve, reject) {
+                    chrome.runtime.sendMessage({
+                        command: 'CLIPBOARD_WRITE',
+                        text: str
+                    }, function (response) {
+                        if (chrome.runtime.lastError) {
+                            console.warn("[iMacros] Clipboard write proxy failed:", chrome.runtime.lastError.message);
+                            // Don't fail the macro - clipboard is non-critical
+                            resolve();
+                            return;
+                        }
+                        if (response && response.success) {
+                            resolve();
+                        } else {
+                            console.warn("[iMacros] Clipboard write failed:", response && response.error);
+                            // Don't fail the macro - clipboard is non-critical
+                            resolve();
+                        }
+                    });
+                });
+            }
+
             // Try Clipboard API first if available (modern browsers)
             if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
                 return navigator.clipboard.writeText(str).catch(function (err) {
                     console.error("[iMacros] Clipboard write failed:", err);
-                    // Don't throw - return rejected promise for caller to handle
-                    return Promise.reject(new Error("Clipboard write failed: " + err.message));
+                    // Don't throw - return resolved promise (clipboard is non-critical)
+                    return Promise.resolve();
                 });
             }
 
             // Fallback to DOM method if available (content scripts, popups)
             if (typeof document !== 'undefined' && document.body) {
                 try {
-                    var x = this._check_area();
+                    var x = self._check_area();
                     x.value = str;
                     x.focus();
                     x.select();
@@ -619,11 +651,11 @@ var imns = {
                     return Promise.resolve();
                 } catch (e) {
                     console.error("[iMacros] Legacy clipboard write failed:", e);
-                    return Promise.reject(e);
+                    return Promise.resolve(); // Don't fail the macro
                 }
             }
 
-            // No clipboard access available - return rejected promise
+            // No clipboard access available - return resolved (non-critical)
             console.warn("[iMacros] Clipboard API not available in this context");
             return Promise.resolve();
         },
@@ -1190,6 +1222,7 @@ var dialogUtils = (function () {
                         }
 
                         // Mirror the normal path by registering args/resolver locally so GET_DIALOG_ARGS works
+                        console.log('[iMacros Utils] Setting dialog args for window:', win.id);
                         dialogArgs.set(win.id, args);
                         dialogResolvers.set(win.id, resolve);
 
@@ -1277,6 +1310,10 @@ function getRedirectURL(id_or_kw) {
 }
 
 function getRedirFromString(idString) {
+    // Custom redirect URL for welcome page
+    if (idString === "welcome") {
+        return getRedirectURL("welcome");
+    }
     const version = getSafeManifestVersion();
     const prefix = `http://rd.imacros.net/redirect.aspx?type=CR&version=${version}`;
     return `${prefix}&helpid=${idString}`;

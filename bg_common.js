@@ -88,19 +88,19 @@ globalScope.afioCache = {
 globalScope.backgroundFileSyncBridge = null;
 
 globalScope.ensureBackgroundFileSyncBridge = function () {
-    if (backgroundFileSyncBridge || typeof FileSyncBridge === 'undefined' || typeof afio === 'undefined') {
-        return backgroundFileSyncBridge;
+    if (globalScope.backgroundFileSyncBridge || typeof FileSyncBridge === 'undefined' || typeof afio === 'undefined') {
+        return globalScope.backgroundFileSyncBridge;
     }
     if (typeof communicator === 'undefined') {
         return null;
     }
-    backgroundFileSyncBridge = new FileSyncBridge({
+    globalScope.backgroundFileSyncBridge = new FileSyncBridge({
         mode: 'background',
         vfs: afio._vfs,
         communicator: communicator
     });
-    backgroundFileSyncBridge.start();
-    return backgroundFileSyncBridge;
+    globalScope.backgroundFileSyncBridge.start();
+    return globalScope.backgroundFileSyncBridge;
 };
 
 // Also verify bridge on load
@@ -156,7 +156,7 @@ function sharedSave(save_data, overwrite, callback) {
     // If tree-type is "files" but file_id is not set, prompt user with saveAs dialog
     // to choose file location instead of falling back to bookmark storage
     if (Storage.getChar("tree-type") === "files" && !save_data.file_id) {
-        afioCache.isInstalled().then(function (installed) {
+        globalScope.afioCache.isInstalled().then(function (installed) {
             if (installed && typeof window !== 'undefined' && window && typeof window.open === 'function') {
                 // Open saveAs dialog to let user choose file location
                 var features = "titlebar=no,menubar=no,location=no," +
@@ -373,7 +373,7 @@ globalScope.installSampleMacroFiles = function () {
         return Promise.resolve();
     }
 
-    return afioCache.isInstalled().then(function (installed) {
+    return globalScope.afioCache.isInstalled().then(function (installed) {
         if (!installed) {
             return Promise.resolve();
         }
@@ -465,7 +465,11 @@ globalScope.installSampleBookmarkletMacros = function () {
 
     // Skip if bookmarks API is not available (e.g. not in manifest or restricted context)
     if (!chrome.bookmarks) {
-        console.warn("[iMacros] chrome.bookmarks API not available, skipping sample bookmarklets installation");
+        console.log("[iMacros] chrome.bookmarks API not available in this context (Offscreen), delegating installation to Service Worker");
+        // Delegate to Service Worker where bookmarks API is available
+        if (chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({ command: 'INSTALL_SAMPLE_BOOKMARKLETS' });
+        }
         return Promise.resolve();
     }
 
