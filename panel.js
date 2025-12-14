@@ -578,6 +578,50 @@ window.addEventListener("message", (event) => {
     }
 });
 
+// --- Extension Reload Detection ---
+// Establish a long-lived connection to detect when the extension context is invalidated (reloaded/updated)
+// --- Extension Reload/Lifecycle Detection ---
+// Maintain a connection to keep SW alive and detect when extension is reloaded.
+let lifeCyclePort = null;
+
+function connectToLifecycle() {
+    try {
+        lifeCyclePort = chrome.runtime.connect({ name: "panel-lifecycle" });
+        lifeCyclePort.onDisconnect.addListener(() => {
+            console.log("[Panel] Lifecycle port disconnected. Checking extension status...");
+            lifeCyclePort = null;
+
+            if (chrome.runtime.lastError) {
+                console.warn("[Panel] Port disconnected due to error:", chrome.runtime.lastError.message);
+            }
+
+            // Attempt to ping the runtime to see if it's still valid
+            try {
+                chrome.runtime.sendMessage({ keepAlive: true }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        // Runtime error -> Extension likely reloaded or context invalidated
+                        console.log("[Panel] Extension context appears invalid (ping failed). Reloading panel...");
+                        // Short delay to ensure the new context is ready
+                        setTimeout(() => window.location.reload(), 500);
+                    } else {
+                        // Response received -> SW just terminated, extension is still alive
+                        console.log("[Panel] Service Worker terminated (idle), reconnecting...");
+                        connectToLifecycle();
+                    }
+                });
+            } catch (e) {
+                // accessing chrome.runtime might throw if context is completely gone
+                console.log("[Panel] Extension context invalidated (exception). Reloading panel...");
+                setTimeout(() => window.location.reload(), 500);
+            }
+        });
+    } catch (e) {
+        console.error("[Panel] Failed to connect to background:", e);
+    }
+}
+
+connectToLifecycle();
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.target === 'panel' && message.type === 'PANEL_STATE_UPDATE') {
         if (message.state) updatePanelState(message.state);
@@ -628,8 +672,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 document.addEventListener("DOMContentLoaded", () => {
     console.log("[Panel] DOMContentLoaded");
 
-    // Ensure window ID is initialized lazily
-    ensureWindowId();
+    // ウィンドウIDを初期化
+    windowIdReadyPromise = initWindowId();
 
     // イベントリスナーの登録
     const addListener = (id, handler) => {

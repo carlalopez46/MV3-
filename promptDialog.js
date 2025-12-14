@@ -27,7 +27,7 @@ function sendResponse(response) {
             type: 'SET_DIALOG_RESULT',
             windowId: w.id,
             response: response
-        }, function(result) {
+        }, function (result) {
             if (chrome.runtime.lastError) {
                 console.error("[iMacros] Failed to send dialog result:", chrome.runtime.lastError.message);
             } else if (!result || !result.success) {
@@ -44,7 +44,7 @@ function getArguments(windowId, callback) {
     chrome.runtime.sendMessage({
         type: 'GET_DIALOG_ARGS',
         windowId: windowId
-    }, function(result) {
+    }, function (result) {
         if (chrome.runtime.lastError) {
             console.error("[iMacros] Failed to get dialog args:", chrome.runtime.lastError.message);
             callback(null);
@@ -96,10 +96,12 @@ window.addEventListener("load", function (evt) {
             return;
         }
 
-        getArguments(w.id, function(myArgs) {
+        getArguments(w.id, function (myArgs) {
             if (!myArgs) {
                 console.error("[iMacros] Failed to get dialog arguments");
-                window.close();
+                // Notify logic (Offscreen/Background) that we are closing to prevent hang
+                sendResponse({ canceled: true });
+                // window.close() is called inside sendResponse
                 return;
             }
 
@@ -141,7 +143,7 @@ window.addEventListener("load", function (evt) {
             dataField.textContent = myArgs.text;
             okButton.addEventListener("click", ok);
             okButton.focus();
-            okButton.addEventListener("keydown", function(e) {
+            okButton.addEventListener("keydown", function (e) {
                 if (e.key === "Enter" || e.key === " ") {
                     ok();
                     e.preventDefault();
@@ -154,7 +156,7 @@ window.addEventListener("load", function (evt) {
                 }
                 promptInput.focus();
                 promptInput.select();
-                promptInput.addEventListener("keydown", function(e) {
+                promptInput.addEventListener("keydown", function (e) {
                     if (e.key === "Enter") ok();
                 });
                 const buttonsContainer = getRequiredElement('buttons');

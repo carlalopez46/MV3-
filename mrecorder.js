@@ -214,6 +214,10 @@ Recorder.prototype.stop = function () {
     context.updateState(this.win_id, "idle");
 
     this.recording = false;
+
+    // Note: Macro saving is handled by offscreen_bg.js or bg.js after recorder.stop() is called.
+    // This ensures proper tree-type detection and fallback to bookmarks when file system is unavailable.
+
     // Clear saved state
     if (chrome.storage && chrome.storage.session) {
         chrome.storage.session.remove("recorder_state_" + this.win_id);
@@ -316,21 +320,39 @@ Recorder.prototype.recordEncryptionType = function () {
         "stored": "SET !ENCRYPTION STOREDKEY",
         "tmpkey": "SET !ENCRYPTION TMPKEY"
     }
-    let password_promise = null
-    if (typ == "no") {
-        password_promise = Promise.resolve({ canceled: true });
-    } else if (typ == "stored") {
+
+    // Fast path: Handle synchronous password retrieval to avoid race conditions
+    if (typ == "stored") {
         let pwd = Storage.getChar("stored-password")
-        // stored password is base64 encoded
-        pwd = decodeURIComponent(atob(pwd))
-        password_promise = Promise.resolve({ password: pwd })
-    } else if (typ == "tmpkey") {
-        password_promise = Rijndael.tempPassword ?
-            Promise.resolve({
-                password: Rijndael.tempPassword
-            }) : dialogUtils.openDialog("passwordDialog.html",
-                "iMacros Password Dialog",
-                { type: "askPassword" })
+        if (pwd) {
+            try {
+                // stored password is base64 encoded
+                this.password = decodeURIComponent(atob(pwd))
+                this.recordAction(enc_types["stored"])
+                return;
+            } catch (e) {
+                console.error("Failed to decode stored password", e);
+            }
+        }
+    } else if (typ == "tmpkey" && Rijndael.tempPassword) {
+        this.password = Rijndael.tempPassword;
+        this.recordAction(enc_types["tmpkey"]);
+        return;
+    } else if (typ == "no") {
+        this.canEncrypt = false;
+        this.recordAction(enc_types["no"]);
+        return;
+    }
+
+    // Slow path: Need to open dialog (async)
+    let password_promise = null
+    if (typ == "tmpkey") {
+        password_promise = dialogUtils.openDialog("passwordDialog.html",
+            "iMacros Password Dialog",
+            { type: "askPassword" })
+    } else {
+        // Fallback for unexpected types
+        password_promise = Promise.resolve({ canceled: true });
     }
 
     password_promise.then(response => {
@@ -689,7 +711,14 @@ Recorder.prototype.encryptTagCommand = function () {
             " has no CONTENT")
         return
     }
-    let cyphertext = this.canEncrypt ?
+
+    if (!this.password && this.canEncrypt) {
+        console.warn("encryptTagCommand: Password not set, skipping encryption");
+        this.recordAction(cmd); // Put back original command
+        return;
+    }
+
+    let cyphertext = (this.canEncrypt && this.password) ?
         Rijndael.encryptString(m[1], this.password) : m[1]
     let updated_cmd = cmd.replace(/(content)=(\S+)\s*$/i, "$1=" + cyphertext)
     this.recordAction(updated_cmd)
@@ -757,8 +786,8 @@ Recorder.prototype.onQueryState = function (data, tab_id, callback) {
 Recorder.prototype.onTabActivated = function (activeInfo) {
     console.log("[DEBUG-REC] onTabActivated:", activeInfo);
     if (this.win_id != activeInfo.windowId) {
-        console.warn("[DEBUG-REC] Window ID mismatch. Recorder:", this.win_id, "Event:", activeInfo.windowId, " - Ignored for testing");
-        // return;
+        console.warn("[DEBUG-REC] Window ID mismatch. Recorder:", this.win_id, "Event:", activeInfo.windowId, " - Ignored");
+        return;
     }
     var recorder = this;
     getTab(activeInfo.tabId).then(function (tab) {
@@ -774,7 +803,9 @@ Recorder.prototype.onTabActivated = function (activeInfo) {
 
         var cmd = "TAB T=" + (cur + 1);
         console.log("[DEBUG-REC] Recording command:", cmd);
-        recorder.recordAction(cmd);
+        if (recorder.recording) {
+            recorder.recordAction(cmd);
+        }
     }).catch(function (err) {
         logError("Failed to get tab in onTabActivated: " + (err.message || err), { tabId: activeInfo.tabId });
     });
@@ -996,8 +1027,8 @@ Recorder.prototype.onNavigation = function (details) {
             return;
         }
         if (tab.windowId != recorder.win_id) {
-            console.warn(`[DEBUG-REC] onNavigation: Window ID mismatch (Recorder: ${recorder.win_id}, Tab: ${tab.windowId}). Mismatch ignored for testing.`);
-            // return; // TEMPORARILY DISABLED for debugging
+            console.warn(`[DEBUG-REC] onNavigation: Window ID mismatch (Recorder: ${recorder.win_id}, Tab: ${tab.windowId}). Mismatch ignored.`);
+            return;
         }
 
         if (details.transitionQualifiers.length &&

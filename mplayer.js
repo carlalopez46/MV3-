@@ -61,6 +61,11 @@ function MacroPlayer(win_id) {
 
 // Helpers to work across Service Worker / Offscreen contexts
 function hasTabsAPI() {
+    // In Offscreen Document, we prefer delegating tab operations to Service Worker
+    // to ensure full access and consistency.
+    if (typeof window !== 'undefined' && window.location && window.location.pathname.endsWith('offscreen.html')) {
+        return false;
+    }
     return (typeof chrome !== "undefined" && chrome && chrome.tabs && typeof chrome.tabs.query === "function");
 }
 
@@ -208,7 +213,7 @@ function mpCreateTab(mplayer, createProperties, callback) {
 
 function mpGetActiveTab(mplayer, callback, errorCallback) {
     if (hasTabsAPI()) {
-        chrome.tabs.query({active: true, windowId: mplayer.win_id}, tabs => {
+        chrome.tabs.query({ active: true, windowId: mplayer.win_id }, tabs => {
             if (chrome.runtime.lastError) {
                 errorCallback && errorCallback(chrome.runtime.lastError);
             } else {
@@ -232,6 +237,104 @@ function mpGetActiveTab(mplayer, callback, errorCallback) {
     }
 }
 
+// Helper to check if chrome.windows API is available
+function hasWindowsAPI() {
+    if (typeof window !== 'undefined' && window.location && window.location.pathname.endsWith('offscreen.html')) {
+        return false;
+    }
+    return (typeof chrome !== "undefined" && chrome && chrome.windows && typeof chrome.windows.get === "function");
+}
+
+// Helper to get window info
+function mpGetWindow(mplayer, windowId, getInfo, callback) {
+    if (hasWindowsAPI()) {
+        chrome.windows.get(windowId, getInfo || {}, win => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] WINDOW_GET error:", chrome.runtime.lastError);
+                callback(null);
+            } else {
+                callback(win);
+            }
+        });
+    } else {
+        chrome.runtime.sendMessage({
+            command: "WINDOW_GET",
+            win_id: windowId,
+            getInfo: getInfo || {}
+        }, response => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] WINDOW_GET error:", chrome.runtime.lastError);
+                callback(null);
+            } else if (!response || response.error) {
+                console.error("[MacroPlayer] WINDOW_GET failed:", response && response.error);
+                callback(null);
+            } else {
+                callback(response.window || null);
+            }
+        });
+    }
+}
+
+// Helper to update window
+function mpUpdateWindow(mplayer, windowId, updateInfo, callback) {
+    if (hasWindowsAPI()) {
+        chrome.windows.update(windowId, updateInfo, win => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] WINDOW_UPDATE error:", chrome.runtime.lastError);
+                callback && callback(null);
+            } else {
+                callback && callback(win);
+            }
+        });
+    } else {
+        chrome.runtime.sendMessage({
+            command: "WINDOW_UPDATE",
+            win_id: windowId,
+            updateInfo: updateInfo
+        }, response => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] WINDOW_UPDATE error:", chrome.runtime.lastError);
+                callback && callback(null);
+            } else if (!response || response.error) {
+                console.error("[MacroPlayer] WINDOW_UPDATE failed:", response && response.error);
+                callback && callback(null);
+            } else {
+                callback && callback(response.window || null);
+            }
+        });
+    }
+}
+
+// Helper to capture visible tab
+function mpCaptureVisibleTab(mplayer, windowId, options, callback) {
+    if (hasTabsAPI() && chrome.tabs.captureVisibleTab) {
+        chrome.tabs.captureVisibleTab(windowId, options, dataUrl => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] CAPTURE_VISIBLE_TAB error:", chrome.runtime.lastError);
+                callback(null);
+            } else {
+                callback(dataUrl);
+            }
+        });
+    } else {
+        chrome.runtime.sendMessage({
+            command: "TAB_CAPTURE",
+            win_id: windowId,
+            options: options
+        }, response => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] CAPTURE_VISIBLE_TAB error:", chrome.runtime.lastError);
+                callback(null);
+            } else if (!response || response.error) {
+                console.error("[MacroPlayer] CAPTURE_VISIBLE_TAB failed:", response && response.error);
+                callback(null);
+            } else {
+                callback(response.dataUrl || null);
+            }
+        });
+    }
+}
+
 function getPanelId(win_id) {
     if (typeof context === "undefined" || context === null) return undefined;
     const ctx = context[win_id];
@@ -246,7 +349,7 @@ function notifyPanel(win_id, type, data) {
             type,
             panelWindowId: panelId,
             data
-        }, () => {});
+        }, () => { });
     } catch (e) {
         console.warn("[MacroPlayer] Failed to notify panel", type, e);
     }
@@ -298,9 +401,9 @@ MacroPlayer.prototype.compileExpressions = function () {
 // add listener for various events
 // NOTE: In Offscreen Document, chrome.tabs and chrome.webNavigation are NOT available.
 // Tab events are forwarded from Service Worker via offscreen_bg.js handlers.
-MacroPlayer.prototype.addListeners = function() {
+MacroPlayer.prototype.addListeners = function () {
     communicator.registerHandler("error-occurred",
-                                 this._onScriptError, this.win_id);
+        this._onScriptError, this.win_id);
 
     // Only register direct listeners if running in Service Worker (not Offscreen)
     // In Offscreen, events are forwarded via TAB_UPDATED/TAB_ACTIVATED messages
@@ -378,7 +481,7 @@ MacroPlayer.prototype.addListeners = function() {
     // );
 };
 
-MacroPlayer.prototype.removeListeners = function() {
+MacroPlayer.prototype.removeListeners = function () {
     communicator.unregisterHandler("error-occurred", this._onScriptError);
 
     // Only remove direct listeners if running in Service Worker (not Offscreen)
@@ -432,7 +535,7 @@ var ABOUT_URL_PATTERN = /^about:/i;
  *   scheme (chrome, edge, brave, opera, vivaldi variants), Chrome devtools or
  *   chrome-search helpers, or an about: URL.
  */
-MacroPlayer.prototype.isInternalURL = function(url) {
+MacroPlayer.prototype.isInternalURL = function (url) {
     if (!url || typeof url !== "string") return false;
 
     // Internal schemes include browser chrome pages, extension schemes, their
@@ -480,7 +583,7 @@ MacroPlayer.prototype.isInternalURL = function(url) {
 // };
 
 
-MacroPlayer.prototype.onNavigationErrorOccured = function(details) {
+MacroPlayer.prototype.onNavigationErrorOccured = function (details) {
     if (details.tabId != this.tab_id)
         return;
 
@@ -495,8 +598,8 @@ MacroPlayer.prototype.onNavigationErrorOccured = function(details) {
         }
 
         this.handleError(new RuntimeError(
-            "Navigation error occurred while loading url "+
-                details.url+", details: "+details.error, 733));
+            "Navigation error occurred while loading url " +
+            details.url + ", details: " + details.error, 733));
         this.stopTimer("loading");
         this.waitingForPageLoad = false;
         // this.activeNavigations.clear();
@@ -545,7 +648,7 @@ MacroPlayer.prototype.onNavigationErrorOccured = function(details) {
 
 
 // network events
-MacroPlayer.prototype.onAuthRequired = function(details, callback) {
+MacroPlayer.prototype.onAuthRequired = function (details, callback) {
     // console.log("onAuthRequired: %O", details);
     if (this.tab_id != details.tabId)
         return;
@@ -553,14 +656,14 @@ MacroPlayer.prototype.onAuthRequired = function(details, callback) {
         asyncRun(this.handleError.bind(this, new RuntimeError(
             "Wrong credentials for HTTP authorization"
         ), 734));
-        return {cancel: true};
+        return { cancel: true };
     }
     this.lastAuthRequestId = details.requestId;
     if (!this.loginData || !this.waitForAuthDialog) {
         asyncRun(this.handleError.bind(this, new RuntimeError(
             "No credentials supplied for HTTP authorization"
         ), 734));
-        return {cancel: true};
+        return { cancel: true };
     }
     var rv = {
         authCredentials: {
@@ -583,14 +686,14 @@ MacroPlayer.prototype.onAuthRequired = function(details, callback) {
 // };
 
 
-MacroPlayer.prototype.onBeforeSendHeaders = function(details) {
+MacroPlayer.prototype.onBeforeSendHeaders = function (details) {
     // console.log("onBeforeSendHeaders: %O", details);
     for (var i = 0; i < details.requestHeaders.length; i++)
         if (details.requestHeaders[i].name == 'User-Agent') {
             details.requestHeaders[i].value = this.userAgent;
             break;
         }
-    return {requestHeaders: details.requestHeaders};
+    return { requestHeaders: details.requestHeaders };
 };
 
 // MacroPlayer.prototype.onReqCompleted = function(details) {
@@ -615,7 +718,7 @@ MacroPlayer.prototype.onBeforeSendHeaders = function(details) {
 // };
 
 
-MacroPlayer.prototype.onTabActivated = function(activeInfo) {
+MacroPlayer.prototype.onTabActivated = function (activeInfo) {
     if (activeInfo.windowId == this.win_id) {
         // console.log("onTabActivated, tabId="+activeInfo.tabId);
         this.tab_id = activeInfo.tabId;
@@ -625,7 +728,7 @@ MacroPlayer.prototype.onTabActivated = function(activeInfo) {
 
 
 // listen to page load events
-MacroPlayer.prototype.onTabUpdated = function(tab_id, obj, tab) {
+MacroPlayer.prototype.onTabUpdated = function (tab_id, obj, tab) {
     if (this.tab_id != tab_id)
         return;
     // console.log("onTabUpdated, changeInfo=%O, tab=%O", obj, tab);
@@ -643,11 +746,11 @@ MacroPlayer.prototype.onTabUpdated = function(tab_id, obj, tab) {
     if (obj.status == "loading" && !this.timers.has("loading")) {
         this.waitingForPageLoad = true;
         const mplayer = this;
-        this.startTimer("loading", this.timeout, "Loading ", function() {
+        this.startTimer("loading", this.timeout, "Loading ", function () {
             mplayer.waitingForPageLoad = false;
             mplayer.handleError(
-                new RuntimeError("Page loading timeout"+
-                                 ", URL: "+mplayer.currentURL, 602));
+                new RuntimeError("Page loading timeout" +
+                    ", URL: " + mplayer.currentURL, 602));
         });
         // We need to catch "loading" event as early as possible
         // onTabUpdated may be fired too late in some cases.
@@ -685,7 +788,7 @@ MacroPlayer.prototype.onTabUpdated = function(tab_id, obj, tab) {
 };
 
 
-MacroPlayer.prototype.startTimer = function(type, timeout, msg, callback) {
+MacroPlayer.prototype.startTimer = function (type, timeout, msg, callback) {
     // only one timer of the type at a time is allowed
     console.assert(!this.timers.has(type));
 
@@ -694,23 +797,23 @@ MacroPlayer.prototype.startTimer = function(type, timeout, msg, callback) {
     var timer = new Object();
     timer.start = performance.now();
 
-    timer.timeout = setTimeout(function() {
+    timer.timeout = setTimeout(function () {
         mplayer.stopTimer(type);
-        typeof(callback) == "function" && callback();
-    } , timeout*1000);
+        typeof (callback) == "function" && callback();
+    }, timeout * 1000);
 
-    timer.interval = setInterval(function() {
+    timer.interval = setInterval(function () {
         var now = performance.now();
-        var elapsedTime = (now - timer.start)/1000;
+        var elapsedTime = (now - timer.start) / 1000;
         if (elapsedTime > timeout) {
             mplayer.stopTimer(type);
-            typeof(callback) == "function" && callback();
+            typeof (callback) == "function" && callback();
             return; // Stop processing after timeout to prevent badge/panel updates
         }
         // change panel/badge text
         notifyPanelStatLine(mplayer.win_id,
-                            msg+elapsedTime.toFixed(1)+"("+Math.round(timeout)+")s",
-                            "warning");
+            msg + elapsedTime.toFixed(1) + "(" + Math.round(timeout) + ")s",
+            "warning");
 
         badge.set(mplayer.win_id, {
             status: "loading",
@@ -722,7 +825,7 @@ MacroPlayer.prototype.startTimer = function(type, timeout, msg, callback) {
     this.timers.set(type, timer);
 };
 
-MacroPlayer.prototype.stopTimer = function(type) {
+MacroPlayer.prototype.stopTimer = function (type) {
     if (!this.timers.has(type))
         return;
     var timer = this.timers.get(type);
@@ -733,21 +836,21 @@ MacroPlayer.prototype.stopTimer = function(type) {
 };
 
 
-MacroPlayer.prototype.clearRetryInterval = function() {
+MacroPlayer.prototype.clearRetryInterval = function () {
     if (this.retryInterval) {
         clearInterval(this.retryInterval);
         delete this.retryInterval;
     }
 }
 
-MacroPlayer.prototype.retry = function(onerror, msg, caller_id, timeout) {
+MacroPlayer.prototype.retry = function (onerror, msg, caller_id, timeout) {
     if (!this.playing)
-    return;
+        return;
 
     if (timeout === undefined) {
-        timeout = this.timeout/10;
+        timeout = this.timeout / 10;
     }
-    var _timeout = timeout*1000; // ms
+    var _timeout = timeout * 1000; // ms
     if (!this.retryInterval) {
         var start_time = performance.now();
         this.retryInterval = setInterval(() => {
@@ -760,20 +863,20 @@ MacroPlayer.prototype.retry = function(onerror, msg, caller_id, timeout) {
             if (remains <= 0) {
                 this.clearRetryInterval();
                 try {
-                    typeof(onerror) == "function" && onerror();
-                } catch(e) {
+                    typeof (onerror) == "function" && onerror();
+                } catch (e) {
                     if (this.ignoreErrors) {
                         this.action_stack.pop();
                         this.next("skipped retry() - error ignored");
                     } else {
                         this.handleError(e);
                     }
-        }
+                }
             } else {
                 // set badge text
-                let text = Math.round(remains/1000).toString();
-                while(text.length < 2)
-                    text = "0"+text;
+                let text = Math.round(remains / 1000).toString();
+                while (text.length < 2)
+                    text = "0" + text;
                 text += "s";
                 badge.set(this.win_id, {
                     status: "tag_wait",
@@ -782,28 +885,28 @@ MacroPlayer.prototype.retry = function(onerror, msg, caller_id, timeout) {
 
                 // set panel text
                 notifyPanelStatLine(this.win_id,
-                    msg+(remains/1000).toFixed(1)+"("+Math.round(_timeout/1000)+")s",
+                    msg + (remains / 1000).toFixed(1) + "(" + Math.round(_timeout / 1000) + ")s",
                     "warning");
             }
         }, 500);
     }
     this.action_stack.push(this.currentAction);
     setTimeout(() => {
-        this.playNextAction("retry "+caller_id);
+        this.playNextAction("retry " + caller_id);
     }, 500);
 };
 
 
 // handle messages from content-scripts
-MacroPlayer.prototype.onTagComplete = function(data) {
+MacroPlayer.prototype.onTagComplete = function (data) {
     if (!data.found) {
         this.retry(() => {
             if (data.extract) {
                 this.showAndAddExtractData("#EANF#");
                 this.action_stack.pop();
-        this.next("onTagComplete");
+                this.next("onTagComplete");
             } else {
-        throw data.error;
+                throw data.error;
             }
         }, "Tag waiting... ", "onTagComplete", this.timeout_tag);
 
@@ -856,9 +959,9 @@ MacroPlayer.prototype.onTagComplete = function(data) {
 // };
 
 
-MacroPlayer.prototype.terminate = function() {
+MacroPlayer.prototype.terminate = function () {
     if (Storage.getBool("debug"))
-        console.info("terminating player for window "+this.win_id);
+        console.info("terminating player for window " + this.win_id);
     // ensure that player is stopped
     if (this.playing)
         this.stop();
@@ -867,20 +970,20 @@ MacroPlayer.prototype.terminate = function() {
 
 // a pattern to match a double quoted string or eval() command
 // or a non-whitespace char sequence
-var im_strre = "(?:\"(?:[^\"\\\\]|\\\\[0btnvfr\"\'\\\\])*\"|"+
-    "eval\\s*\\(\"(?:[^\"\\\\]|\\\\[\\w\"\'\\\\])*\"\\)|"+
+var im_strre = "(?:\"(?:[^\"\\\\]|\\\\[0btnvfr\"\'\\\\])*\"|" +
+    "eval\\s*\\(\"(?:[^\"\\\\]|\\\\[\\w\"\'\\\\])*\"\\)|" +
     "\\S*)";
 
 // const im_strre = "(?:\"(?:[^\"\\\\]|\\\\[0btnvfr\"\'\\\\])*\"|\\S*)";
 
 
-MacroPlayer.prototype.noContentPage = function(cmd_name) {
+MacroPlayer.prototype.noContentPage = function (cmd_name) {
     if (!/^https?|file/i.test(this.currentURL))
         this.handleError(
             new RuntimeError(
-                cmd_name+" command can not be executed because"+
-                    " it requires a Web page loaded in active tab."+
-                    " Current page is "+this.currentURL, 612
+                cmd_name + " command can not be executed because" +
+                " it requires a Web page loaded in active tab." +
+                " Current page is " + this.currentURL, 612
             )
         );
 };
@@ -889,31 +992,31 @@ MacroPlayer.prototype.noContentPage = function(cmd_name) {
 // ADD command http://wiki.imacros.net/ADD
 // regexp for parsing ADD command
 MacroPlayer.prototype.RegExpTable["add"] =
-    "^(\\S+)\\s+("+im_strre+")\\s*$";
+    "^(\\S+)\\s+(" + im_strre + ")\\s*$";
 
 MacroPlayer.prototype.ActionTable["add"] = function (cmd) {
     var param = imns.unwrap(this.expandVariables(cmd[2], "add2"));
     var m = null, arr = null;
 
-    if ( m = cmd[1].match(this.limits.varsRe) ) {
+    if (m = cmd[1].match(this.limits.varsRe)) {
         var num = imns.s2i(m[1]);
         var n1 = imns.s2i(this.getVar(num)), n2 = imns.s2i(param);
-        if ( !isNaN(n1) && !isNaN(n2) ) {
+        if (!isNaN(n1) && !isNaN(n2)) {
             this.vars[num] = (n1 + n2).toString();
         } else {
             this.vars[num] = this.getVar(num) + param;
         }
-    } else if ( (arr = cmd[1].match(/^!extract$/i)) ) {
+    } else if ((arr = cmd[1].match(/^!extract$/i))) {
         this.addExtractData(param);
     } else if (/^!\S+$/.test(cmd[1])) {
-        throw new BadParameter("Unsupported variable "+cmd[1]+
-                               " for ADD command");
+        throw new BadParameter("Unsupported variable " + cmd[1] +
+            " for ADD command");
     } else {
         var n1 = imns.s2i(this.getUserVar(cmd[1])), n2 = imns.s2i(param);
-        if ( !isNaN(n1) && !isNaN(n2) ) {
+        if (!isNaN(n1) && !isNaN(n2)) {
             this.setUserVar(cmd[1], (n1 + n2).toString());
         } else {
-            this.setUserVar(cmd[1], this.getUserVar(cmd[1])+param);
+            this.setUserVar(cmd[1], this.getUserVar(cmd[1]) + param);
         }
     }
 
@@ -929,8 +1032,8 @@ MacroPlayer.prototype.ActionTable["back"] = function (cmd) {
 
     if (/^(?:https?|file)/.test(this.currentURL || ""))
         communicator.postMessage("back-command", {}, this.tab_id,
-                                 function() {},
-                                 {number: 0});
+            function () { },
+            { number: 0 });
     // mplayer.next() will be called on load-complete event
 };
 
@@ -938,7 +1041,7 @@ MacroPlayer.prototype.ActionTable["back"] = function (cmd) {
 // CLEAR command http://wiki.imacros.net/CLEAR
 // I added new optional parameter to the command which restricts
 // cookies removal to specified domain/url
-MacroPlayer.prototype.RegExpTable["clear"] = "^\\s*("+im_strre+")?\\s*$";
+MacroPlayer.prototype.RegExpTable["clear"] = "^\\s*(" + im_strre + ")?\\s*$";
 
 // Check if chrome.cookies is available (not in Offscreen Document)
 function hasCookiesAPI() {
@@ -963,7 +1066,7 @@ MacroPlayer.prototype.ActionTable["clear"] = function (cmd) {
 
     if (hasCookiesAPI()) {
         // Direct access (Service Worker context)
-        chrome.cookies.getAll(details, function(cookies) {
+        chrome.cookies.getAll(details, function (cookies) {
             if (chrome.runtime.lastError) {
                 console.warn("[MacroPlayer] CLEAR: Failed to get cookies:", chrome.runtime.lastError.message);
                 mplayer.next("CLEAR");
@@ -974,11 +1077,11 @@ MacroPlayer.prototype.ActionTable["clear"] = function (cmd) {
                 return;
             }
             var remaining = cookies.length;
-            cookies.forEach(function(cookie) {
+            cookies.forEach(function (cookie) {
                 // Strip leading dot from domain (e.g., ".example.com" -> "example.com")
                 var domain = cookie.domain.startsWith('.') ? cookie.domain.slice(1) : cookie.domain;
                 var url = (cookie.secure ? "https" : "http") + "://" + domain + cookie.path;
-                chrome.cookies.remove({url: url, name: cookie.name}, function() {
+                chrome.cookies.remove({ url: url, name: cookie.name }, function () {
                     if (chrome.runtime.lastError) {
                         console.warn("[MacroPlayer] CLEAR: Failed to remove cookie:", cookie.name, chrome.runtime.lastError.message);
                     }
@@ -994,7 +1097,7 @@ MacroPlayer.prototype.ActionTable["clear"] = function (cmd) {
         chrome.runtime.sendMessage({
             command: 'COOKIES_CLEAR',
             details: details
-        }, function(response) {
+        }, function (response) {
             if (chrome.runtime.lastError) {
                 console.warn("[MacroPlayer] COOKIES_CLEAR error:", chrome.runtime.lastError.message);
             } else if (response && response.error) {
@@ -1009,23 +1112,26 @@ MacroPlayer.prototype.ActionTable["clear"] = function (cmd) {
 
 // EVENT command
 MacroPlayer.prototype.RegExpTable["event"] =
-    "type\\s*=\\s*("+im_strre+")"+
-    "(?:\\s+(selector|xpath)\\s*=\\s*("+im_strre+"))?"+
-    "(?:\\s+(button|key|char|point)\\s*=\\s*("+im_strre+"))?"+
-    "(?:\\s+modifiers\\s*=\\s*("+im_strre+"))?";
+    "type\\s*=\\s*(" + im_strre + ")" +
+    "(?:\\s+(selector|xpath)\\s*=\\s*(" + im_strre + "))?" +
+    "(?:\\s+(button|key|char|point)\\s*=\\s*(" + im_strre + "))?" +
+    "(?:\\s+modifiers\\s*=\\s*(" + im_strre + "))?";
 
-MacroPlayer.prototype.attachDebugger = function(version) {
+MacroPlayer.prototype.attachDebugger = function (version) {
     if (this.isInternalURL(this.currentURL)) {
-        // Reject to prevent debugger operations on restricted pages; callers handle this gracefully.
+        // Cannot attach to internal/restricted pages.
+        // Return resolved to avoid breaking flow immediately, but commands requiring debugger will likely fail.
+        // Alternatively, reject if we want to stop. But EVENT command catch block handles errors.
         return Promise.reject(new RuntimeError("Cannot attach debugger to restricted page: " + this.currentURL, 711));
     }
+
     return this.debuggerAttached ?
         Promise.resolve() : attach_debugger(this.tab_id, version).then(() => {
             this.debuggerAttached = true
         })
 }
 
-MacroPlayer.prototype.detachDebugger = function() {
+MacroPlayer.prototype.detachDebugger = function () {
     return this.debuggerAttached ?
         detach_debugger(this.tab_id).then(() => {
             this.debuggerAttached = false
@@ -1040,8 +1146,8 @@ function hasDebuggerAPI() {
 function attach_debugger(tab_id, version = "1.2") {
     if (hasDebuggerAPI()) {
         // Direct access (Service Worker context)
-        return new Promise(function(resolve, reject) {
-            chrome.debugger.attach({tabId: tab_id}, version, function() {
+        return new Promise(function (resolve, reject) {
+            chrome.debugger.attach({ tabId: tab_id }, version, function () {
                 if (chrome.runtime.lastError)
                     reject(chrome.runtime.lastError);
                 else
@@ -1050,12 +1156,12 @@ function attach_debugger(tab_id, version = "1.2") {
         });
     } else {
         // Proxy through Service Worker (Offscreen Document context)
-        return new Promise(function(resolve, reject) {
+        return new Promise(function (resolve, reject) {
             chrome.runtime.sendMessage({
                 command: 'DEBUGGER_ATTACH',
                 tabId: tab_id,
                 version: version
-            }, function(response) {
+            }, function (response) {
                 if (chrome.runtime.lastError) {
                     reject(chrome.runtime.lastError);
                 } else if (response && response.error) {
@@ -1071,10 +1177,10 @@ function attach_debugger(tab_id, version = "1.2") {
 function send_command(tab_id, method, params) {
     if (hasDebuggerAPI()) {
         // Direct access (Service Worker context)
-        return new Promise(function(resolve, reject) {
+        return new Promise(function (resolve, reject) {
             chrome.debugger.sendCommand(
-                {tabId: tab_id}, method, params,
-                function(response) {
+                { tabId: tab_id }, method, params,
+                function (response) {
                     if (chrome.runtime.lastError)
                         reject(chrome.runtime.lastError);
                     else
@@ -1084,13 +1190,13 @@ function send_command(tab_id, method, params) {
         });
     } else {
         // Proxy through Service Worker (Offscreen Document context)
-        return new Promise(function(resolve, reject) {
+        return new Promise(function (resolve, reject) {
             chrome.runtime.sendMessage({
                 command: 'DEBUGGER_SEND_COMMAND',
                 tabId: tab_id,
                 method: method,
                 params: params
-            }, function(response) {
+            }, function (response) {
                 if (chrome.runtime.lastError) {
                     reject(chrome.runtime.lastError);
                 } else if (response && response.error) {
@@ -1106,25 +1212,40 @@ function send_command(tab_id, method, params) {
 function detach_debugger(tab_id) {
     if (hasDebuggerAPI()) {
         // Direct access (Service Worker context)
-        return new Promise(function(resolve, reject) {
-            chrome.debugger.detach({tabId: tab_id}, function() {
-                if (chrome.runtime.lastError)
-                    reject(chrome.runtime.lastError);
-                else
+        return new Promise(function (resolve, reject) {
+            chrome.debugger.detach({ tabId: tab_id }, function () {
+                if (chrome.runtime.lastError) {
+                    if (chrome.runtime.lastError.message &&
+                        (chrome.runtime.lastError.message.includes("Debugger is not attached") ||
+                            chrome.runtime.lastError.message.includes("Cannot access a chrome-extension"))) {
+                        // Ignore if already detached or if we can't access the page (e.g. extension page)
+                        resolve();
+                    } else {
+                        reject(chrome.runtime.lastError);
+                    }
+                } else {
                     resolve();
+                }
             });
         });
     } else {
         // Proxy through Service Worker (Offscreen Document context)
-        return new Promise(function(resolve, reject) {
+        return new Promise(function (resolve, reject) {
             chrome.runtime.sendMessage({
                 command: 'DEBUGGER_DETACH',
                 tabId: tab_id
-            }, function(response) {
+            }, function (response) {
                 if (chrome.runtime.lastError) {
                     reject(chrome.runtime.lastError);
                 } else if (response && response.error) {
-                    reject(new Error(response.error));
+                    // Ignore if already detached
+                    const errorMessage = typeof response.error === 'string' ? response.error : String(response.error);
+                    if (errorMessage.includes("Debugger is not attached") ||
+                        errorMessage.includes("Cannot access a chrome-extension")) {
+                        resolve();
+                    } else {
+                        reject(new Error(errorMessage));
+                    }
                 } else {
                     resolve();
                 }
@@ -1217,7 +1338,7 @@ function get_windows_virtual_keycode(c) {
     return keyCode;
 }
 
-MacroPlayer.prototype.dispatchCharKeydownEvent = function(details) {
+MacroPlayer.prototype.dispatchCharKeydownEvent = function (details) {
     return Promise.resolve()
     // var vk = get_windows_virtual_keycode(details.char);
     // var keyid = get_key_identifier_from_char(details.char);
@@ -1235,7 +1356,7 @@ MacroPlayer.prototype.dispatchCharKeydownEvent = function(details) {
     // }, Promise.resolve());
 };
 
-MacroPlayer.prototype.dispatchCharKeyupEvent = function(details) {
+MacroPlayer.prototype.dispatchCharKeyupEvent = function (details) {
     return Promise.resolve()
     // var vk = get_windows_virtual_keycode(details.char);
     // var keyid = get_key_identifier_from_char(details.char);
@@ -1250,7 +1371,7 @@ MacroPlayer.prototype.dispatchCharKeyupEvent = function(details) {
 };
 
 
-MacroPlayer.prototype.dispatchControlKeydownEvent = function(details) {
+MacroPlayer.prototype.dispatchControlKeydownEvent = function (details) {
     var vk = details.key;
     var keyid = get_key_identifier_from_keycode(details.key);
     var modifiers = get_modifiers_bitmask(details.modifiers);
@@ -1263,7 +1384,7 @@ MacroPlayer.prototype.dispatchControlKeydownEvent = function(details) {
     });
 };
 
-MacroPlayer.prototype.dispatchControlKeyupEvent = function(details) {
+MacroPlayer.prototype.dispatchControlKeyupEvent = function (details) {
     var vk = details.key;
     var keyid = get_key_identifier_from_keycode(details.key);
     var modifiers = get_modifiers_bitmask(details.modifiers);
@@ -1276,30 +1397,32 @@ MacroPlayer.prototype.dispatchControlKeyupEvent = function(details) {
     });
 };
 
-MacroPlayer.prototype.dispatchCharKeypressEvent = function(details) {
+MacroPlayer.prototype.dispatchCharKeypressEvent = function (details) {
     var vk = get_windows_virtual_keycode(details.char);
     var keyid = get_key_identifier_from_char(details.char);
     var modifiers = get_modifiers_bitmask(details.modifiers);
     var mplayer = this;
     return [
-        {"type": "char",
-         "text": details.char,
-         "modifiers": modifiers}
-    ].reduce(function(seq, opts) {
-        return seq.then(function() {
+        {
+            "type": "char",
+            "text": details.char,
+            "modifiers": modifiers
+        }
+    ].reduce(function (seq, opts) {
+        return seq.then(function () {
             return send_command(mplayer.tab_id, "Input.dispatchKeyEvent", opts);
         });
     }, Promise.resolve());
 };
 
-MacroPlayer.prototype.dispatchControlKeypressEvent = function(details) {
+MacroPlayer.prototype.dispatchControlKeypressEvent = function (details) {
     var vk = details.key;
     var keyid = get_key_identifier_from_keycode(details.key);
     var modifiers = get_modifiers_bitmask(details.modifiers);
     var mplayer = this;
     return ["rawKeyDown", "keyUp"]
-        .reduce(function(seq, type) {
-            return seq.then(function() {
+        .reduce(function (seq, type) {
+            return seq.then(function () {
                 return send_command(mplayer.tab_id, "Input.dispatchKeyEvent", {
                     "type": type,
                     "windowsVirtualKeyCode": vk,
@@ -1310,7 +1433,7 @@ MacroPlayer.prototype.dispatchControlKeypressEvent = function(details) {
         }, Promise.resolve());
 };
 
-MacroPlayer.prototype.dispatchKeyboardEvent = function(details) {
+MacroPlayer.prototype.dispatchKeyboardEvent = function (details) {
     var char_funcs = {
         "keydown": this.dispatchCharKeydownEvent.bind(this),
         "keyup": this.dispatchCharKeyupEvent.bind(this),
@@ -1348,17 +1471,17 @@ function get_mouse_event_name(type) {
 
 function get_target_center_point(rect) {
     return {
-        x: rect.left+rect.width/2,
-        y: rect.top+rect.height/2,
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
     };
 }
 
-MacroPlayer.prototype.dispatchMouseEvent = function(details) {
+MacroPlayer.prototype.dispatchMouseEvent = function (details) {
     let point = {}
     if (details.point) {
-        point.x = details.point.x-details.targetRect.pageXOffset+
+        point.x = details.point.x - details.targetRect.pageXOffset +
             details.targetRect.xOffset
-        point.y = details.point.y-details.targetRect.pageYOffset+
+        point.y = details.point.y - details.targetRect.pageYOffset +
             details.targetRect.yOffset
     } else {
         point = get_target_center_point(details.targetRect)
@@ -1378,6 +1501,11 @@ MacroPlayer.prototype.dispatchMouseEvent = function(details) {
     });
 };
 
+MacroPlayer.prototype.RegExpTable["event"] =
+    "type\\s*=\\s*(" + im_strre + ")" +
+    "(?:\\s+(selector|xpath)\\s*=\\s*(" + im_strre + "))?" +
+    "(?:\\s+(button|key|char|point|value)\\s*=\\s*(" + im_strre + "))?" +
+    "(?:\\s+modifiers\\s*=\\s*(" + im_strre + "))?";
 
 MacroPlayer.prototype.ActionTable["event"] = function (cmd) {
     var type = imns.unwrap(this.expandVariables(cmd[1], "event1")).toLowerCase();
@@ -1388,8 +1516,12 @@ MacroPlayer.prototype.ActionTable["event"] = function (cmd) {
     var modifiers = cmd[6] ?
         imns.unwrap(this.expandVariables(cmd[6], "event6")) : "";
 
-    var data = {scroll: true};
+    var data = { scroll: true };
     data[selector_type || "selector"] = selector || ":root";
+
+    if (type === "input" && value_type === "value") {
+        data.value = value;
+    }
 
     this.attachDebugger().then(
         () => communicator.sendMessage(
@@ -1397,7 +1529,9 @@ MacroPlayer.prototype.ActionTable["event"] = function (cmd) {
         )
     ).then(response => {
         if (!response) {
-            throw new RuntimeError(chrome.runtime.lastError.message);
+            const msg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ?
+                chrome.runtime.lastError.message : "Unknown error in activate-element";
+            throw new RuntimeError(msg);
         }
         else if (response.error)
             throw new RuntimeError(
@@ -1412,8 +1546,8 @@ MacroPlayer.prototype.ActionTable["event"] = function (cmd) {
         var char = "";
         var point = null;
 
-        if (!value_type) {
-            ; // do nothing
+        if (!value_type || value_type === "value") {
+            ; // do nothing (value handled in activate-element)
         } else if (value_type == "button") {
             button = imns.s2i(value);
             if (isNaN(button))
@@ -1428,12 +1562,12 @@ MacroPlayer.prototype.ActionTable["event"] = function (cmd) {
             const point_re =
                 /^\(\s*(\d+(?:\.\d+)?)\s*\,\s*(\d+(?:\.\d+)?)\s*\)$/;
             var m = null;
-            if ( !(m = point_re.exec(value.trim())) )
+            if (!(m = point_re.exec(value.trim())))
                 throw new BadParameter("(x,y) POINT value", 3);
-            point = {x: parseFloat(m[1]), y: parseFloat(m[2])};
+            point = { x: parseFloat(m[1]), y: parseFloat(m[2]) };
         }
         return Promise.resolve().then(() => {
-            if (/^mouse/.test(type)) {
+            if (/^mouse|hover/.test(type)) {
                 var details = {
                     type: type,
                     point: point,
@@ -1453,8 +1587,8 @@ MacroPlayer.prototype.ActionTable["event"] = function (cmd) {
             } else if (type == "click") {
                 // click is a result of mousedown/up
                 return [
-                    {clickCount: 1, type: "mousedown"},
-                    {clickCount: 1, type: "mouseup"}
+                    { clickCount: 1, type: "mousedown" },
+                    { clickCount: 1, type: "mouseup" }
                 ].map(x => ({
                     type: x.type,
                     clickCount: x.clickCount,
@@ -1464,14 +1598,14 @@ MacroPlayer.prototype.ActionTable["event"] = function (cmd) {
                     targetRect: targetRect
                 })).reduce((seq, details) => seq.then(
                     () => this.dispatchMouseEvent(details)
-                ) , Promise.resolve())
+                ), Promise.resolve())
             } else if (type == "dblclick") {
                 // dblclick is a result of two mousedown/up
                 return [
-                    {clickCount: 1, type: "mousedown"},
-                    {clickCount: 1, type: "mouseup"},
-                    {clickCount: 2, type: "mousedown"},
-                    {clickCount: 2, type: "mouseup"}
+                    { clickCount: 1, type: "mousedown" },
+                    { clickCount: 1, type: "mouseup" },
+                    { clickCount: 2, type: "mousedown" },
+                    { clickCount: 2, type: "mouseup" }
                 ].map(x => ({
                     type: x.type,
                     clickCount: x.clickCount,
@@ -1481,7 +1615,7 @@ MacroPlayer.prototype.ActionTable["event"] = function (cmd) {
                     targetRect: targetRect
                 })).reduce((seq, details) => seq.then(
                     () => this.dispatchMouseEvent(details)
-                ) , Promise.resolve())
+                ), Promise.resolve())
             }
         })
     }).then(() => this.next("EVENT")).catch(e => {
@@ -1498,10 +1632,10 @@ MacroPlayer.prototype.ActionTable["event"] = function (cmd) {
 
 
 MacroPlayer.prototype.RegExpTable["events"] =
-        "type\\s*=\\s*("+im_strre+")"+
-        "(?:\\s+(selector|xpath)\\s*=\\s*("+im_strre+"))?"+
-        "(?:\\s+(keys|chars|points)\\s*=\\s*("+im_strre+"))?"+
-        "(?:\\s+modifiers\\s*=\\s*("+im_strre+"))?";
+    "type\\s*=\\s*(" + im_strre + ")" +
+    "(?:\\s+(selector|xpath)\\s*=\\s*(" + im_strre + "))?" +
+    "(?:\\s+(keys|chars|points)\\s*=\\s*(" + im_strre + "))?" +
+    "(?:\\s+modifiers\\s*=\\s*(" + im_strre + "))?";
 
 MacroPlayer.prototype.ActionTable["events"] = function (cmd) {
     var type = imns.unwrap(this.expandVariables(cmd[1], "events1")).toLowerCase();
@@ -1511,13 +1645,18 @@ MacroPlayer.prototype.ActionTable["events"] = function (cmd) {
     var value = cmd[5] ? imns.unwrap(this.expandVariables(cmd[5], "events5")) : 0;
     var modifiers = cmd[6] ?
         imns.unwrap(this.expandVariables(cmd[6], "events6")) : "";
-    var data = {scroll: true};
+    var data = { scroll: true };
     data[selector_type || "selector"] = selector || ":root";
     this.attachDebugger().then(
         () => communicator.sendMessage(
             "activate-element", data, this.tab_id, this.currentFrame
         )
     ).then(response => {
+        if (!response) {
+            const msg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ?
+                chrome.runtime.lastError.message : "Unknown error in activate-element";
+            throw new RuntimeError(msg);
+        }
         if (response.error)
             throw new RuntimeError(
                 response.error.message, response.error.errnum
@@ -1534,24 +1673,24 @@ MacroPlayer.prototype.ActionTable["events"] = function (cmd) {
                     chars: decryptedString.split("")
                 }))
             } else {
-                return {chars: value.split("")}
+                return { chars: value.split("") }
             }
         } else if (value_type.toLowerCase() == "keys") {
             let keys_re = /\[\d+(?:\s*,\s*\d+)*\]/
-                if ( !keys_re.test(value.trim()) )
-                    throw new BadParameter("[k1,..,kn] as KEYS value", 3);
-            return {keys: JSON.parse(value)}
+            if (!keys_re.test(value.trim()))
+                throw new BadParameter("[k1,..,kn] as KEYS value", 3);
+            return { keys: JSON.parse(value) }
         } else if (value_type.toLowerCase() == "points") {
             let points_re = /^(?:\s*\(\d+(?:\.\d+)?\s*\,\s*\d+(?:\.\d+)?\s*\)(?:\s*,\s*)?)+$/
-                if ( !points_re.test(value.trim()) )
-                    throw new BadParameter("(x,y)[,(x,y)] as POINTS value", 3);
+            if (!points_re.test(value.trim()))
+                throw new BadParameter("(x,y)[,(x,y)] as POINTS value", 3);
             let point_re = /\(\s*(\d+(?:\.\d+)?)\s*\,\s*(\d+(?:\.\d+)?)\s*\)/g
             let points = []
             let m;
-            while((m = point_re.exec(value))) {
-                points.push({x: parseFloat(m[1]), y: parseFloat(m[2])});
+            while ((m = point_re.exec(value))) {
+                points.push({ x: parseFloat(m[1]), y: parseFloat(m[2]) });
             }
-            return {points: points, targetRect: resp.targetRect}
+            return { points: points, targetRect: resp.targetRect }
         }
     }).then(value => {
         if (type == "mousemove") {
@@ -1562,7 +1701,7 @@ MacroPlayer.prototype.ActionTable["events"] = function (cmd) {
                 modifiers: modifiers
             })).reduce((seq, details) => seq.then(
                 () => this.dispatchMouseEvent(details)
-            ) , Promise.resolve())
+            ), Promise.resolve())
         } else if (/^key/.test(type) && value.keys) {
             return value.keys.map(key => ({
                 type: type,
@@ -1570,7 +1709,7 @@ MacroPlayer.prototype.ActionTable["events"] = function (cmd) {
                 modifiers: modifiers
             })).reduce((seq, details) => seq.then(
                 () => this.dispatchKeyboardEvent(details)
-            ) , Promise.resolve())
+            ), Promise.resolve())
         } else if (/^key/.test(type) && value.chars) {
             return value.chars.map(char => ({
                 type: type,
@@ -1580,7 +1719,7 @@ MacroPlayer.prototype.ActionTable["events"] = function (cmd) {
                 () => this.dispatchKeyboardEvent(details)
             ), Promise.resolve())
         } else {
-            throw RuntimeError("Can not process event type "+type, 711)
+            throw new RuntimeError("Can not process event type " + type, 711)
         }
     }).then(
         () => this.next("EVENTS")
@@ -1597,7 +1736,7 @@ MacroPlayer.prototype.ActionTable["events"] = function (cmd) {
 };
 
 
-MacroPlayer.prototype.decrypt = function(str) {
+MacroPlayer.prototype.decrypt = function (str) {
     this.waitingForPassword = true
     return Promise.resolve().then(() => {
         if (this.encryptionType == "no") {
@@ -1612,8 +1751,8 @@ MacroPlayer.prototype.decrypt = function(str) {
             let p = Rijndael.tempPassword ? Promise.resolve({
                 password: Rijndael.tempPassword
             }) : dialogUtils.openDialog("passwordDialog.html",
-                                        "iMacros Password Dialog",
-                                        {type: "askPassword"})
+                "iMacros Password Dialog",
+                { type: "askPassword" })
             return p.then(result => {
                 if (result.canceled) {
                     this.waitingForPassword = false
@@ -1625,14 +1764,14 @@ MacroPlayer.prototype.decrypt = function(str) {
                     let rv = Rijndael.decryptString(str, result.password)
                     Rijndael.tempPassword = result.password
                     return rv
-                } catch(e) {
+                } catch (e) {
                     // wrong password, try again
                     return this.decrypt(str)
                 }
             })
         } else {
             throw new RuntimeError(
-                "Unsupported encryption type: "+this.encryptionType, 711
+                "Unsupported encryption type: " + this.encryptionType, 711
             )
         }
     }).then(decryptedString => {
@@ -1646,14 +1785,14 @@ MacroPlayer.prototype.decrypt = function(str) {
 
 // FRAME command http://wiki.imacros.net/FRAME
 MacroPlayer.prototype.RegExpTable["frame"] =
-    "^(f|name)\\s*=\\s*("+im_strre+")\\s*$";
+    "^(f|name)\\s*=\\s*(" + im_strre + ")\\s*$";
 
-MacroPlayer.prototype.onFrameComplete = function(data) {
+MacroPlayer.prototype.onFrameComplete = function (data) {
     if (!data.frame) {
         var self = this;
-        this.retry(function() {
-            self.currentFrame = {number: 0};
-            throw new RuntimeError("frame "+self.requestedFrameParam+" not found", 722);
+        this.retry(function () {
+            self.currentFrame = { number: 0 };
+            throw new RuntimeError("frame " + self.requestedFrameParam + " not found", 722);
         }, "Frame waiting... ", "onFrameComplete", this.timeout_tag);
     } else {
         this.clearRetryInterval();
@@ -1675,7 +1814,7 @@ MacroPlayer.prototype.ActionTable["frame"] = function (cmd) {
 
         // shortcut for main frame
         if (param == 0) {
-            this.currentFrame = {number: 0};
+            this.currentFrame = { number: 0 };
             this.next("FRAME");
             return;
         }
@@ -1689,17 +1828,17 @@ MacroPlayer.prototype.ActionTable["frame"] = function (cmd) {
     var self = this;
 
     communicator.postMessage("frame-command", frame_data, this.tab_id,
-                             this.onFrameComplete.bind(this),
-                             {number: 0});
+        this.onFrameComplete.bind(this),
+        { number: 0 });
 };
 
 
 
 // IMAGESEARCH command http://wiki.imacros.net/IMAGESEARCH
 MacroPlayer.prototype.RegExpTable["imagesearch"] =
-    "^pos\\s*=\\s*("+im_strre+
-    ")\\s+image\\s*=\\s*("+im_strre+")\\s+"+
-    "confidence\\s*=\\s*("+im_strre+")";
+    "^pos\\s*=\\s*(" + im_strre +
+    ")\\s+image\\s*=\\s*(" + im_strre + ")\\s+" +
+    "confidence\\s*=\\s*(" + im_strre + ")";
 
 MacroPlayer.prototype.ActionTable["imagesearch"] = function (cmd) {
     var pos = imns.s2i(imns.unwrap(
@@ -1724,25 +1863,25 @@ MacroPlayer.prototype.ActionTable["imagesearch"] = function (cmd) {
         // NOTE: we assume here that defdatapath is already set which
         // may not be true under some (rare) circumstances
         var default_dir = afio.openNode(localStorage["defdatapath"]);
-    default_dir.append(image);
-    image = default_dir.path;
+        default_dir.append(image);
+        image = default_dir.path;
     }
 
     var mplayer = this;
-    communicator.postMessage("webpage-hide-scrollbars",{hide: true}, mplayer.tab_id,()=>{});
-    this.captureWebPage(function(_) {
-        communicator.postMessage("webpage-hide-scrollbars",{hide: false}, mplayer.tab_id,()=>{});
-    // chrome.tabs.captureVisibleTab(this.win_id, {format: "png"}, function(_) {
+    communicator.postMessage("webpage-hide-scrollbars", { hide: true }, mplayer.tab_id, () => { });
+    this.captureWebPage(function (_) {
+        communicator.postMessage("webpage-hide-scrollbars", { hide: false }, mplayer.tab_id, () => { });
+        // chrome.tabs.captureVisibleTab(this.win_id, {format: "png"}, function(_) {
         const host = "com.ipswitch.imacros.host";
-        var msg_no_free_beer = "This feature requires"+
-            " the iMacros image recognition library,"+
-            " which is part of the commercial iMacros Standard"+
+        var msg_no_free_beer = "This feature requires" +
+            " the iMacros image recognition library," +
+            " which is part of the commercial iMacros Standard" +
             " and Enterprise Editions";
         var re = /data\:([\w-]+\/[\w-]+)?(?:;(base64))?,(.+)/;
         var m = re.exec(_);
         if (!m) {
             mplayer.handleError(
-                new RuntimeError("Can not parse image data"+_), 701
+                new RuntimeError("Can not parse image data" + _), 701
             );
             return;
         }
@@ -1751,10 +1890,10 @@ MacroPlayer.prototype.ActionTable["imagesearch"] = function (cmd) {
             type: "do_image_search",
             image_data: m[3],
             sample_path: image,
-            pos: pos-1,         // zero-based index expected
+            pos: pos - 1,         // zero-based index expected
             cl: cl
         };
-        chrome.runtime.sendNativeMessage(host, request, function(result) {
+        chrome.runtime.sendNativeMessage(host, request, function (result) {
             if (chrome.runtime.lastError) {
                 var nf = "Specified native messaging host not found";
                 if (chrome.runtime.lastError.message.match(nf)) {
@@ -1772,24 +1911,24 @@ MacroPlayer.prototype.ActionTable["imagesearch"] = function (cmd) {
                 return;
             }
 
-            if(!result.found) {
-                mplayer.retry(function() {
+            if (!result.found) {
+                mplayer.retry(function () {
                     throw new RuntimeError(
-                        "Image specified by "+image+
-                            " does not match the web-page", 727);
-                }, "Image waiting... ", "onImageSearch", mplayer.timeout_tag*4);
+                        "Image specified by " + image +
+                        " does not match the web-page", 727);
+                }, "Image waiting... ", "onImageSearch", mplayer.timeout_tag * 4);
                 return;
             }
             mplayer.clearRetryInterval();
             communicator.postMessage(
                 "image-search-command",
                 result, mplayer.tab_id,
-                function() {
+                function () {
                     mplayer.imageX = result.x;
                     mplayer.imageY = result.y;
                     mplayer.next("IMAGESEARCH");
                 },
-                {number: 0}
+                { number: 0 }
             );
         });
     });
@@ -1799,21 +1938,21 @@ MacroPlayer.prototype.ActionTable["imagesearch"] = function (cmd) {
 
 // ONDOWNLOAD command http://wiki.imacros.net/ONDOWNLOAD
 MacroPlayer.prototype.RegExpTable["ondownload"] =
-    "^folder\\s*=\\s*("+im_strre+")\\s+"+
-    "file\\s*=\\s*("+im_strre+")"+
-    "(?:\\s+wait\\s*=(yes|no|true|false))?"+
-    "(?:\\s+checksum\\s*=(md5|sha1):(\\S+))?"+
+    "^folder\\s*=\\s*(" + im_strre + ")\\s+" +
+    "file\\s*=\\s*(" + im_strre + ")" +
+    "(?:\\s+wait\\s*=(yes|no|true|false))?" +
+    "(?:\\s+checksum\\s*=(md5|sha1):(\\S+))?" +
     "\\s*$";
 
 MacroPlayer.prototype.ActionTable["ondownload"] = function (cmd) {
     var obj = new Object();
     var wait = true;
     var folder = imns.unwrap(this.expandVariables(cmd[1], "ondownload1"));
-    
+
     if (folder !== "*" && !this.afioIsInstalled) {
         throw new BadParameter("FOLDER requires File Access for iMacros Extensions. Specify FOLDER=* to save file to the browser's default download folder.");
     }
-    
+
     var file = imns.unwrap(this.expandVariables(cmd[2], "ondownload2"));
     if (typeof cmd[3] != "undefined") {
         var param = imns.unwrap(this.expandVariables(cmd[3], "ondownload3"));
@@ -1858,41 +1997,41 @@ MacroPlayer.prototype.ActionTable["ondownload"] = function (cmd) {
 
 // a handler passed to a singleton onDeterminingFilename event listener
 // stored in context object
-MacroPlayer.prototype.onDeterminingFilename = function(dl, suggest) {
+MacroPlayer.prototype.onDeterminingFilename = function (dl, suggest) {
     if (!this.activeDownloads.has(dl.id))
         return false;
 
     //  Get file name and extension from the source uri.
     var filename = "", m = null, name = "", ext = "";
-    if ( m = dl.url.match(/\/([^\/?]+)(?=\?.+|$)/) ) {
-    name = m[1];
-    if (m = name.match(/\.([^\.\s]+)$/)) {
-        ext = m[1];
-        name = name.replace(/\.[^\.\s]+$/, "");
-    }
+    if (m = dl.url.match(/\/([^\/?]+)(?=\?.+|$)/)) {
+        name = m[1];
+        if (m = name.match(/\.([^\.\s]+)$/)) {
+            ext = m[1];
+            name = name.replace(/\.[^\.\s]+$/, "");
+        }
     }
     var dl_obj = this.activeDownloads.get(dl.id);
     if (dl_obj.downloadFilename == "*") {
         return false;
     } else if (/^\+/.test(dl_obj.downloadFilename)) {
-    filename = name+dl_obj.downloadFilename.substring(1)+"."+ext;
+        filename = name + dl_obj.downloadFilename.substring(1) + "." + ext;
     } else {
         // TODO: I'm not sure if we should replace the provided extension
-    // if (/\.[^\.\s]+$/i.test(this.downloadFilename))
-    //     filename = this.downloadFilename.replace(/\.[^\.\s]+$/, "."+ext);
-    // else
-    filename = dl_obj.downloadFilename;
+        // if (/\.[^\.\s]+$/i.test(this.downloadFilename))
+        //     filename = this.downloadFilename.replace(/\.[^\.\s]+$/, "."+ext);
+        // else
+        filename = dl_obj.downloadFilename;
     }
     // NOTE: I guess "overwrite" is the proper action here since user
     // should know best if any name conflicts are possible
-    suggest({filename: filename, conflictAction: "overwrite"});
+    suggest({ filename: filename, conflictAction: "overwrite" });
 
     return true;
 };
 
 
 
-MacroPlayer.prototype.onDownloadCompleted = function(id) {
+MacroPlayer.prototype.onDownloadCompleted = function (id) {
     // console.log("onDownloadCompleted, id=%d", id);
     var dl_obj = this.activeDownloads.get(id);
     this.activeDownloads.delete(id);
@@ -1923,9 +2062,9 @@ MacroPlayer.prototype.onDownloadCompleted = function(id) {
         dest_dir = afio.openNode(dl_obj.downloadFolder);
     }
     var mplayer = this;
-    dest_dir.exists().then(function(exists) {
+    dest_dir.exists().then(function (exists) {
         if (!exists)
-            throw new RuntimeError("Path "+dl_obj.downloadFolder+" does not exist", 732);
+            throw new RuntimeError("Path " + dl_obj.downloadFolder + " does not exist", 732);
 
         var file = afio.openNode(dl_obj.downloadFilename);
         dest_dir.append(file.leafName);
@@ -1933,12 +2072,12 @@ MacroPlayer.prototype.onDownloadCompleted = function(id) {
         mplayer.downloadedFilename = dest_dir.path;
         // console.log("onDownloadCompleted, id=%d, file=%s, dest=%s", id,
         //             file.path, dest_dir.path);
-        return dest_dir.exists().then(function(exists) {
+        return dest_dir.exists().then(function (exists) {
             // a workaroud  for Windows - remove existing file before moving
             // the downloaded file
-            return exists ?  dest_dir.remove() : Promise.resolve();
-        }).then(function() {
-            return file.moveTo(dest_dir).then(function() {
+            return exists ? dest_dir.remove() : Promise.resolve();
+        }).then(function () {
+            return file.moveTo(dest_dir).then(function () {
                 if (mplayer.waitForDownloadCompleted) {
                     mplayer.stopTimer("download");
                     mplayer.waitForDownloadCompleted = false;
@@ -1946,13 +2085,13 @@ MacroPlayer.prototype.onDownloadCompleted = function(id) {
                 }
             });
         });
-    }).catch(function(err) {
+    }).catch(function (err) {
         mplayer.handleError(err);
     });
 };
 
 
-MacroPlayer.prototype.onDownloadCreated = function(dl) {
+MacroPlayer.prototype.onDownloadCreated = function (dl) {
     // console.log("onDownloadCreated %O", dl);
     if (dl.state != "in_progress")
         return;
@@ -1983,7 +2122,7 @@ MacroPlayer.prototype.onDownloadCreated = function(dl) {
             "download",
             this.timeout_download,
             "Loading file ",
-            function() {
+            function () {
                 mplayer.waitForDownloadCompleted = false;
                 mplayer.handleError(
                     new RuntimeError("Download timeout", 604));
@@ -1993,7 +2132,7 @@ MacroPlayer.prototype.onDownloadCreated = function(dl) {
     }
 };
 
-MacroPlayer.prototype.onDownloadChanged = function(changeInfo) {
+MacroPlayer.prototype.onDownloadChanged = function (changeInfo) {
     // console.log("onDownloadChanged %O", changeInfo);
     if (!this.activeDownloads.has(changeInfo.id))
         return;
@@ -2014,15 +2153,15 @@ function hasDownloadsAPI() {
     return typeof chrome !== 'undefined' && chrome.downloads && typeof chrome.downloads.download === 'function';
 }
 
-MacroPlayer.prototype.saveTarget = function(url) {
+MacroPlayer.prototype.saveTarget = function (url) {
     var self = this;
 
     if (hasDownloadsAPI()) {
         // Direct access (Service Worker context)
-        chrome.downloads.download({url: url}, function(dl_id) {
+        chrome.downloads.download({ url: url }, function (dl_id) {
             if (chrome.runtime.lastError) {
                 self.handleError(new RuntimeError(
-                    "Download failed: "+chrome.runtime.lastError.message
+                    "Download failed: " + chrome.runtime.lastError.message
                 ));
                 return;
             }
@@ -2036,7 +2175,7 @@ MacroPlayer.prototype.saveTarget = function(url) {
             options: { url: url },
             win_id: self.win_id,
             tab_id: self.tab_id
-        }, function(response) {
+        }, function (response) {
             if (chrome.runtime.lastError) {
                 self.handleError(new RuntimeError(
                     "Download failed: " + chrome.runtime.lastError.message
@@ -2069,7 +2208,7 @@ MacroPlayer.prototype.ActionTable["onerrordialog"] = function (cmd) {
 };
 
 
-MacroPlayer.prototype.onErrorOccurred = function(data) {
+MacroPlayer.prototype.onErrorOccurred = function (data) {
     if (!this.playing || !this.shouldStopOnError)
         return;
 
@@ -2089,8 +2228,8 @@ MacroPlayer.prototype.ActionTable["onscripterror"] =
 
 // ONLOGIN command http://wiki.imacros.net/ONLOGIN
 MacroPlayer.prototype.RegExpTable["onlogin"] =
-    "^user\\s*=\\s*("+im_strre+")\\s+"+
-    "password\\s*=\\s*("+im_strre+")\\s*$";
+    "^user\\s*=\\s*(" + im_strre + ")\\s+" +
+    "password\\s*=\\s*(" + im_strre + ")\\s*$";
 
 MacroPlayer.prototype.ActionTable["onlogin"] = function (cmd) {
     var username = imns.unwrap(this.expandVariables(cmd[1], "onlogin1"));
@@ -2104,7 +2243,7 @@ MacroPlayer.prototype.ActionTable["onlogin"] = function (cmd) {
         this.loginData.password = decryptedString;
         chrome.webRequest.onAuthRequired.addListener(
             this.onAuth,
-            {windowId: this.win_id, urls: ["<all_urls>"]},
+            { windowId: this.win_id, urls: ["<all_urls>"] },
             ["blocking"]
         );
         this.next("ONLOGIN");
@@ -2123,29 +2262,32 @@ MacroPlayer.prototype.ActionTable["pause"] = function (cmd) {
 
 // PROMPT command http://wiki.imacros.net/PROMPT
 MacroPlayer.prototype.RegExpTable["prompt"] =
-    "^("+im_strre+")"+
-    "(?:\\s+("+im_strre+")"+
-    "(?:\\s+("+im_strre+"))?)?\\s*$";
+    "^(" + im_strre + ")" +
+    "(?:\\s+(" + im_strre + ")" +
+    "(?:\\s+(" + im_strre + "))?)?\\s*$";
 
 MacroPlayer.prototype.ActionTable["prompt"] = function (cmd) {
-    if (this.noContentPage("PROMPT"))
-        return;
+
 
     var x = {};
     x.text = imns.unwrap(this.expandVariables(cmd[1], "prompt1"));
 
-    if (typeof(cmd[2]) != "undefined") {
-        if (this.limits.varsRe.test(cmd[2])) {
+    if (typeof (cmd[2]) != "undefined") {
+        // Strip {{ and }} if present to handle incorrect syntax like {{!VAR1}}
+        var varParam = cmd[2].replace(/^\{\{/, "").replace(/\}\}$/, "");
+
+        if (this.limits.varsRe.test(varParam)) {
             x.varnum = imns.s2i(RegExp.$1);
-        } else if (/^[^!]\S*/.test(cmd[2])) {
+        } else if (/^[^!]\S*/.test(varParam) || (varParam.startsWith('!') && !this.limits.varsRe.test(varParam))) {
+            // Allow user variables or other built-in variables that aren't !VARn
             this.checkFreewareLimits("user_vars", null);
-            x.varname = cmd[2];
+            x.varname = varParam;
         } else {
-            throw new BadParameter("Unsupported variable "+cmd[2]);
+            throw new BadParameter("Unsupported variable " + cmd[2]);
         }
     }
 
-    if (typeof(cmd[3]) != "undefined") {
+    if (typeof (cmd[3]) != "undefined") {
         x.defval = imns.unwrap(this.expandVariables(cmd[3], "prompt3"));
     }
 
@@ -2157,7 +2299,7 @@ MacroPlayer.prototype.ActionTable["prompt"] = function (cmd) {
                 "iMacros Prompt Dialog",
                 { type: "askInput", text: x.text, default: x.defval });
             return p.then(function (result) {
-                var retobj = {varnum: x.varnum, varname: x.varname};
+                var retobj = { varnum: x.varnum, varname: x.varname };
                 retobj.value = "";
                 if (!result.canceled) {
                     retobj.value = result.inputValue;
@@ -2187,10 +2329,10 @@ MacroPlayer.prototype.ActionTable["prompt"] = function (cmd) {
     }
 };
 
-MacroPlayer.prototype.onPromptComplete = function(data) {
-    if (data && typeof(data.varname) != "undefined") {
+MacroPlayer.prototype.onPromptComplete = function (data) {
+    if (data && typeof (data.varname) != "undefined") {
         this.setUserVar(data.varname, data.value);
-    } else if (data && typeof(data.varnum) != "undefined") {
+    } else if (data && typeof (data.varnum) != "undefined") {
         this.vars[imns.s2i(data.varnum)] = data.value;
     }
     this.next("PROMPT");
@@ -2199,43 +2341,43 @@ MacroPlayer.prototype.onPromptComplete = function(data) {
 
 // PROXY command http://wiki.imacros.net/PROXY
 MacroPlayer.prototype.RegExpTable["proxy"] =
-    "^address\\s*=\\s*("+im_strre+")"+
-    "(?:\\s+bypass\\s*=\\s*("+im_strre+")\\s*)?$";
+    "^address\\s*=\\s*(" + im_strre + ")" +
+    "(?:\\s+bypass\\s*=\\s*(" + im_strre + ")\\s*)?$";
 
 
-MacroPlayer.prototype.setProxySettings = function(config) {
+MacroPlayer.prototype.setProxySettings = function (config) {
     // set new proxy settings
     var mplayer = this;
     chrome.proxy.settings.set(
-        {value: config},
-        function() {
+        { value: config },
+        function () {
             mplayer.next("PROXY");
         }
     );
 };
 
-MacroPlayer.prototype.storeProxySettings = function(callback) {
+MacroPlayer.prototype.storeProxySettings = function (callback) {
     var mplayer = this;
     // first we should store old settings
     chrome.proxy.settings.get(
-        {'incognito': false},
-        function(config) {
+        { 'incognito': false },
+        function (config) {
             mplayer.proxySettings = config.value;
-            typeof(callback) == "function" && callback();
+            typeof (callback) == "function" && callback();
         }
     );
 };
 
 
-MacroPlayer.prototype.restoreProxySettings = function() {
+MacroPlayer.prototype.restoreProxySettings = function () {
     if (!this.proxySettings)
         return;
     if (this.proxySettings.mode == "system") {
         chrome.proxy.settings.clear({});
     } else {
         chrome.proxy.settings.set(
-            {value: this.proxySettings, 'incognito': false},
-            function() {}
+            { value: this.proxySettings, 'incognito': false },
+            function () { }
         );
     }
 };
@@ -2246,12 +2388,12 @@ MacroPlayer.prototype.restoreProxySettings = function() {
 
 MacroPlayer.prototype.ActionTable["proxy"] = function (cmd) {
     var address = imns.unwrap(this.expandVariables(cmd[1], "proxy1"));
-    var bypass = cmd[2]? imns.unwrap(this.expandVariables(cmd[2], "proxy2")):
+    var bypass = cmd[2] ? imns.unwrap(this.expandVariables(cmd[2], "proxy2")) :
         null;
 
     if (!chrome.proxy) {
-        throw new RuntimeError("PROXY command can not be executed because"+
-                               " chrome.proxy module unavailable", 610);
+        throw new RuntimeError("PROXY command can not be executed because" +
+            " chrome.proxy module unavailable", 610);
     }
 
     var addr_re = /^(?:(https?)\s*=\s*)?([\d\w\.]+):(\d+)\s*$/;
@@ -2282,11 +2424,11 @@ MacroPlayer.prototype.ActionTable["proxy"] = function (cmd) {
     }
     var mplayer = this;
     if (!this.proxySettings)
-        this.storeProxySettings(function() {
+        this.storeProxySettings(function () {
             mplayer.setProxySettings(config);
         });
     else
-       this.setProxySettings(config);
+        this.setProxySettings(config);
 
 };
 
@@ -2300,8 +2442,8 @@ MacroPlayer.prototype.ActionTable["refresh"] = function (cmd) {
 
     if (/^(?:https?|file)/.test(this.currentURL || ""))
         communicator.postMessage("refresh-command", {}, this.tab_id,
-                                 function () {},
-                                 {number: 0});
+            function () { },
+            { number: 0 });
     // mplayer.next() will be called on load-complete event
 };
 
@@ -2309,7 +2451,7 @@ MacroPlayer.prototype.ActionTable["refresh"] = function (cmd) {
 // utility functions for next two commands
 
 // get file name of the page, e.g. index.html
-var __doc_name = function(url) {
+var __doc_name = function (url) {
     // use the location file name if present
     var name = url;
     if (/\/([^\/?]*)(?:\?.*)?$/.test(url))
@@ -2325,9 +2467,9 @@ var __doc_name = function(url) {
 
 
 // ensure that filename has an extension or add .ext
-var __ensure_ext = function(filename, ext) {
-    if (!(new RegExp("\\."+ext+"$")).test(filename)) {
-        return filename+"."+ext;
+var __ensure_ext = function (filename, ext) {
+    if (!(new RegExp("\\." + ext + "$")).test(filename)) {
+        return filename + "." + ext;
     } else {
         return filename;
     }
@@ -2336,9 +2478,9 @@ var __ensure_ext = function(filename, ext) {
 
 // SAVEAS command http://wiki.imacros.net/SAVEAS
 MacroPlayer.prototype.RegExpTable["saveas"] =
-    "^type\\s*=\\s*(\\S+)\\s+"+
-    "folder\\s*=\\s*("+im_strre+")\\s+"+
-    "file\\s*=\\s*("+im_strre+")\\s*$";
+    "^type\\s*=\\s*(\\S+)\\s+" +
+    "folder\\s*=\\s*(" + im_strre + ")\\s+" +
+    "file\\s*=\\s*(" + im_strre + ")\\s*$";
 
 function getSaveAsFile(mplayer, folder, filename, type) {
     if (!mplayer.afioIsInstalled)
@@ -2349,9 +2491,9 @@ function getSaveAsFile(mplayer, folder, filename, type) {
     let f = folder == "*" ?
         mplayer.defDownloadFolder.clone() : afio.openNode(folder)
 
-    return f.exists().then(function(exists) {
+    return f.exists().then(function (exists) {
         if (!exists) {
-            throw new RuntimeError("Path "+folder+" does not exist", 732);
+            throw new RuntimeError("Path " + folder + " does not exist", 732);
         }
         let defaultName = (type == "extract") ? "extract" : __doc_name(mplayer.currentURL);
         if (filename == "*") {
@@ -2369,10 +2511,10 @@ function getSaveAsFile(mplayer, folder, filename, type) {
         } else if (type == "txt" || type == "htm") {
             f.append(__ensure_ext(filename, type));
         } else if (/^png|jpeg$/.test(type)) {
-            f.append(__ensure_ext(filename, type == "jpeg"? "jpg": "png"));
+            f.append(__ensure_ext(filename, type == "jpeg" ? "jpg" : "png"));
         } else {
-            throw new BadParameter("iMacros for Chrome supports only "+
-                                   "MHT|HTM|TXT|EXTRACT|PNG|JPEG SAVEAS types")
+            throw new BadParameter("iMacros for Chrome supports only " +
+                "MHT|HTM|TXT|EXTRACT|PNG|JPEG SAVEAS types")
         }
 
         return f;
@@ -2394,23 +2536,23 @@ MacroPlayer.prototype.ActionTable["saveas"] = function (cmd) {
             let data = mplayer.getExtractData();
             mplayer.clearExtractData();
             data = data.replace(/\"/g, '""');
-            data = '"'+data.replace(/\[EXTRACT\]/g, '"'+
-                                    mplayer.dataSourceDelimiter+
-                                    '"')+'"';
-            afio.appendTextFile(f, data+(__is_windows() ? "\r\n" : "\n"))
+            data = '"' + data.replace(/\[EXTRACT\]/g, '"' +
+                mplayer.dataSourceDelimiter +
+                '"') + '"';
+            afio.appendTextFile(f, data + (__is_windows() ? "\r\n" : "\n"))
                 .then(() => mplayer.next("SAVEAS"))
                 .catch(err => mplayer.handleError(err));
         } else if (type == "mht") {
             chrome.pageCapture.saveAsMHTML(
-                {tabId: mplayer.tab_id},
-                function(data) {
+                { tabId: mplayer.tab_id },
+                function (data) {
                     let reader = new FileReader();
-                    reader.onload = function(event) {
+                    reader.onload = function (event) {
                         afio.writeTextFile(f, event.target.result)
                             .then(() => mplayer.next("SAVEAS"))
                             .catch(e => mplayer.handleError(e));
                     };
-                    reader.onerror = function(event) {
+                    reader.onerror = function (event) {
                         mplayer.handleError(event.target.error);
                     };
                     reader.readAsText(data);
@@ -2419,18 +2561,18 @@ MacroPlayer.prototype.ActionTable["saveas"] = function (cmd) {
         } else if (type == "txt" || type == "htm") {
             // NOTE: both txt and htm save only topmost frame data
             communicator.postMessage(
-                "saveas-command", {type: type}, mplayer.tab_id,
-                function(data) {
+                "saveas-command", { type: type }, mplayer.tab_id,
+                function (data) {
                     afio.writeTextFile(f, data)
                         .then(() => mplayer.next("SAVEAS"))
                         .catch(e => mplayer.handleError(e));
                 },
-                {number: 0}
+                { number: 0 }
             );
         } else if (/^png|jpeg$/.test(type)) {
-            communicator.postMessage("webpage-hide-scrollbars",{hide: true}, mplayer.tab_id,()=>{});
-            mplayer.captureWebPage(function(data) {
-                communicator.postMessage("webpage-hide-scrollbars",{hide: false}, mplayer.tab_id,()=>{});
+            communicator.postMessage("webpage-hide-scrollbars", { hide: true }, mplayer.tab_id, () => { });
+            mplayer.captureWebPage(function (data) {
+                communicator.postMessage("webpage-hide-scrollbars", { hide: false }, mplayer.tab_id, () => { });
                 var re = /data\:([\w-]+\/[\w-]+)?(?:;(base64))?,(.+)/;
                 var m = re.exec(data);
                 var imageData = {
@@ -2449,11 +2591,11 @@ MacroPlayer.prototype.ActionTable["saveas"] = function (cmd) {
 
 // SCREENSHOT command
 MacroPlayer.prototype.RegExpTable["screenshot"] =
-    "^type\\s*=\\s*(browser|page)\\s+"+
-    "folder\\s*=\\s*("+im_strre+")\\s+"+
-    "file\\s*=\\s*("+im_strre+")\\s*$";
+    "^type\\s*=\\s*(browser|page)\\s+" +
+    "folder\\s*=\\s*(" + im_strre + ")\\s+" +
+    "file\\s*=\\s*(" + im_strre + ")\\s*$";
 
-MacroPlayer.prototype.doSplitCycle = function(canvas, ctx, moves, type, callback) {
+MacroPlayer.prototype.doSplitCycle = function (canvas, ctx, moves, type, callback) {
     if (moves.length == 0) {
         callback(canvas.toDataURL())
     } else {
@@ -2461,27 +2603,33 @@ MacroPlayer.prototype.doSplitCycle = function(canvas, ctx, moves, type, callback
         let [move, ...rest] = moves
         communicator.postMessage(
             "webpage-scroll-to",
-            {x: move.x_offset, y: move.y_offset},
+            { x: move.x_offset, y: move.y_offset },
             this.tab_id,
             () => {
-                chrome.tabs.captureVisibleTab(
-                    this.win_id, {format: type}, dataURL => {
+                mpCaptureVisibleTab(
+                    mplayer,
+                    this.win_id, { format: type }, dataURL => {
+                        if (!dataURL) {
+                            console.error("[MacroPlayer] captureVisibleTab failed");
+                            callback(null);
+                            return;
+                        }
                         let img = new Image(move.width, move.height)
                         img.src = dataURL
-                        img.onload = () => {                            
+                        img.onload = () => {
                             ctx.drawImage(img, move.x_offset, move.y_offset);
                             this.doSplitCycle(canvas, ctx, rest, type, callback)
                         }
                     }
                 )
-            }, {number: 0}
+            }, { number: 0 }
         )
     }
 };
 
-MacroPlayer.prototype.splitPage = function(dmns, type, callback) {
+MacroPlayer.prototype.splitPage = function (dmns, type, callback) {
     let overlap = 200; // minimum overlap, to avoid sticky headers.
-    let split = function(w, x, xs) {
+    let split = function (w, x, xs) {
         if (w <= 0) {
             return xs
         }
@@ -2499,40 +2647,40 @@ MacroPlayer.prototype.splitPage = function(dmns, type, callback) {
     // steps to perform in y-direction
     let ys = split(dmns.doc_h, dmns.win_h, [])
     // the two above combined and flattened
-    let [moves, ] = ys.reduce(([y_acc, y_offset], y_step) => {
-        let [x_moves, ] = xs.reduce(([x_acc, x_offset], x_step) => {
+    let [moves,] = ys.reduce(([y_acc, y_offset], y_step) => {
+        let [x_moves,] = xs.reduce(([x_acc, x_offset], x_step) => {
             let move = {
                 // if this is the last piece, make the offset as large as its size, so that it sits at the end.
-                x_offset: (x_offset + dmns.win_w) <=  dmns.doc_w ? x_offset : dmns.doc_w - dmns.win_w,
-                y_offset: (y_offset + dmns.win_h) <=  dmns.doc_h ? y_offset : dmns.doc_h - dmns.win_h,
+                x_offset: (x_offset + dmns.win_w) <= dmns.doc_w ? x_offset : dmns.doc_w - dmns.win_w,
+                y_offset: (y_offset + dmns.win_h) <= dmns.doc_h ? y_offset : dmns.doc_h - dmns.win_h,
                 width: dmns.win_w,
-                height:  dmns.win_h
+                height: dmns.win_h
             }
             return [x_acc.concat(move), x_offset + x_step]
         }, [[], 0])
         return [y_acc.concat(x_moves), y_offset + y_step]
     }, [[], 0])
     let canvas = document.createElementNS("http://www.w3.org/1999/xhtml",
-                      "canvas");
-    canvas.style.width = dmns.doc_w+"px";
-    canvas.style.height = dmns.doc_h+"px";
+        "canvas");
+    canvas.style.width = dmns.doc_w + "px";
+    canvas.style.height = dmns.doc_h + "px";
     canvas.width = dmns.doc_w;
     canvas.height = dmns.doc_h;
     let ctx = canvas.getContext("2d");
     // Start from the end. If starting from the beginning, sticky headers appear, avoiding sticky footers instead.
-    moves.reverse();  
+    moves.reverse();
     this.doSplitCycle(canvas, ctx, moves, type, callback);
 };
 
-MacroPlayer.prototype.captureWebPage = function(callback, type) {
+MacroPlayer.prototype.captureWebPage = function (callback, type) {
     var mplayer = this;
     communicator.postMessage(
         "query-page-dimensions",
         {}, this.tab_id,
-        function(dmns) {
-            mplayer.splitPage(dmns, type || "png",  callback);
+        function (dmns) {
+            mplayer.splitPage(dmns, type || "png", callback);
         },
-        {number: 0}
+        { number: 0 }
     );
 };
 
@@ -2546,8 +2694,8 @@ MacroPlayer.prototype.ActionTable["screenshot"] = function (cmd) {
     var type = imns.unwrap(this.expandVariables(cmd[1], "screenshot1")).
         toLowerCase();
     if (type != "page") {
-        throw new BadParameter("SCREENSHOT TYPE="+type.toUpperCase()+
-                             " is not supported");
+        throw new BadParameter("SCREENSHOT TYPE=" + type.toUpperCase() +
+            " is not supported");
     }
 
     var f = null;
@@ -2560,9 +2708,9 @@ MacroPlayer.prototype.ActionTable["screenshot"] = function (cmd) {
     var file = imns.unwrap(this.expandVariables(cmd[3], "saveas3")), t;
 
     var mplayer = this;
-    f.exists().then(function(exists) {
+    f.exists().then(function (exists) {
         if (!exists) {
-            throw new RuntimeError("Path "+folder+" does not exist", 732)
+            throw new RuntimeError("Path " + folder + " does not exist", 732)
         }
 
         if (file == "*") {
@@ -2575,9 +2723,9 @@ MacroPlayer.prototype.ActionTable["screenshot"] = function (cmd) {
         var re = new RegExp('\\s*[:*?|<>\\"/]+\\s*', "g");
         file = file.replace(re, "_");
         f.append(__ensure_ext(file, "png"));
-        communicator.postMessage("webpage-hide-scrollbars",{hide: true}, mplayer.tab_id,()=>{});
-        mplayer.captureWebPage(function(data) {
-            communicator.postMessage("webpage-hide-scrollbars",{hide: false}, mplayer.tab_id,()=>{});
+        communicator.postMessage("webpage-hide-scrollbars", { hide: true }, mplayer.tab_id, () => { });
+        mplayer.captureWebPage(function (data) {
+            communicator.postMessage("webpage-hide-scrollbars", { hide: false }, mplayer.tab_id, () => { });
             var re = /data\:([\w-]+\/[\w-]+)?(?:;(base64))?,(.+)/;
             var m = re.exec(data);
             var imageData = {
@@ -2585,13 +2733,13 @@ MacroPlayer.prototype.ActionTable["screenshot"] = function (cmd) {
                 encoding: m[2],
                 mimeType: m[1]
             };
-            afio.writeImageToFile(f, imageData).then(function() {
+            afio.writeImageToFile(f, imageData).then(function () {
                 mplayer.next("SCREENSHOT");
-            }).catch(function(e) {
+            }).catch(function (e) {
                 mplayer.handleError(e);
             });
         });
-    }).catch(function(err) {
+    }).catch(function (err) {
         mplayer.handleError(err);
     });
 };
@@ -2599,9 +2747,9 @@ MacroPlayer.prototype.ActionTable["screenshot"] = function (cmd) {
 
 // SEARCH command
 MacroPlayer.prototype.RegExpTable["search"] =
-    "^source\\s*=\\s*(txt|regexp):("+im_strre+")"+
-    "(?:\\s+ignore_case\\s*=\\s*(yes|no))?"+
-    "(?:\\s+extract\\s*=\\s*("+im_strre+"))?\\s*$";
+    "^source\\s*=\\s*(txt|regexp):(" + im_strre + ")" +
+    "(?:\\s+ignore_case\\s*=\\s*(yes|no))?" +
+    "(?:\\s+extract\\s*=\\s*(" + im_strre + "))?\\s*$";
 
 MacroPlayer.prototype.ActionTable["search"] = function (cmd) {
     var query = imns.unwrap(this.expandVariables(cmd[2]));
@@ -2621,12 +2769,12 @@ MacroPlayer.prototype.ActionTable["search"] = function (cmd) {
     };
 
     communicator.postMessage("search-command", data, this.tab_id,
-                             this.onSearchComplete.bind(this),
-                             this.currentFrame);
+        this.onSearchComplete.bind(this),
+        this.currentFrame);
 };
 
 
-MacroPlayer.prototype.onSearchComplete = function(data) {
+MacroPlayer.prototype.onSearchComplete = function (data) {
     if (data.error) {
         this.handleError(data.error);
     } else {
@@ -2639,260 +2787,264 @@ MacroPlayer.prototype.onSearchComplete = function(data) {
 
 // SET command http://wiki.imacros.net/SET
 MacroPlayer.prototype.RegExpTable["set"] =
-    "^(\\S+)\\s+("+im_strre+")\\s*$";
+    "^(\\S+)\\s+(" + im_strre + ")\\s*$";
 
 
 MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
     var param = imns.unwrap(this.expandVariables(cmd[2], "set2"));
     var mplayer = this;
-    switch(cmd[1].toLowerCase()) {
-    case "!encryption":
-        switch(param.toLowerCase()) {
-        case "no":
-            this.encryptionType = "no"; break;
-        case "storedkey": case "yes":
-            this.encryptionType = "stored"; break;
-        case "tmpkey":
-            this.encryptionType = "tmpkey"; break;
-        default:
-            throw new BadParameter("!ENCRYPTION can be only "+
-                                   "YES|NO|STOREDKEY|TMPKEY");
-        }
+    switch (cmd[1].toLowerCase()) {
+        case "!encryption":
+            switch (param.toLowerCase()) {
+                case "no":
+                    this.encryptionType = "no"; break;
+                case "storedkey": case "yes":
+                    this.encryptionType = "stored"; break;
+                case "tmpkey":
+                    this.encryptionType = "tmpkey"; break;
+                default:
+                    throw new BadParameter("!ENCRYPTION can be only " +
+                        "YES|NO|STOREDKEY|TMPKEY");
+            }
 
-        break;
-    case "!downloadpdf":
-        // TODO: not very clear what to do with that command
-        this.shouldDownloadPDF = /^yes$/i.test(param); break;
-    case "!loop":
-        if (this.firstLoop) {
-            loop = imns.s2i(param)
-            if (isNaN(loop))
-                throw new BadParameter("!LOOP must be integer");
-            this.currentLoop = this.checkFreewareLimits("loops", loop)
-            notifyPanelLoop(this.win_id, this.currentLoop);
-        }
-        break;
-    case "!extract":
-        this.clearExtractData();
-        if (!/^null$/i.test(param))
-            this.addExtractData(param);
-        break;
-    case "!extractadd":
-        this.addExtractData(param); break;
-    case "!extract_test_popup":
-        this.shouldPopupExtract = /^yes$/i.test(param); break;
-    case "!errorignore":
-        this.ignoreErrors = /^yes$/i.test(param); break;
-    case "!datasource":
-        if (!this.afioIsInstalled) {
-            throw new RuntimeError(
-                "!DATASOURCE requires File IO interface", 660
-            );
-        }
-        this.loadDataSource(param)
-            .then(() => this.next("SET"))
-            .catch(e => this.handleError(e))
-        return;
-    case "!datasource_line":
-        var x = imns.s2i(param);
-        if (isNaN(x) || x <= 0)
-            throw new BadParameter("!DATASOURCE_LINE must be positive integer");
-        if (this.dataSource.length < x)
-            throw new RuntimeError("Invalid DATASOURCE_LINE value: "+
-                                   param, 751);
-        this.dataSourceLine = x;
-        break;
-    case "!datasource_columns":
-        if (isNaN(imns.s2i(param)))
+            break;
+        case "!downloadpdf":
+            // TODO: not very clear what to do with that command
+            this.shouldDownloadPDF = /^yes$/i.test(param); break;
+        case "!loop":
+            if (this.firstLoop) {
+                loop = imns.s2i(param)
+                if (isNaN(loop))
+                    throw new BadParameter("!LOOP must be integer");
+                this.currentLoop = this.checkFreewareLimits("loops", loop)
+                notifyPanelLoop(this.win_id, this.currentLoop);
+            }
+            break;
+        case "!extract":
+            this.clearExtractData();
+            if (!/^null$/i.test(param))
+                this.addExtractData(param);
+            break;
+        case "!extractadd":
+            this.addExtractData(param); break;
+        case "!extract_test_popup":
+            this.shouldPopupExtract = /^yes$/i.test(param); break;
+        case "!errorignore":
+            this.ignoreErrors = /^yes$/i.test(param); break;
+        case "!datasource":
+            if (!this.afioIsInstalled) {
+                throw new RuntimeError(
+                    "!DATASOURCE requires File IO interface", 660
+                );
+            }
+            this.loadDataSource(param)
+                .then(() => this.next("SET"))
+                .catch(e => this.handleError(e))
+            return;
+        case "!datasource_line":
+            var x = imns.s2i(param);
+            if (isNaN(x) || x <= 0)
+                throw new BadParameter("!DATASOURCE_LINE must be positive integer");
+            if (this.dataSource.length < x)
+                throw new RuntimeError("Invalid DATASOURCE_LINE value: " +
+                    param, 751);
+            this.dataSourceLine = x;
+            break;
+        case "!datasource_columns":
+            if (isNaN(imns.s2i(param)))
                 throw new BadParameter("!DATASOURCE_COLUMNS must be integer");
-        this.dataSourceColumns = imns.s2i(param);
-        break;
-    case "!datasource_delimiter":
-        if (param.length > 1)
-            throw new BadParameter("!DATASOURCE_DELIMITER must be single character");
-        this.dataSourceDelimiter = param;
-        break;
-    case "!folder_datasource":
-        if (!this.afioIsInstalled) {
-            throw new RuntimeError(
-                "!FOLDER_DATASOURCE requires File IO interface", 660
-            );
-        }
-        this.dataSourceFolder = afio.openNode(param);
-        this.dataSourceFolder.exists().then(exists => {
-            if (!exists) {
-                this.handleError( new RuntimeError(
-                    "can not write to FOLDER_DATASOURCE: "+
-                        param+" does not exist or not accessible.", 732
-                ));
+            this.dataSourceColumns = imns.s2i(param);
+            break;
+        case "!datasource_delimiter":
+            if (param.length > 1)
+                throw new BadParameter("!DATASOURCE_DELIMITER must be single character");
+            this.dataSourceDelimiter = param;
+            break;
+        case "!folder_datasource":
+            if (!this.afioIsInstalled) {
+                throw new RuntimeError(
+                    "!FOLDER_DATASOURCE requires File IO interface", 660
+                );
             }
-        }).then(() => {
-            this.next("SET");
-        }).catch(err => {
-            this.handleError(new RuntimeError(
-                "can not open FOLDER_DATASOURCE: "+
-                    param+", error "+err.message, 732
-            ));
-        });
-        return;
-    case "!folder_download":
-        if (!this.afioIsInstalled) {
-            throw new RuntimeError(
-                "!FOLDER_DOWNLOAD requires File IO interface", 660
-            );
-        }
-        this.defDownloadFolder = afio.openNode(param);
-        this.defDownloadFolder.exists().then(exists => {
-            if (!exists) {
-                this.handleError( new RuntimeError(
-                    "can not write to FOLDER_DOWNLOAD: "+
-                        param+" does not exist or not accessible.", 732
-                ));
+            this.dataSourceFolder = afio.openNode(param);
+            this.dataSourceFolder.exists().then(exists => {
+                if (!exists) {
+                    throw new RuntimeError(
+                        "can not write to FOLDER_DATASOURCE: " +
+                        param + " does not exist or not accessible.", 732
+                    );
+                }
+            }).then(() => {
+                this.next("SET");
+            }).catch(err => {
+                throw new RuntimeError(
+                    "can not open FOLDER_DATASOURCE: " +
+                    param + ", error " + err.message, 732
+                );
+            });
+            return;
+        case "!folder_download":
+            if (!this.afioIsInstalled) {
+                throw new RuntimeError(
+                    "!FOLDER_DOWNLOAD requires File IO interface", 660
+                );
             }
-        }).then(() => {
-            this.next("SET");
-        }).catch(err => {
-            this.handleError(new RuntimeError(
-                "can not open FOLDER_DOWNLOAD: "+
-                    param+", error "+err.message, 732
-            ));
-        });
-        return;
-    case "!timeout": case "!timeout_page":
-        var x = imns.s2i(param);
-        if (isNaN(x) || x <= 0)
-            throw new BadParameter("!TIMEOUT must be positive integer");
-        this.timeout = x;
-        this.timeout_tag = Math.round(this.timeout/10);
-        break;
-    case "!timeout_tag": case "!timeout_step":
-        var x = imns.s2i(param);
-        if (isNaN(x) || x <= 0)
-            throw new BadParameter("!TIMEOUT_TAG must be positive integer");
-        this.timeout_tag = x;
-        break;
-    case "!timeout_download":
-        var x = imns.s2i(param);
-        if (isNaN(x) || x <= 0)
-            throw new BadParameter("!TIMEOUT_DOWNLOAD must be positive integer");
-        this.timeout_download = x;
-        break;
-    case "!timeout_macro":
-        var x = parseFloat(param);
-        if (isNaN(x) || x <= 0)
-            throw new BadParameter("!TIMEOUT_MACRO must be positive number");
-        this.globalTimer.setMacroTimeout(x);
-        break;
-    case "!clipboard":
-        imns.Clipboard.putString(param);
-        break;
-    case "!filestopwatch":
-        if (!this.afioIsInstalled)
-            throw new RuntimeError(
-                "!FILESTOPWATCH requires File IO interface", 660
-            );
-        var filename = param, file;
-        if (__is_full_path(filename) ) { // full path
-            file = afio.openNode(filename);
-        } else {
-            file = this.defDownloadFolder.clone()
-            file.append(filename);
-        }
-        var parent = file.parent;
-        var mplayer = this;
-        parent.exists().then(function(exists) {
-            if (!exists)
-                throw new RuntimeError("Path "+parent.path+
-                                       " does not exists", 732);
-        }).then(function() {
-            return afio.appendTextFile(file, "").catch(function(e) {
+            this.defDownloadFolder = afio.openNode(param);
+            this.defDownloadFolder.exists().then(exists => {
+                if (!exists) {
+                    throw new RuntimeError(
+                        "can not write to FOLDER_DOWNLOAD: " +
+                        param + " does not exist or not accessible.", 732
+                    );
+                }
+            }).then(() => {
+                this.next("SET");
+            }).catch(err => {
+                throw new RuntimeError(
+                    "can not open FOLDER_DOWNLOAD: " +
+                    param + ", error " + err.message, 732
+                );
+            });
+            return;
+        case "!timeout": case "!timeout_page":
+            var x = imns.s2i(param);
+            if (isNaN(x) || x < 0)
+                throw new BadParameter("!TIMEOUT must be non-negative integer");
+            this.timeout = x;
+            this.timeout_tag = Math.round(this.timeout / 10);
+            break;
+        case "!timeout_tag": case "!timeout_step":
+            var x = imns.s2i(param);
+            if (isNaN(x) || x < 0)
+                throw new BadParameter("!TIMEOUT_TAG must be non-negative integer");
+            this.timeout_tag = x;
+            // User convenience: if STEP timeout is 0 (no wait), also reduce page timeout to avoid perceived hang
+            if (x === 0 && this.timeout > 1) {
+                this.timeout = 1;
+            }
+            break;
+        case "!timeout_download":
+            var x = imns.s2i(param);
+            if (isNaN(x) || x < 0)
+                throw new BadParameter("!TIMEOUT_DOWNLOAD must be non-negative integer");
+            this.timeout_download = x;
+            break;
+        case "!timeout_macro":
+            var x = parseFloat(param);
+            if (isNaN(x) || x < 0)
+                throw new BadParameter("!TIMEOUT_MACRO must be non-negative number");
+            this.globalTimer.setMacroTimeout(x);
+            break;
+        case "!clipboard":
+            imns.Clipboard.putString(param);
+            break;
+        case "!filestopwatch":
+            if (!this.afioIsInstalled)
+                throw new RuntimeError(
+                    "!FILESTOPWATCH requires File IO interface", 660
+                );
+            var filename = param, file;
+            if (__is_full_path(filename)) { // full path
+                file = afio.openNode(filename);
+            } else {
+                file = this.defDownloadFolder.clone()
+                file.append(filename);
+            }
+            var parent = file.parent;
+            var mplayer = this;
+            parent.exists().then(function (exists) {
+                if (!exists)
+                    throw new RuntimeError("Path " + parent.path +
+                        " does not exists", 732);
+            }).then(function () {
+                return afio.appendTextFile(file, "").catch(function (e) {
                     var reason = "";
                     if (/ACCESS_DENIED/.test(e.toString()))
                         reason = ", access denied";
-                   throw new RuntimeError(
-                        "can not write to STOPWATCH file: "+
-                            file.path+reason, 731);
+                    throw new RuntimeError(
+                        "can not write to STOPWATCH file: " +
+                        file.path + reason, 731);
+                });
+            }).then(function () {
+                mplayer.stopwatchFile = file;
+                mplayer.shouldWriteStopwatchFile = true;
+                mplayer.next("SET");
+            }).catch(function (err) {
+                mplayer.handleError(err);
             });
-        }).then(function() {
-            mplayer.stopwatchFile = file;
-            mplayer.shouldWriteStopwatchFile = true;
-            mplayer.next("SET");
-        }).catch(function(err) {
-            mplayer.handleError(err);
-        });
-        return;
-    case "!folder_stopwatch":
-        if (param.toLowerCase() == "no") {
-            this.shouldWriteStopwatchFile = false;
-        } else {
-            this.stopwatchFolder = afio.openNode(param);
-        // TODO: isWritable is buggy on Windows as it can only check files
-        // if (!this.stopwatchFolder.isWritable) {
-            //  throw new RuntimeError("can not write to STOPWATCH folder: "+
-            //                            "access denied", 731);
-            // }
-            this.shouldWriteStopwatchFile = true;
-    }
-        break;
-    case "!replayspeed":
-        switch(param.toLowerCase()) {
-            case "slow":
-                this.delay = 2000; break;
-            case "medium":
-                this.delay = 1000; break;
-            case "fast":
-                this.delay = 0; break;
-            default:
-                throw new BadParameter("!REPLAYSPEED can be SLOW|MEDIUM|FAST");
+            return;
+        case "!folder_stopwatch":
+            if (param.toLowerCase() == "no") {
+                this.shouldWriteStopwatchFile = false;
+            } else {
+                this.stopwatchFolder = afio.openNode(param);
+                // TODO: isWritable is buggy on Windows as it can only check files
+                // if (!this.stopwatchFolder.isWritable) {
+                //  throw new RuntimeError("can not write to STOPWATCH folder: "+
+                //                            "access denied", 731);
+                // }
+                this.shouldWriteStopwatchFile = true;
             }
-        break;
-    case "!playbackdelay":
-        let newDelay = parseFloat(param)
-        if (isNaN(newDelay) || newDelay <= 0)
-            throw new BadParameter("!PLAYBACKDELAY should be a"+
-                                   " positive number of seconds");
-        this.delay = Math.round(newDelay*1000);
-        break;
-    case "!file_profiler":
-        if (param.toLowerCase() == "no") {
-            this.writeProfiler = false;
-            this.profiler.file = null;
-        } else {
-            if (!this.afioIsInstalled) {
-                throw new RuntimeError(
-                    "!FILE_PROFILER requires File IO interface", 660
+            break;
+        case "!replayspeed":
+            switch (param.toLowerCase()) {
+                case "slow":
+                    this.delay = 2000; break;
+                case "medium":
+                    this.delay = 1000; break;
+                case "fast":
+                    this.delay = 0; break;
+                default:
+                    throw new BadParameter("!REPLAYSPEED can be SLOW|MEDIUM|FAST");
+            }
+            break;
+        case "!playbackdelay":
+            let newDelay = parseFloat(param)
+            if (isNaN(newDelay) || newDelay <= 0)
+                throw new BadParameter("!PLAYBACKDELAY should be a" +
+                    " positive number of seconds");
+            this.delay = Math.round(newDelay * 1000);
+            break;
+        case "!file_profiler":
+            if (param.toLowerCase() == "no") {
+                this.writeProfiler = false;
+                this.profiler.file = null;
+            } else {
+                if (!this.afioIsInstalled) {
+                    throw new RuntimeError(
+                        "!FILE_PROFILER requires File IO interface", 660
+                    );
+                }
+                this.writeProfilerData = true;
+                this.profiler.enabled = true;
+                this.profiler.file = param;
+            }
+            break;
+
+        case "!linenumber_delta":
+            var x = imns.s2i(param);
+            if (isNaN(x) || x > 0)
+                throw new BadParameter("!LINENUMBER_DELTA must be negative integer or zero");
+            this.linenumber_delta = x;
+            break;
+        case "!useragent":
+            if (!this.userAgent) { // we don't want to register more than one handler
+                chrome.webRequest.onBeforeSendHeaders.addListener(
+                    this._onBeforeSendHeaders,
+                    { windowId: this.win_id, urls: ["<all_urls>"] },
+                    ["blocking", "requestHeaders"]
                 );
             }
-            this.writeProfilerData = true;
-            this.profiler.enabled = true;
-            this.profiler.file = param;
-        }
-        break;
-
-    case "!linenumber_delta":
-        var x = imns.s2i(param);
-        if (isNaN(x) || x > 0)
-            throw new BadParameter("!LINENUMBER_DELTA must be negative integer or zero");
-        this.linenumber_delta = x;
-        break;
-    case "!useragent":
-        if (!this.userAgent) { // we don't want to register more than one handler
-            chrome.webRequest.onBeforeSendHeaders.addListener(
-                this._onBeforeSendHeaders,
-                {windowId: this.win_id, urls: ["<all_urls>"]},
-                ["blocking", "requestHeaders"]
-            );
-        }
-        this.userAgent = param;
-        break;
-    default:
-        if (this.limits.varsRe.test(cmd[1])) {
-            this.vars[imns.s2i(RegExp.$1)] = param;
-        } else if (/^!\S+$/.test(cmd[1])) {
-            throw new BadParameter("Unsupported variable "+cmd[1]);
-        } else {
-            this.setUserVar(cmd[1], param);
-        }
+            this.userAgent = param;
+            break;
+        default:
+            if (this.limits.varsRe.test(cmd[1])) {
+                this.vars[imns.s2i(RegExp.$1)] = param;
+            } else if (/^!\S+$/.test(cmd[1])) {
+                throw new BadParameter("Unsupported variable " + cmd[1]);
+            } else {
+                this.setUserVar(cmd[1], param);
+            }
     }
     this.next("SET");
 };
@@ -2900,7 +3052,7 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
 
 // SIZE command http://wiki.imacros.net/SIZE
 MacroPlayer.prototype.RegExpTable["size"] =
-    "^x\\s*=\\s*("+im_strre+")\\s+y=("+im_strre+")\\s*$";
+    "^x\\s*=\\s*(" + im_strre + ")\\s+y=(" + im_strre + ")\\s*$";
 
 MacroPlayer.prototype.ActionTable["size"] = function (cmd) {
     if (this.noContentPage("SIZE"))
@@ -2913,52 +3065,57 @@ MacroPlayer.prototype.ActionTable["size"] = function (cmd) {
         throw new BadParameter("positive integer", 2)
 
     var mplayer = this;
-    chrome.windows.get(this.win_id, {populate: false}, function(w) {
+    mpGetWindow(this, this.win_id, { populate: false }, function (w) {
+        if (!w) {
+            mplayer.handleError(new RuntimeError("Failed to get window info", 999));
+            return;
+        }
         communicator.postMessage(
             "query-page-dimensions",
             {}, mplayer.tab_id,
-            function(dmns) {
+            function (dmns) {
                 var delta_x = w.width - dmns.win_w;
                 var delta_y = w.height - dmns.win_h;
-                chrome.windows.update(
+                mpUpdateWindow(
+                    mplayer,
                     mplayer.win_id,
-                    {width: x+delta_x, height: y+delta_y},
-                    function() {
+                    { width: x + delta_x, height: y + delta_y },
+                    function () {
                         mplayer.next("SIZE");
                     }
                 );
             },
-            {number: 0}
+            { number: 0 }
         );
     });
 };
 
 // STOPWATCH command http://wiki.imacros.net/STOPWATCH
 MacroPlayer.prototype.RegExpTable["stopwatch"] =
-    "^((?:(start|stop)\\s+)?id|label)\\s*=\\s*("+im_strre+")\\s*$";
+    "^((?:(start|stop)\\s+)?id|label)\\s*=\\s*(" + im_strre + ")\\s*$";
 
 // add new time watch
-MacroPlayer.prototype.addTimeWatch = function(name) {
+MacroPlayer.prototype.addTimeWatch = function (name) {
     this.watchTable[name] = this.globalTimer.getElapsedSeconds();
 };
 
 
-MacroPlayer.prototype.stopTimeWatch = function(name) {
+MacroPlayer.prototype.stopTimeWatch = function (name) {
     if (typeof this.watchTable[name] == "undefined")
-        throw new RuntimeError("Time watch "+name+" does not exist", 762);
+        throw new RuntimeError("Time watch " + name + " does not exist", 762);
     let elapsed = this.globalTimer.getElapsedSeconds() - this.watchTable[name];
     this.lastWatchValue = elapsed;
-    let stamp = new Date(this.globalTimer.macro_start_time + this.watchTable[name]*1000); // time when this timewWatch started
-    let x = {id: name, type: "id", elapsedTime: elapsed, timestamp: stamp};
+    let stamp = new Date(this.globalTimer.macro_start_time + this.watchTable[name] * 1000); // time when this timewWatch started
+    let x = { id: name, type: "id", elapsedTime: elapsed, timestamp: stamp };
     this.stopwatchResults.push(x);
 };
 
 
-MacroPlayer.prototype.addTimeWatchLabel = function(name) {
+MacroPlayer.prototype.addTimeWatchLabel = function (name) {
     let elapsed = this.globalTimer.getElapsedSeconds();
     this.lastWatchValue = elapsed;
     let stamp = new Date(this.globalTimer.macro_start_time);  // time when the macro started
-    let x = {id: name, type: "label", elapsedTime: elapsed, timestamp: stamp};
+    let x = { id: name, type: "label", elapsedTime: elapsed, timestamp: stamp };
     this.stopwatchResults.push(x);
 };
 
@@ -2975,24 +3132,24 @@ MacroPlayer.prototype.ActionTable["stopwatch"] = function (cmd) {
     if (!use_label) { // Need a pair of STOPWATCH commands to start and stop the clock, respectively.
         var found = typeof this.watchTable[param] != "undefined";
         switch (action) {
-        case "start":
-            if (found)
-                throw new RuntimeError("stopwatch id="+param+
-                                       " already started", 761);
-            this.addTimeWatch(param);
-            break;
-        case "stop":
-            if (!found)
-                throw new RuntimeError("stopwatch id="+param+
-                                       " wasn't started", 762);
-            this.stopTimeWatch(param);
-            break;
-        default:                // old syntax
-            if (found)
-                this.stopTimeWatch(param);
-            else
+            case "start":
+                if (found)
+                    throw new RuntimeError("stopwatch id=" + param +
+                        " already started", 761);
                 this.addTimeWatch(param);
-            break;
+                break;
+            case "stop":
+                if (!found)
+                    throw new RuntimeError("stopwatch id=" + param +
+                        " wasn't started", 762);
+                this.stopTimeWatch(param);
+                break;
+            default:                // old syntax
+                if (found)
+                    this.stopTimeWatch(param);
+                else
+                    this.addTimeWatch(param);
+                break;
         }
     } else { // only one STOPWATCH command to stop the clock. Start time is at macro start.
         // save time in sec since macro was started
@@ -3003,7 +3160,7 @@ MacroPlayer.prototype.ActionTable["stopwatch"] = function (cmd) {
 
 
 MacroPlayer.prototype.globalTimer = {
-    init: function(mplayer) {
+    init: function (mplayer) {
         this.mplayer = mplayer;
         if (this.macroTimeout) {
             clearTimeout(this.macroTimeout);
@@ -3011,31 +3168,31 @@ MacroPlayer.prototype.globalTimer = {
         }
     },
 
-    start: function() {
+    start: function () {
         this.start_time = performance.now(); // attention: this property is in milliseconds!  Relative, since document start.      
         this.macro_start_time = Date.now();  // macro start time in milliseconds, absolute (epoch)
     },
 
-    getElapsedSeconds: function() {
+    getElapsedSeconds: function () {
         if (!this.start_time)
             return 0;
         var now = performance.now();
-        return (now - this.start_time)/1000;
+        return (now - this.start_time) / 1000;
     },
 
-    setMacroTimeout: function(x) {
+    setMacroTimeout: function (x) {
         var mplayer = this.mplayer;
-        this.macroTimeout = setTimeout( function () {
+        this.macroTimeout = setTimeout(function () {
             if (!mplayer.playing)
                 return;
             mplayer.handleError(
-                new RuntimeError("Macro replaying timeout of "+x+
-                                 "s exceeded", 603)
+                new RuntimeError("Macro replaying timeout of " + x +
+                    "s exceeded", 603)
             );
-        }, Math.round(x*1000));
+        }, Math.round(x * 1000));
     },
 
-    stop: function() {
+    stop: function () {
         if (this.macroTimeout) {
             clearTimeout(this.macroTimeout);
             this.macroTimeout = null;
@@ -3048,19 +3205,19 @@ MacroPlayer.prototype.globalTimer = {
 // TAG command http://wiki.imacros.net/TAG
 
 // regexp for matching att1:"val1"&&att2:val2.. sequence
-const im_atts_re = "(?:[-\\w]+:"+im_strre+"(?:&&[-\\w]+:"+im_strre+")*|\\*?)";
+const im_atts_re = "(?:[-\\w]+:" + im_strre + "(?:&&[-\\w]+:" + im_strre + ")*|\\*?)";
 
 MacroPlayer.prototype.RegExpTable["tag"] =
-    "^(?:pos\\s*=\\s*(\\S+)\\s+"+
-    "type\\s*=\\s*(\\S+)"+
-    "(?:\\s+form\\s*=\\s*("+im_atts_re+"))?\\s+"+
-    "attr\\s*=\\s*("+im_atts_re+")"+
-    "|(selector|xpath)\\s*=\\s*("+im_strre+"))"+
-           //"|xpath \\s*=\\s*("+im_strre+"))"+
-    "(?:\\s+(content|extract)\\s*=\\s*"+
-    "([%$#]"+im_strre+"(?::[%$#]"+im_strre+")*|"+
-    "event:"+im_strre+"|"+
-    im_strre+"))?\\s*$";
+    "^(?:pos\\s*=\\s*(\\S+)\\s+" +
+    "type\\s*=\\s*(\\S+)" +
+    "(?:\\s+form\\s*=\\s*(" + im_atts_re + "))?\\s+" +
+    "attr\\s*=\\s*(" + im_atts_re + ")" +
+    "|(selector|xpath)\\s*=\\s*(" + im_strre + "))" +
+    //"|xpath \\s*=\\s*("+im_strre+"))"+
+    "(?:\\s+(content|extract)\\s*=\\s*" +
+    "([%$#]" + im_strre + "(?::[%$#]" + im_strre + ")*|" +
+    "event:" + im_strre + "|" +
+    im_strre + "))?\\s*$";
 
 MacroPlayer.prototype.ActionTable["tag"] = function (cmd) {
     if (this.noContentPage("TAG"))
@@ -3089,13 +3246,13 @@ MacroPlayer.prototype.ActionTable["tag"] = function (cmd) {
     const parseAtts = str => {
         if (!str || str == "*")
             return null;
-        var arr = str.split(new RegExp("&&(?=[-\\w]+:"+im_strre+")"));
+        var arr = str.split(new RegExp("&&(?=[-\\w]+:" + im_strre + ")"));
         var parsed_atts = new Object(), at, val, m;
-        const re = new RegExp("^([-\\w]+):("+im_strre+")$");
+        const re = new RegExp("^([-\\w]+):(" + im_strre + ")$");
         for (var i = 0; i < arr.length; i++) {
             if (!(m = re.exec(arr[i])))
                 throw new BadParameter("incorrect ATTR or FORM specifier: "
-                                       +arr[i]);
+                    + arr[i]);
             at = m[1].toLowerCase();
 
             if (at.length && at in parsed_atts) {
@@ -3103,7 +3260,7 @@ MacroPlayer.prototype.ActionTable["tag"] = function (cmd) {
             }
 
             if (at.length) {
-                val = imns.unwrap(this.expandVariables(m[2], "tag_attr"+i));
+                val = imns.unwrap(this.expandVariables(m[2], "tag_attr" + i));
                 // While replaying:
                 // 1. remove all leading/trailing whitespaces
                 // 2. remove all linebreaks in the target string
@@ -3112,7 +3269,7 @@ MacroPlayer.prototype.ActionTable["tag"] = function (cmd) {
                 val = val.replace(/\*/g, '(?:\n|.)*');
                 // 3. treat all <SP> as a one or more whitespaces
                 val = val.replace(/ /g, "\\s+");
-                parsed_atts[at] = "^\\s*"+val+"\\s*$";
+                parsed_atts[at] = "^\\s*" + val + "\\s*$";
             } else {
                 parsed_atts[at] = "^$";
             }
@@ -3132,7 +3289,7 @@ MacroPlayer.prototype.ActionTable["tag"] = function (cmd) {
     } else {
         data.pos = imns.unwrap(this.expandVariables(cmd[1], "tag1"));
         data.tagName = imns.unwrap(this.expandVariables(cmd[2], "tag2")).
-               toLowerCase();
+            toLowerCase();
         data.form = parseAtts(cmd[3]);
         data.atts = parseAtts(cmd[4]);
         data.atts_str = cmd[4]; // for error message
@@ -3145,8 +3302,8 @@ MacroPlayer.prototype.ActionTable["tag"] = function (cmd) {
             data.pos = imns.s2i(RegExp.$1);
             data.relative = false;
         } else {
-            throw new BadParameter("POS=<number> or POS=R<number>"+
-                                   "where <number> is a non-zero integer", 1);
+            throw new BadParameter("POS=<number> or POS=R<number>" +
+                "where <number> is a non-zero integer", 1);
         }
         // get rid of INPUT:* tag names
         if (/^(\S+):(\S+)$/i.test(data.tagName)) {
@@ -3156,7 +3313,7 @@ MacroPlayer.prototype.ActionTable["tag"] = function (cmd) {
             data.tagName = RegExp.$1.toLowerCase();
             val = imns.escapeREChars(val);
             val = val.replace(/\*/g, '(?:\n|.)*');
-            data.atts["type"] = "^"+val+"$";
+            data.atts["type"] = "^" + val + "$";
         }
 
     }
@@ -3173,7 +3330,7 @@ MacroPlayer.prototype.ActionTable["tag"] = function (cmd) {
         delete this.shouldDecryptPassword
         p = this.decrypt(data.txt).then(
             plaintext => Object.assign(
-                {}, data, {txt: plaintext, passwordDecrypted: true}
+                {}, data, { txt: plaintext, passwordDecrypted: true }
             )
         )
     }
@@ -3186,40 +3343,40 @@ MacroPlayer.prototype.ActionTable["tag"] = function (cmd) {
 };
 
 
-MacroPlayer.prototype.parseContentStr = function(cs) {
+MacroPlayer.prototype.parseContentStr = function (cs) {
     var rv = new Object();
     if (/^event:(\S+)$/i.test(cs)) {
         rv.type = "event";
         var etype = RegExp.$1.toLowerCase();
-        switch(etype) {
-        case "saveitem": case "savepictureas":
-        case "savetargetas": case "savetarget":
-        case "mouseover": case "fail_if_found":
-            rv.etype = etype;
-            break;
-        default:
-            throw new RuntimeError("Unknown event type "+etype+
-                                   " for tag command.", 711);
+        switch (etype) {
+            case "saveitem": case "savepictureas":
+            case "savetargetas": case "savetarget":
+            case "mouseover": case "fail_if_found":
+                rv.etype = etype;
+                break;
+            default:
+                throw new RuntimeError("Unknown event type " + etype +
+                    " for tag command.", 711);
         }
     } else {
         rv.type = "select";
         // regexp for testing if content is $goo:$foo
         const val_re = new RegExp(
-            "^(?:([%$#])"+im_strre+")(?::\\1"+im_strre+")*$"
+            "^(?:([%$#])" + im_strre + ")(?::\\1" + im_strre + ")*$"
         );
         const idx_re = new RegExp("^\\d+(?::\\d+)*$");
 
         var m, split_re = null;
         // build regexp for splitting content into values
-        if(m = cs.match(val_re)) {
+        if (m = cs.match(val_re)) {
             var non_delimeter =
-                "(?:\"(?:[^\"\\\\]|\\\\[0btnvfr\"\'\\\\])*\"|"+
-                "eval\\s*\\(\"(?:[^\"\\\\]|\\\\[\\w\"\'\\\\])*\"\\)|"+
-                "(?:[^:\\s]|:[^"+m[1]+"])+)";
-            split_re = new RegExp("(\\"+m[1]+non_delimeter+")", "g");
+                "(?:\"(?:[^\"\\\\]|\\\\[0btnvfr\"\'\\\\])*\"|" +
+                "eval\\s*\\(\"(?:[^\"\\\\]|\\\\[\\w\"\'\\\\])*\"\\)|" +
+                "(?:[^:\\s]|:[^" + m[1] + "])+)";
+            split_re = new RegExp("(\\" + m[1] + non_delimeter + ")", "g");
         } else if (m = cs.match(idx_re)) {
             split_re = new RegExp("(\\d+)", "g");
-        } else if (cs.toLowerCase() =="all") {
+        } else if (cs.toLowerCase() == "all") {
             rv.seltype = "all";
             return rv;
         } else {
@@ -3230,7 +3387,7 @@ MacroPlayer.prototype.parseContentStr = function(cs) {
 
         // split content into values
         var g, opts = new Array();
-        while(g = split_re.exec(cs)) {
+        while (g = split_re.exec(cs)) {
             opts.push(g[1]);
         }
         rv.seltype = opts.length > 1 ? "multiple" : "single";
@@ -3239,24 +3396,24 @@ MacroPlayer.prototype.parseContentStr = function(cs) {
             if (/^([%$#])(.*)$/i.test(opts[i])) {
                 var typ = RegExp.$1;
                 var val = RegExp.$2;
-                val = imns.unwrap(this.expandVariables(val, "opts"+i));
+                val = imns.unwrap(this.expandVariables(val, "opts" + i));
                 if (typ == "$" || typ == "%") {
-                    var re_str = "^\\s*"+imns.escapeREChars(val).
-                        replace(/\*/g, '(?:[\r\n]|.)*')+"\\s*$";
-                    opts[i] = {typ: typ, re_str: re_str, str: val};
+                    var re_str = "^\\s*" + imns.escapeREChars(val).
+                        replace(/\*/g, '(?:[\r\n]|.)*') + "\\s*$";
+                    opts[i] = { typ: typ, re_str: re_str, str: val };
                 } else if (typ == "#") {
                     var idx = parseInt(val);
                     if (isNaN(idx))
                         throw new RuntimeError(
-                            "Wrong CONTENT specifier "+cs, 711);
-                    opts[i] = {typ: "#", idx: idx};
+                            "Wrong CONTENT specifier " + cs, 711);
+                    opts[i] = { typ: "#", idx: idx };
                 }
             } else if (/^(\d+)$/i.test(opts[i])) { // indexes 1:2:...
                 var idx = parseInt(RegExp.$1);
                 if (isNaN(idx))
-                    throw new RuntimeError("Wrong CONTENT specifier "+cs,
-                                           711);
-                opts[i] = {typ: "#", idx: idx};
+                    throw new RuntimeError("Wrong CONTENT specifier " + cs,
+                        711);
+                opts[i] = { typ: "#", idx: idx };
             }
         }
 
@@ -3267,25 +3424,25 @@ MacroPlayer.prototype.parseContentStr = function(cs) {
 };
 
 
-MacroPlayer.prototype.handleInputFileTag = function(selector, files) {
+MacroPlayer.prototype.handleInputFileTag = function (selector, files) {
     return this.attachDebugger("1.2")
         .then(() => send_command(this.tab_id, "DOM.getDocument"))
-        .then(({root: {nodeId}}) => send_command(
+        .then(({ root: { nodeId } }) => send_command(
             this.tab_id,
             "DOM.querySelector",
-            {nodeId, selector}
+            { nodeId, selector }
         ))
-        .then(({nodeId}) => send_command(
+        .then(({ nodeId }) => send_command(
             this.tab_id,
             "DOM.setFileInputFiles",
-            {files, nodeId}
+            { files, nodeId }
         ))
         .then(() => this.detachDebugger())
         .catch(e => this.handleError(e))
 }
 
 // VERSION command http://wiki.imacros.net/VERSION
-MacroPlayer.prototype.RegExpTable["version"] = "^(?:build\\s*=\\s*(\\S+))?"+
+MacroPlayer.prototype.RegExpTable["version"] = "^(?:build\\s*=\\s*(\\S+))?" +
     "(?:\\s+recorder\\s*=\\s*(\\S+))?\\s*$";
 MacroPlayer.prototype.ActionTable["version"] = function (cmd) {
     // do nothing
@@ -3296,14 +3453,14 @@ MacroPlayer.prototype.ActionTable["version"] = function (cmd) {
 
 // URL command http://wiki.imacros.net/URL
 MacroPlayer.prototype.RegExpTable["url"] =
-    "^goto\\s*=\\s*("+im_strre+")\\s*$";
+    "^goto\\s*=\\s*(" + im_strre + ")\\s*$";
 
 MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
     var param = imns.unwrap(this.expandVariables(cmd[1], "url1")),
         scheme = null;
 
     if (!/^([a-z]+):.*/i.test(param)) {
-        param = "http://"+param;
+        param = "http://" + param;
     }
     // Test for javascript: URLs and execute it
     var jsRegex = RegExp("^javascript:\\(?(.+)\\)?$");
@@ -3372,8 +3529,8 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
                         "loading", this.timeout, "Loading ", () => {
                             this.waitingForPageLoad = false;
                             this.handleError(new RuntimeError(
-                                "Page loading timeout"+
-                                    ", URL: "+this.currentURL, 602
+                                "Page loading timeout" +
+                                ", URL: " + this.currentURL, 602
                             ));
                         }
                     )
@@ -3381,7 +3538,7 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
         };
 
         if (hasTabsAPI()) {
-            chrome.tabs.update(this.tab_id, {url: param}, onUpdated);
+            chrome.tabs.update(this.tab_id, { url: param }, onUpdated);
         } else {
             mpUpdateTab(this, this.tab_id, { url: param }, tab => onUpdated(tab));
         }
@@ -3392,12 +3549,12 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
 
 
 // TAB command http://wiki.imacros.net/TAB
-MacroPlayer.prototype.RegExpTable["tab"] = "^(t\\s*=\\s*(\\S+)|"+
-    "close|closeallothers|open|open\\s+new|new\\s+open"+
+MacroPlayer.prototype.RegExpTable["tab"] = "^(t\\s*=\\s*(\\S+)|" +
+    "close|closeallothers|open|open\\s+new|new\\s+open" +
     ")\\s*$";
 
 MacroPlayer.prototype.ActionTable["tab"] = function (cmd) {
-    communicator.postMessage("tab-command", {}, this.tab_id, () => {})
+    communicator.postMessage("tab-command", {}, this.tab_id, () => { })
     if (/^close$/i.test(cmd[1])) { // close current tab
         this.detachDebugger().then(() => mpRemoveTabs(
             this, this.tab_id, () => this.next("TAB CLOSE")
@@ -3406,7 +3563,7 @@ MacroPlayer.prototype.ActionTable["tab"] = function (cmd) {
         //close all tabs except current
         mpQueryTabs(
             this,
-            {windowId: this.win_id, active: false},
+            { windowId: this.win_id, active: false },
             tabs => {
                 let ids = tabs.map(tab => tab.id)
                 this.startTabIndex = 0
@@ -3430,16 +3587,21 @@ MacroPlayer.prototype.ActionTable["tab"] = function (cmd) {
         let n = imns.s2i(this.expandVariables(cmd[2], "tab2"))
         if (isNaN(n))
             throw new BadParameter("T=<number>", 1)
-        let tab_num = n-1
-        mpQueryTabs(this, {windowId: this.win_id}, tabs => {
-            if (tab_num < 0 || tab_num > tabs.length-1) {
+        let tab_num = n - 1
+        mpQueryTabs(this, { windowId: this.win_id }, tabs => {
+            if (tab_num < 0 || tab_num > tabs.length - 1) {
                 this.handleError(
-                    new RuntimeError("Tab number "+n+" does not exist", 771)
+                    new RuntimeError("Tab number " + n + " does not exist", 771)
                 )
             } else {
                 this.detachDebugger().then(() => mpUpdateTab(
-                    this, tabs[tab_num].id, {active: true},
-                    t => this.next("TAB T=")
+                    this, tabs[tab_num].id, { active: true },
+                    t => {
+                        // Immediately update tab_id to ensure subsequent commands use the correct tab
+                        // even if the onTabActivated event hasn't arrived yet.
+                        this.tab_id = tabs[tab_num].id;
+                        this.next("TAB T=")
+                    }
                 ))
             }
         })
@@ -3456,7 +3618,7 @@ MacroPlayer.prototype.ActionTable["wait"] = function (cmd) {
 
     if (isNaN(param))
         throw new BadParameter("SECONDS=<number>", 1);
-    param = Math.round(param*10)*100; // get number of ms
+    param = Math.round(param * 10) * 100; // get number of ms
     if (param == 0)
         param = 10;
     else if (param < 0)
@@ -3474,25 +3636,25 @@ MacroPlayer.prototype.ActionTable["wait"] = function (cmd) {
 
     // show timer
     var start_time = performance.now();
-    var total = param/1000;
+    var total = param / 1000;
     mplayer.waitInterval = setInterval(function () {
         if (!mplayer.inWaitCommand) {
             clearInterval(mplayer.waitInterval);
             return;
         }
-        let passed = (performance.now() - start_time)/1000
+        let passed = (performance.now() - start_time) / 1000
         var remains = total - passed
         if (remains > 0) {
             var text = passed.toFixed(0);
-            while(text.length < 3)
-                text = "0"+text;
+            while (text.length < 3)
+                text = "0" + text;
             badge.set(mplayer.win_id, {
                 status: "waiting",
                 text: text
             });
 
             notifyPanelStatLine(mplayer.win_id,
-                "Waiting "+passed.toFixed(1)+"("+total.toFixed(1)+")s", "info");
+                "Waiting " + passed.toFixed(1) + "(" + total.toFixed(1) + ")s", "info");
         } else {
             clearInterval(mplayer.waitInterval);
             delete mplayer.waitInterval;
@@ -3504,7 +3666,7 @@ MacroPlayer.prototype.ActionTable["wait"] = function (cmd) {
 
 
 
-MacroPlayer.prototype.beforeEachRun = function() {
+MacroPlayer.prototype.beforeEachRun = function () {
     // stopwatch-related properties
     this.watchTable = new Object();
     this.stopwatchResults = new Array();
@@ -3519,7 +3681,7 @@ MacroPlayer.prototype.beforeEachRun = function() {
     this.timers = new Map();
     this.globalTimer.init(this);
     this.proxySettings = null;
-    this.currentFrame = {number: 0};
+    this.currentFrame = { number: 0 };
     // clear waiting flags
     this.waitingForPageLoad = false;
     this.inWaitCommand = false;
@@ -3552,7 +3714,7 @@ MacroPlayer.prototype.beforeEachRun = function() {
 };
 
 
-MacroPlayer.prototype.afterEachRun = function() {
+MacroPlayer.prototype.afterEachRun = function () {
     // form lastPerformance and save STOPWATCH results
     this.saveStopwatchResults();
 
@@ -3565,7 +3727,7 @@ MacroPlayer.prototype.afterEachRun = function() {
 
 
 // reset all defaults, should be called on every play
-MacroPlayer.prototype.reset = function() {
+MacroPlayer.prototype.reset = function () {
     // this.vars = new Array();
     // this.userVars = new Map();
 
@@ -3603,8 +3765,8 @@ MacroPlayer.prototype.reset = function() {
     // default timeout tag wait time
     // TODO: maybe store it in localStorage
     this.timeout = 60;  // seconds
-    this.timeout_tag = Math.round(this.timeout/10);
-    this.timeout_download = this.timeout*5;
+    this.timeout_tag = Math.round(this.timeout / 10);
+    this.timeout_download = this.timeout * 5;
 
     // encryption type
     var typ = Storage.getChar("encryption-type");
@@ -3655,7 +3817,7 @@ MacroPlayer.prototype.reset = function() {
 };
 
 
-MacroPlayer.prototype.pause = function() {
+MacroPlayer.prototype.pause = function () {
     if (!this.pauseIsPending) {
         this.pauseIsPending = true
         context.updateState(this.win_id, "paused")
@@ -3712,7 +3874,7 @@ MacroPlayer.prototype.parseInlineMacro = function (content) {
 };
 
 MacroPlayer.prototype.RegExpTable["run"] =
-    "^macro\\s*=\\s*("+im_strre+")\\s*$";
+    "^macro\\s*=\\s*(" + im_strre + ")\\s*$";
 
 MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
     const rawArg = cmd[1] || "";
@@ -3725,7 +3887,7 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
     );
     const source = loaded != null ? loaded : await this.loadMacroFileFromFs(resolvedPath);
     if (source == null)
-        throw new RuntimeError("Macro '"+macroPath+"' not found", 701);
+        throw new RuntimeError("Macro '" + macroPath + "' not found", 701);
 
     const macro = typeof source === "string" ? this.parseInlineMacro(source) : source;
     macro.name = macro.name || macroPath;
@@ -3740,7 +3902,7 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
 // @macro is a macro name
 // @loopnum - positive integer
 // which should be used to specify cycled replaying
-MacroPlayer.prototype.play = function(macro, limits, callback) {
+MacroPlayer.prototype.play = function (macro, limits, callback) {
     // console.info("Playing macro %O, limits %O", macro, limits);
     const comment = new RegExp("^\\s*(?:'.*)?$");
     this.source = macro.source;
@@ -3779,9 +3941,9 @@ MacroPlayer.prototype.play = function(macro, limits, callback) {
         // prepare stack of actions
         this.action_stack = this.actions.slice();
         this.action_stack.reverse();
-        context.updateState(this.win_id,"playing");
+        context.updateState(this.win_id, "playing");
         notifyPanelShowLines(this.win_id, this.source, this.currentMacro);
-        notifyPanelStatLine(this.win_id, "Replaying "+this.currentMacro, "info");
+        notifyPanelStatLine(this.win_id, "Replaying " + this.currentMacro, "info");
         // start replaying
         this.globalTimer.start();
         this.playNextAction("start");
@@ -3792,10 +3954,10 @@ MacroPlayer.prototype.play = function(macro, limits, callback) {
 
 
 // parse macro
-MacroPlayer.prototype.parseMacro = function() {
+MacroPlayer.prototype.parseMacro = function () {
     const comment = new RegExp("^\\s*(?:'.*)?$");
     const linenumber_delta_re =
-            new RegExp("^\\s*'\\s*!linenumber_delta\\s*:\\s*(-?\\d+)", "i");
+        new RegExp("^\\s*'\\s*!linenumber_delta\\s*:\\s*(-?\\d+)", "i");
     this.linenumber_delta = 0;  // workaround for #381
     // check macro syntax and form list of actions
     this.source = this.source.replace(/\r+/g, ""); // remove \r symbols if any
@@ -3816,24 +3978,26 @@ MacroPlayer.prototype.parseMacro = function() {
             var cmdArguments = RegExp.$2 ? RegExp.$2 : "";
             // check if command is known
             if (!(command in this.RegExpTable))
-                throw new SyntaxError("unknown command: "+
-                                      command.toUpperCase()+
-                                      " at line "+(i+1+this.linenumber_delta));
+                throw new SyntaxError("unknown command: " +
+                    command.toUpperCase() +
+                    " at line " + (i + 1 + this.linenumber_delta));
             // parse arguments
             var args = this.RegExpTable[command].exec(cmdArguments);
-            if ( !args )
-                throw new SyntaxError("wrong format of "+
-                                      command.toUpperCase()+" command"+
-                                      " at line "+(i+1+this.linenumber_delta));
+            if (!args)
+                throw new SyntaxError("wrong format of " +
+                    command.toUpperCase() + " command" +
+                    " at line " + (i + 1 + this.linenumber_delta));
             // put parsed action into action list
-            this.actions.push({name: command,
-                               args: args, line: i+1});
+            this.actions.push({
+                name: command,
+                args: args, line: i + 1
+            });
             this.checkFreewareLimits("lines", this.actions.length)
 
         } else {
-            throw new SyntaxError("can not parse macro line "+
-                                  (i+1+this.linenumber_delta)
-                                  +": "+lines[i]);
+            throw new SyntaxError("can not parse macro line " +
+                (i + 1 + this.linenumber_delta)
+                + ": " + lines[i]);
         }
     }
 };
@@ -3841,7 +4005,7 @@ MacroPlayer.prototype.parseMacro = function() {
 
 
 // exec current action
-MacroPlayer.prototype.exec = function(action) {
+MacroPlayer.prototype.exec = function (action) {
     if (!this.retryInterval) {
         badge.set(this.win_id, {
             status: "playing",
@@ -3856,7 +4020,7 @@ MacroPlayer.prototype.exec = function(action) {
 };
 
 // delayed start of next action
-MacroPlayer.prototype.next = function(caller_id) {
+MacroPlayer.prototype.next = function (caller_id) {
     var mplayer = this;
     if (this.delay) {
         this.waitingForDelay = true;
@@ -3868,60 +4032,60 @@ MacroPlayer.prototype.next = function(caller_id) {
             }, this.delay);
         }
     } else {
-        asyncRun(function() {mplayer.playNextAction(caller_id);});
+        asyncRun(function () { mplayer.playNextAction(caller_id); });
     }
     // stop profile timer
     this.profiler.end("OK", 1, this);
 };
 
 
-MacroPlayer.prototype.playNextAction = function(caller_id) {
+MacroPlayer.prototype.playNextAction = function (caller_id) {
     if (!this.playing)
         return;
 
     if (!this.retryInterval) {
-        notifyPanelStatLine(this.win_id, "Replaying "+this.currentMacro, "info");
+        notifyPanelStatLine(this.win_id, "Replaying " + this.currentMacro, "info");
     }
 
     // call "each run" initialization routine
     if (caller_id == "new loop")
         this.beforeEachRun();
 
-    if ( this.pauseIsPending ) { // check if player should be paused
+    if (this.pauseIsPending) { // check if player should be paused
         this.pauseIsPending = false;
         this.paused = true;
         return;
-    } else if ( this.paused ||
-                this.waitingForDelay ||    // replaying delay
-                this.waitingForPageLoad || // a page is loading
-                this.inWaitCommand ||     // we are in WAIT
-                this.waitingForPassword || // asking for a password
-                this.waitingForExtract     // extract dialog
-              ) {
+    } else if (this.paused ||
+        this.waitingForDelay ||    // replaying delay
+        this.waitingForPageLoad || // a page is loading
+        this.inWaitCommand ||     // we are in WAIT
+        this.waitingForPassword || // asking for a password
+        this.waitingForExtract     // extract dialog
+    ) {
         if (Storage.getBool("debug"))
-            console.debug("("+this.globalTimer.getElapsedSeconds().toFixed(3)+") "+
-                          "playNextAction(caller='"+(caller_id || "")+"')"+
-                          ", waiting for: "+
-                          (this.waitingForDelay ? "delay, " : "")+
-                          (this.waitingForPageLoad ? "page load, " : "")+
-                          (this.waitingForPassword ? "password, " : "")+
-                          (this.waitingForExtract ? "extract, " : "")+
-                          (this.inWaitCommand ? "in wait, ": ""));
+            console.debug("(" + this.globalTimer.getElapsedSeconds().toFixed(3) + ") " +
+                "playNextAction(caller='" + (caller_id || "") + "')" +
+                ", waiting for: " +
+                (this.waitingForDelay ? "delay, " : "") +
+                (this.waitingForPageLoad ? "page load, " : "") +
+                (this.waitingForPassword ? "password, " : "") +
+                (this.waitingForExtract ? "extract, " : "") +
+                (this.inWaitCommand ? "in wait, " : ""));
         // waiting for something
         return;
-    }  else {
+    } else {
         // fetch next action
-        if ( this.action_stack.length ) {
+        if (this.action_stack.length) {
             this.currentAction = this.action_stack.pop();
             try {
                 if (Storage.getBool("debug"))
                     console.debug(
-                        "("+this.globalTimer.getElapsedSeconds().toFixed(3)+") "+
-                            "playNextAction(caller='"+(caller_id || "")+
-                            "')\n playing "+
-                            this.currentAction.name.toUpperCase()+
-                            " command"+
-                            ", line: "+this.currentAction.line
+                        "(" + this.globalTimer.getElapsedSeconds().toFixed(3) + ") " +
+                        "playNextAction(caller='" + (caller_id || "") +
+                        "')\n playing " +
+                        this.currentAction.name.toUpperCase() +
+                        " command" +
+                        ", line: " + this.currentAction.line
                     );
                 this.profiler.start(this.currentAction);
                 this.exec(this.currentAction);
@@ -3954,11 +4118,11 @@ MacroPlayer.prototype.playNextAction = function(caller_id) {
 
 // handle error
 MacroPlayer.prototype.handleError = function (e) {
-    this.errorCode = e.errnum ? -1*Math.abs(e.errnum) : -1001;
-    this.errorMessage = (e.name ? e.name : "Error")+": "+e.message;
+    this.errorCode = e.errnum ? -1 * Math.abs(e.errnum) : -1001;
+    this.errorMessage = (e.name ? e.name : "Error") + ": " + e.message;
     if (this.currentAction) {
-        this.errorMessage += ", line: "+
-            (this.currentAction.line+this.linenumber_delta).toString();
+        this.errorMessage += ", line: " +
+            (this.currentAction.line + this.linenumber_delta).toString();
     }
     // save profiler data for the broken action
     this.profiler.end(this.errorMessage, this.errorCode, this);
@@ -3977,7 +4141,7 @@ MacroPlayer.prototype.handleError = function (e) {
     showInfo(args);
     if (this.playing && !this.ignoreErrors) {
         this.stop();
-    } else if(this.ignoreErrors) {
+    } else if (this.ignoreErrors) {
         this.next("error handler");
     }
 };
@@ -3985,7 +4149,7 @@ MacroPlayer.prototype.handleError = function (e) {
 
 
 // form lastPerformance and save STOPWATCH results
-MacroPlayer.prototype.saveStopwatchResults = function() {
+MacroPlayer.prototype.saveStopwatchResults = function () {
     // ensure that macro timeout is cleared
     this.globalTimer.stop();
 
@@ -3993,13 +4157,13 @@ MacroPlayer.prototype.saveStopwatchResults = function() {
     this.totalRuntime = this.globalTimer.getElapsedSeconds();
 
     // make all values look like 00000.000
-    var format = function(x) {
+    var format = function (x) {
         var m = x.toFixed(3).match(/^(\d+)\.(\d{3})/);
         var s = m[1];
         while (s.length < 5)
-            s = "0"+s;
+            s = "0" + s;
 
-        return s+"."+m[2];
+        return s + "." + m[2];
     };
 
     this.lastPerformance.push(
@@ -4018,14 +4182,14 @@ MacroPlayer.prototype.saveStopwatchResults = function() {
     let t = imns.formatDate("hh:nn", now);
 
     let newline = __is_windows() ? "\r\n" : "\n";
-    let s = "\"Date: "+d+"  Time: "+t+
-        ", Macro: "+this.currentMacro+
-        ", Status: "+this.errorMessage+" ("+this.errorCode+")\",";
+    let s = "\"Date: " + d + "  Time: " + t +
+        ", Macro: " + this.currentMacro +
+        ", Status: " + this.errorMessage + " (" + this.errorCode + ")\",";
     s += newline;
     for (let r of this.stopwatchResults) {
         let timestamp = imns.formatDate("dd/mm/yyyy,hh:nn:ss", r.timestamp);
-        s += "\""+timestamp+"\","+"\""+r.id+"\","+
-            "\""+r.elapsedTime.toFixed(3).toString()+"\"";
+        s += "\"" + timestamp + "\"," + "\"" + r.id + "\"," +
+            "\"" + r.elapsedTime.toFixed(3).toString() + "\"";
         s += newline;
         this.lastPerformance.push(
             {
@@ -4051,7 +4215,7 @@ MacroPlayer.prototype.saveStopwatchResults = function() {
             file = this.defDownloadFolder.clone()
         let filename = /^(.+)\.iim$/i.test(this.currentMacro) ?
             RegExp.$1 : this.currentMacro;
-        file.append("performance_"+filename+".csv");
+        file.append("performance_" + filename + ".csv");
     }
 
     afio.appendTextFile(file, s).catch(console.error.bind(console));
@@ -4060,31 +4224,31 @@ MacroPlayer.prototype.saveStopwatchResults = function() {
 
 MacroPlayer.prototype.profiler = {
     // make string representation of Date object
-    make_str: function(x) {
-        var prepend = function(str, num) {
+    make_str: function (x) {
+        var prepend = function (str, num) {
             str = str.toString();
             var x = imns.s2i(str), y = imns.s2i(num);
             if (isNaN(x) || isNaN(y))
                 return;
             while (str.length < num)
-                str = '0'+str;
+                str = '0' + str;
             return str;
         };
-        var str = prepend(x.getHours(), 2)+":"+
-            prepend(x.getMinutes(), 2)+":"+
-            prepend(x.getSeconds(), 2)+"."+
+        var str = prepend(x.getHours(), 2) + ":" +
+            prepend(x.getMinutes(), 2) + ":" +
+            prepend(x.getSeconds(), 2) + "." +
             prepend(x.getMilliseconds(), 3);
         return str;
     },
 
-    init: function() {
+    init: function () {
         this.profiler_data = new Array();
         this.macroStartTime = new Date();
         this.enabled = false;
     },
 
 
-    start: function(action) {
+    start: function (action) {
         if (!this.enabled)
             return;
         this.currentAction = action;
@@ -4092,15 +4256,15 @@ MacroPlayer.prototype.profiler = {
     },
 
 
-    end: function(err_text, err_code, mplayer) {
+    end: function (err_text, err_code, mplayer) {
         if (!this.enabled || !this.startTime)
             return;
         var now = new Date();
-        var elapsedTime = (now.getTime()-this.startTime.getTime())/1000;
+        var elapsedTime = (now.getTime() - this.startTime.getTime()) / 1000;
 
         // form new profiler data object
         var data = {
-            Line: this.currentAction.line+mplayer.linenumber_delta,
+            Line: this.currentAction.line + mplayer.linenumber_delta,
             StartTime: this.make_str(this.startTime),
             EndTime: this.make_str(now),
             ElapsedSeconds: elapsedTime.toFixed(3),
@@ -4112,14 +4276,14 @@ MacroPlayer.prototype.profiler = {
         // add timeout_threshold value if applicable
         if (this.currentAction.name == "tag") {
             var threshold = (mplayer.timeout_tag > 0) ?
-                mplayer.timeout_tag : mplayer.timeout/10;
+                mplayer.timeout_tag : mplayer.timeout / 10;
             // get threshold in percents of timeout_tag
             data.timeout_threshold =
-                ((elapsedTime/threshold)*100).toFixed();
+                ((elapsedTime / threshold) * 100).toFixed();
         } else if (this.currentAction.name == "url") {
             // get threshold in percents of timeout_page
             data.timeout_threshold =
-                ((elapsedTime/mplayer.timeout)*100).toFixed();
+                ((elapsedTime / mplayer.timeout) * 100).toFixed();
         }
         // console.log("new profiler data, %O", data);
         this.profiler_data.push(data);
@@ -4129,7 +4293,7 @@ MacroPlayer.prototype.profiler = {
         delete this.startTime;
     },
 
-    getResultingXMLFragment: function(mplayer) {
+    getResultingXMLFragment: function (mplayer) {
         if (!this.enabled)
             return "";
         var macroEndTime = new Date();
@@ -4146,7 +4310,7 @@ MacroPlayer.prototype.profiler = {
         var j = mplayer.linenumber_delta == 0 ? 0 : -mplayer.linenumber_delta;
         for (var i = 0; i < source.length; i++) {
             if (j < this.profiler_data.length &&
-                this.profiler_data[j].Line == i+1+mplayer.linenumber_delta) {
+                this.profiler_data[j].Line == i + 1 + mplayer.linenumber_delta) {
                 var command = doc.createElement("Command");
                 var string = doc.createElement("String");
                 // first set String node
@@ -4183,8 +4347,8 @@ MacroPlayer.prototype.profiler = {
         var end = doc.createElement("End"); // macro end time
         end.textContent = this.make_str(macroEndTime);
         var elapsed = doc.createElement("ElapsedSeconds"); // macro duration
-        var duration = (macroEndTime.getTime()-
-                        this.macroStartTime.getTime())/1000;
+        var duration = (macroEndTime.getTime() -
+            this.macroStartTime.getTime()) / 1000;
         elapsed.textContent = duration.toFixed(3);
         var status = doc.createElement("Status"); // error code and text
         var code = doc.createElement("Code");
@@ -4209,8 +4373,8 @@ MacroPlayer.prototype.profiler = {
 };
 
 
-MacroPlayer.prototype.saveProfilerData = function() {
-    if(!this.defDownloadFolder)
+MacroPlayer.prototype.saveProfilerData = function () {
+    if (!this.defDownloadFolder)
         return;
     var xml_frag = this.profiler.getResultingXMLFragment(this);
     var file = null;
@@ -4219,27 +4383,27 @@ MacroPlayer.prototype.saveProfilerData = function() {
             file = afio.openNode(this.profiler.file);
         } else {
             file = this.defDownloadFolder.clone()
-            var leafname = /\.xml$/i.test(this.profiler.file)?
-                this.profiler.file : this.profiler.file+".xml";
+            var leafname = /\.xml$/i.test(this.profiler.file) ?
+                this.profiler.file : this.profiler.file + ".xml";
             file.append(leafname);
         }
     } else {
         file = this.defDownloadFolder.clone()
-        file.append("Chrome_Profiler_"+imns.formatDate("yyyy-mm-dd")+".xml");
+        file.append("Chrome_Profiler_" + imns.formatDate("yyyy-mm-dd") + ".xml");
     }
 
-    file.exists().then(function(exists) {
+    file.exists().then(function (exists) {
         if (exists) {
-            return afio.readTextFile(file).then(function(x) {
-                x = x.replace(/\s*<\/Profile>\s*$/, "\n"+xml_frag+"</Profile>");
+            return afio.readTextFile(file).then(function (x) {
+                x = x.replace(/\s*<\/Profile>\s*$/, "\n" + xml_frag + "</Profile>");
                 return afio.writeTextFile(file, x);
             });
         } else {
-            var x = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"+
-                "<?xml-stylesheet type='text/xsl' href='Profiler.xsl'?>\n"+
-                "<Profile>\n"+
-                "<!--Profiled with iMacros for Chrome "+
-                Storage.getChar("version")+" on "+(new Date())+"-->";
+            var x = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
+                "<?xml-stylesheet type='text/xsl' href='Profiler.xsl'?>\n" +
+                "<Profile>\n" +
+                "<!--Profiled with iMacros for Chrome " +
+                Storage.getChar("version") + " on " + (new Date()) + "-->";
             x += xml_frag;
             x += "</Profile>";
             return afio.writeTextFile(file, x);
@@ -4248,7 +4412,7 @@ MacroPlayer.prototype.saveProfilerData = function() {
 };
 
 
-MacroPlayer.prototype.stop = function() {    // Stop playing
+MacroPlayer.prototype.stop = function () {    // Stop playing
     this.detachDebugger()
     this.playing = false
     this.pauseIsPending = false
@@ -4284,12 +4448,12 @@ MacroPlayer.prototype.stop = function() {    // Stop playing
 
     // tell content script do some clean-up
     communicator.postMessage("stop-replaying", {}, this.tab_id,
-                             function() {});
+        function () { });
 
     // clear user-set variables
     this.vars = new Array();
-    this.userVars.clear();    
-    context.updateState(this.win_id,"idle");
+    this.userVars.clear();
+    context.updateState(this.win_id, "idle");
 
     // restore proxy settings
     if (this.proxySettings) {
@@ -4326,12 +4490,12 @@ MacroPlayer.prototype.stop = function() {    // Stop playing
     if (typeof this.callback == "function") {
         var f = this.callback, self = this;
         delete this.callback;
-        setTimeout(function() {f(self);}, 0);
+        setTimeout(function () { f(self); }, 0);
     }
 };
 
 
-MacroPlayer.prototype.checkFreewareLimits = function(type, value) {
+MacroPlayer.prototype.checkFreewareLimits = function (type, value) {
     let check = (max, msg) => {
         if (value <= max) {
             return value
@@ -4339,29 +4503,29 @@ MacroPlayer.prototype.checkFreewareLimits = function(type, value) {
             throw new FreewareLimit(msg + " " + value + " exceeds max value " + max)
         }
     }
-    if(!this.limits) 
+    if (!this.limits)
         return value;
-    switch(type) {
-    case "lines":
-        return check(this.limits.maxMacroLen, "macro length")
-    case "loops":
-        return check(this.limits.maxIterations, "number of iterations")
-    case "csv_rows":
-        return check(this.limits.maxCSVRows, "number of CSV rows")
-    case "csv_cols":
-        return check(this.limits.maxCSVCols, "number of CSV columns")
-    case "user_vars":
-        if (!this.limits.userVars) {
-            throw new FreewareLimit("user defined variables not allowed."+
-                                    " Maximum number of variables is " +
-                                    this.limits.maxVariables)
-        } else {
-            return value
-        }
+    switch (type) {
+        case "lines":
+            return check(this.limits.maxMacroLen, "macro length")
+        case "loops":
+            return check(this.limits.maxIterations, "number of iterations")
+        case "csv_rows":
+            return check(this.limits.maxCSVRows, "number of CSV rows")
+        case "csv_cols":
+            return check(this.limits.maxCSVCols, "number of CSV columns")
+        case "user_vars":
+            if (!this.limits.userVars) {
+                throw new FreewareLimit("user defined variables not allowed." +
+                    " Maximum number of variables is " +
+                    this.limits.maxVariables)
+            } else {
+                return value
+            }
     }
 }
 
-MacroPlayer.prototype.convertLimits = function(limits) {
+MacroPlayer.prototype.convertLimits = function (limits) {
     // { "maxVariables" : number|"unlimited",
     //   "maxCSVRows" : number|"unlimited",
     //   "maxCSVCols" : number|"unlimited",
@@ -4374,7 +4538,7 @@ MacroPlayer.prototype.convertLimits = function(limits) {
         obj[key] = convert(limits[key])
     }
     obj.varsRe = limits.maxVariables == "unlimited" || limits.maxVariables >= 10 ?
-        /^!var([0-9]+)$/i : new RegExp("^!var([1-"+limits.maxVariables+"])$", "i");
+        /^!var([0-9]+)$/i : new RegExp("^!var([1-" + limits.maxVariables + "])$", "i");
     obj.userVars = limits.maxVariables == "unlimited" || limits.maxVariables >= 10;
 
     return Object.freeze(obj)
@@ -4385,27 +4549,27 @@ MacroPlayer.prototype.getExtractData = function () {
     return this.extractData;
 };
 
-MacroPlayer.prototype.addExtractData = function(str) {
-    if ( this.extractData.length ) {
-        this.extractData += "[EXTRACT]"+str;
+MacroPlayer.prototype.addExtractData = function (str) {
+    if (this.extractData.length) {
+        this.extractData += "[EXTRACT]" + str;
     } else {
         this.extractData = str;
     }
 };
 
-MacroPlayer.prototype.clearExtractData = function() {
+MacroPlayer.prototype.clearExtractData = function () {
     this.extractData = "";
 };
 
 
 // Show Popup for extraction
-MacroPlayer.prototype.showAndAddExtractData = function(str) {
+MacroPlayer.prototype.showAndAddExtractData = function (str) {
     this.addExtractData(str);
     if (!this.shouldPopupExtract)
         return;
     this.waitingForExtract = true;
-    var features = "titlebar=no,menubar=no,location=no,"+
-        "resizable=yes,scrollbars=yes,status=no,"+
+    var features = "titlebar=no,menubar=no,location=no," +
+        "resizable=yes,scrollbars=yes,status=no," +
         "width=430,height=380";
     var win = window.open("extractDialog.html",
         null, features);
@@ -4418,7 +4582,7 @@ MacroPlayer.prototype.showAndAddExtractData = function(str) {
 
 
 // Datasources
-MacroPlayer.prototype.loadDataSource = function(filename) {
+MacroPlayer.prototype.loadDataSource = function (filename) {
     var file;
     if (!__is_full_path(filename)) {
         if (this.dataSourceFolder)
@@ -4431,12 +4595,12 @@ MacroPlayer.prototype.loadDataSource = function(filename) {
         file = afio.openNode(filename);
     }
     var mplayer = this;
-    return file.exists().then(function(exists) {
+    return file.exists().then(function (exists) {
         if (!exists) {
             throw new RuntimeError("Data source file does not exist", 730)
         }
         mplayer.dataSourceFile = file.path;
-        return afio.readTextFile(file).then(function(data) {
+        return afio.readTextFile(file).then(function (data) {
             if (!/\r?\n$/.test(data))
                 data += "\n";     // add \n to make regexp not so complicated
             mplayer.dataSource = new Array();
@@ -4445,8 +4609,8 @@ MacroPlayer.prototype.loadDataSource = function(filename) {
             var ws = '[ \t\v]';   // non-crlf whitespace,
             // TODO: should we include all Unicode ws?
             var delim = mplayer.dataSourceDelimiter;
-            var field = ws+'*("(?:[^\"]+|"")*"|[^'+delim+'\\n\\r]*)'+ws+
-                '*('+delim+'|\\r?\\n|\\r)';
+            var field = ws + '*("(?:[^\"]+|"")*"|[^' + delim + '\\n\\r]*)' + ws +
+                '*(' + delim + '|\\r?\\n|\\r)';
             var re = new RegExp(field, "g"), m, vals = new Array();
             while (m = re.exec(data)) {
                 var value = m[1], t;
@@ -4458,7 +4622,7 @@ MacroPlayer.prototype.loadDataSource = function(filename) {
                 // preserve double-quoted strings
                 // see fx #362
                 if (t = value.match(/^\"((?:[\r\n]|.)*)\"$/))
-                    value = '"\\"'+t[1]+'\\""';
+                    value = '"\\"' + t[1] + '\\""';
                 vals.push(value);
                 mplayer.checkFreewareLimits("csv_cols", vals.length)
                 if (m[2] != delim) {
@@ -4470,10 +4634,10 @@ MacroPlayer.prototype.loadDataSource = function(filename) {
             }
 
             if (!mplayer.dataSource.length) {
-                    throw new RuntimeError("Can not parse datasource file "+
-                                           filename, 752)
+                throw new RuntimeError("Can not parse datasource file " +
+                    filename, 752)
             }
-        }).catch(function(err) {
+        }).catch(function (err) {
             mplayer.handleError(err);
         });
     });
@@ -4481,43 +4645,43 @@ MacroPlayer.prototype.loadDataSource = function(filename) {
 
 
 MacroPlayer.prototype.getColumnData = function (col) {
-    var line =  this.dataSourceLine || this.currentLoop;
+    var line = this.dataSourceLine || this.currentLoop;
 
     if (!line)
         line = 1;
 
     if (line > this.dataSource.length)
-        throw new RuntimeError("Row number "+line+" exceeds available rows "+this.dataSource.length, 754);
+        throw new RuntimeError("Row number " + line + " exceeds available rows " + this.dataSource.length, 754);
 
-    var max_columns = this.dataSourceColumns || this.dataSource[line-1].length;
+    var max_columns = this.dataSourceColumns || this.dataSource[line - 1].length;
     if (col > max_columns)
-        throw new RuntimeError("Column number "+col+
-                               " greater than total number"+
-                               " of columns "+max_columns, 753);
+        throw new RuntimeError("Column number " + col +
+            " greater than total number" +
+            " of columns " + max_columns, 753);
 
-    return this.dataSource[line-1][col-1];
+    return this.dataSource[line - 1][col - 1];
 };
 
 
 // functions to access built-in VARiables
-MacroPlayer.prototype.getVar = function(idx) {
+MacroPlayer.prototype.getVar = function (idx) {
     var num = typeof idx === "string" ? imns.s2i(idx) : idx;
     return this.vars[num] || "";
 };
 
 // functions to access user defined variables
-MacroPlayer.prototype.setUserVar = function(name, value) {
+MacroPlayer.prototype.setUserVar = function (name, value) {
     this.checkFreewareLimits("user_vars", null);
     this.userVars.set(name.toLowerCase(), value);
 };
 
-MacroPlayer.prototype.getUserVar = function(name) {
+MacroPlayer.prototype.getUserVar = function (name) {
     this.checkFreewareLimits("user_vars", null);
     var value = this.userVars.get(name.toLowerCase());
     return value === undefined ? "" : value;
 };
 
-MacroPlayer.prototype.hasUserVar = function(name) {
+MacroPlayer.prototype.hasUserVar = function (name) {
     this.checkFreewareLimits("user_vars", null);
     return this.userVars.has(name.toLowerCase());
 };
@@ -4555,16 +4719,16 @@ MacroPlayer.prototype.do_eval = function (s, eval_id) {
 };
 
 
-MacroPlayer.prototype.onSandboxMessage = function(event) {
+MacroPlayer.prototype.onSandboxMessage = function (event) {
     var x = event.data;
     if (!x.type || x.type != "eval_in_sandbox_result")
         return;
-    
+
     var r = x.result;
     // convert undefined or null result to a string value
-    if (typeof(x.result) == "undefined") {
+    if (typeof (x.result) == "undefined") {
         r = "undefined";
-    } else if (!r && typeof(r) == "object") {
+    } else if (!r && typeof (r) == "object") {
         r = "null";
     }
     // store the result
@@ -4579,9 +4743,9 @@ MacroPlayer.prototype.onSandboxMessage = function(event) {
     }
 };
 
-MacroPlayer.prototype.onInterrupt = function(eval_id) {
+MacroPlayer.prototype.onInterrupt = function (eval_id) {
     if (Storage.getBool("debug")) {
-        console.debug("Caught interrupt exception, eval_id="+eval_id);
+        console.debug("Caught interrupt exception, eval_id=" + eval_id);
     }
 };
 
@@ -4589,7 +4753,7 @@ MacroPlayer.prototype.onInterrupt = function(eval_id) {
 // {{varname}} with the variable value
 // Use '#NOVAR#{{' to insert '{{'
 // (the function would fail if a variable contains '#novar#{' string)
-MacroPlayer.prototype.expandVariables = function(param, eval_id) {
+MacroPlayer.prototype.expandVariables = function (param, eval_id) {
     // first replace all #NOVAR#{{ by #NOVAR#{
     param = param.replace(/#novar#\{\{/ig, "#NOVAR#{");
     // substitute {{vars}}
@@ -4941,7 +5105,7 @@ MacroPlayer.prototype.expandVariables = function(param, eval_id) {
         if (t) return mplayer.imageY;
 
         t = var_name.match(/^!\S+$/);
-        if (t) throw new BadParameter("Unsupported variable "+var_name);
+        if (t) throw new BadParameter("Unsupported variable " + var_name);
 
         return mplayer.getUserVar(var_name);
     };
@@ -4958,7 +5122,7 @@ MacroPlayer.prototype.expandVariables = function(param, eval_id) {
                 replace(/\n/g, "\\n").
                 replace(/\r/g, "\\r");
         };
-        var js_str = match[1].replace(/\{\{(\S+?)\}\}/g, function(m, s) {
+        var js_str = match[1].replace(/\{\{(\S+?)\}\}/g, function (m, s) {
             return escape(handleVariable(m, s))
         });
         // substitute all #novar#{ by {{

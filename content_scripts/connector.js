@@ -18,7 +18,10 @@ function Connector() {
             let handledByNew = connector.onMessage(msg, callback);
 
             // Log warning only if neither system handled the message and it has a topic
-            if (!handledByLegacy && !handledByNew && msg.topic) {
+            // AND the message was not targeting a different frame (if _frame is specified)
+            let isTargetingOtherFrame = msg._frame && !connector.thisFrame(msg._frame);
+
+            if (!handledByLegacy && !handledByNew && msg.topic && !isTargetingOtherFrame) {
                 console.warn("[iMacros MV3] Unknown topic:", msg.topic, "Current handlers:", Object.keys(connector.handlers));
                 logWarning(`Connector: Unknown topic '${msg.topic}' - not handled by any system`, {
                     topic: msg.topic,
@@ -155,12 +158,17 @@ Connector.prototype.postMessage = function (topic, data, callback) {
         chrome.runtime.sendMessage({ topic: topic, data: data }, function (response) {
             if (chrome.runtime.lastError) {
                 // Only log if it's not the expected "message channel closed" error for query-state
-                if (topic !== 'query-state' || chrome.runtime.lastError.message.indexOf('message channel closed') === -1) {
-                    console.error("Error sending message from connector:", chrome.runtime.lastError.message, { topic: topic });
-                    logError("Connector.postMessage: Failed to send message: " + chrome.runtime.lastError.message, {
+                var errorMsg = chrome.runtime.lastError.message;
+                var isIgnorableError = topic === 'query-state' &&
+                    (errorMsg.indexOf('message channel closed') !== -1 ||
+                        errorMsg.indexOf('The message port closed') !== -1);
+
+                if (!isIgnorableError) {
+                    console.error("Error sending message from connector:", errorMsg, { topic: topic });
+                    logError("Connector.postMessage: Failed to send message: " + errorMsg, {
                         topic: topic,
                         url: window.location.href,
-                        errorMessage: chrome.runtime.lastError.message
+                        errorMessage: errorMsg
                     });
                 }
             }
@@ -170,12 +178,17 @@ Connector.prototype.postMessage = function (topic, data, callback) {
         chrome.runtime.sendMessage({ topic: topic, data: data }, function (response) {
             if (chrome.runtime.lastError) {
                 // Only log if it's not the expected "message channel closed" error for query-state
-                if (topic !== 'query-state' || chrome.runtime.lastError.message.indexOf('message channel closed') === -1) {
-                    console.error("Error sending message from connector:", chrome.runtime.lastError.message, { topic: topic });
-                    logError("Connector.postMessage: Failed to send message: " + chrome.runtime.lastError.message, {
+                var errorMsg = chrome.runtime.lastError.message;
+                var isIgnorableError = topic === 'query-state' &&
+                    (errorMsg.indexOf('message channel closed') !== -1 ||
+                        errorMsg.indexOf('The message port closed') !== -1);
+
+                if (!isIgnorableError) {
+                    console.error("Error sending message from connector:", errorMsg, { topic: topic });
+                    logError("Connector.postMessage: Failed to send message: " + errorMsg, {
                         topic: topic,
                         url: window.location.href,
-                        errorMessage: chrome.runtime.lastError.message
+                        errorMessage: errorMsg
                     });
                 }
             }
