@@ -14,75 +14,64 @@ of altering command semantics.
 
 // Basic logging stub to avoid runtime failures in test harnesses where
 // showInfo is not provided by the UI layer.
-var showInfo = (typeof globalThis.showInfo === 'function')
-    ? globalThis.showInfo
-    : function (message) {
+if (typeof showInfo !== 'function') {
+    function showInfo(args) {
         try {
-            console.info('[MacroPlayer] Info:', message);
+            console.info('[MacroPlayer] Info:', args);
         } catch (e) {
             // console may not be available in every embedding context
         }
-    };
-if (typeof globalThis.showInfo !== 'function') {
-    globalThis.showInfo = showInfo;
+    }
 }
 
 // Variable manager wrapper that keeps the legacy MacroPlayer variable
 // storage in sync with the newer VariableManager utility loaded by the
 // test harness.
-if (typeof VariableManager === 'function') {
-    function PlayerVariableManager(player) {
-        VariableManager.call(this);
-        this.player = player;
-        this._syncVarsFromPlayer();
+function PlayerVariableManager(player) {
+    VariableManager.call(this);
+    this.player = player;
+    this._syncVarsFromPlayer();
+}
+
+PlayerVariableManager.prototype = Object.create(VariableManager.prototype);
+PlayerVariableManager.prototype.constructor = PlayerVariableManager;
+
+PlayerVariableManager.prototype._syncVarsFromPlayer = function () {
+    if (!this.player || !Array.isArray(this.player.vars)) {
+        return;
     }
-
-    PlayerVariableManager.prototype = Object.create(VariableManager.prototype);
-    PlayerVariableManager.prototype.constructor = PlayerVariableManager;
-
-    PlayerVariableManager.prototype._syncVarsFromPlayer = function () {
-        if (!this.player || !Array.isArray(this.player.vars)) {
-            return;
+    for (let i = 0; i < this.player.vars.length; i++) {
+        if (typeof this.player.vars[i] !== 'undefined') {
+            this.globalVars.set('VAR' + i, this.player.vars[i]);
         }
-        for (let i = 0; i < this.player.vars.length; i++) {
-            if (typeof this.player.vars[i] !== 'undefined') {
-                this.globalVars.set('VAR' + i, this.player.vars[i]);
-            }
-        }
-    };
+    }
+};
 
-    PlayerVariableManager.prototype.setVar = function (name, value) {
-        name = String(name ?? '').replace(/^!/, '');
-        VariableManager.prototype.setVar.call(this, name, value);
+PlayerVariableManager.prototype.setVar = function (name, value) {
+    name = name.replace(/^!/, '');
+    VariableManager.prototype.setVar.call(this, name, value);
 
-        if (/^VAR\d+$/i.test(name)) {
-            const idx = parseInt(name.slice(3), 10);
-            if (idx < 0 || idx > 9999) {
-                console.warn('[PlayerVariableManager] Variable index out of range:', idx);
-                return;
-            }
+    if (/^VAR\d+$/.test(name)) {
+        const idx = parseInt(name.slice(3), 10);
+        if (!Number.isNaN(idx)) {
             this.player.vars[idx] = value;
         }
+    }
 
-        if (name === 'LOOP') {
-            const loop = parseInt(value, 10);
-            this.player.currentLoop = Number.isFinite(loop) && loop > 0 ? loop : 1;
-        }
-    };
+    if (name === 'LOOP') {
+        this.player.currentLoop = value;
+    }
+};
 
-    PlayerVariableManager.prototype.resetLocalContext = function (currentLoop) {
-        const loopSeed = parseInt(currentLoop ?? (this.localContext && this.localContext.LOOP), 10);
-        const loopValue = Number.isFinite(loopSeed) && loopSeed > 0 ? loopSeed : 1;
-        VariableManager.prototype.resetLocalContext.call(this);
-        this.localContext.LOOP = loopValue;
-        this.player.currentLoop = loopValue;
-    };
+PlayerVariableManager.prototype.resetLocalContext = function () {
+    VariableManager.prototype.resetLocalContext.call(this);
+    this.player.currentLoop = this.localContext.LOOP;
+};
 
-    PlayerVariableManager.prototype.clearGlobalVars = function () {
-        VariableManager.prototype.clearGlobalVars.call(this);
-        this.player.vars.length = 0;
-    };
-}
+PlayerVariableManager.prototype.clearGlobalVars = function () {
+    VariableManager.prototype.clearGlobalVars.call(this);
+    this.player.vars = new Array();
+};
 
 // MacroPlayer implementation
 function MacroPlayer(win_id) {
@@ -92,7 +81,7 @@ function MacroPlayer(win_id) {
     this.userVars = new Map();
     this.ports = new Object();
     this._ActionTable = new Object();
-    this.callStack = new Array();
+    this.callStack = [];
     this.compileExpressions();
 
     this._onScriptError = this.onErrorOccurred.bind(this);
@@ -132,7 +121,7 @@ function MacroPlayer(win_id) {
     this._onDownloadCreated = this.onDownloadCreated.bind(this);
     this._onDownloadChanged = this.onDownloadChanged.bind(this);
 
-    if (typeof VariableManager === 'function' && typeof PlayerVariableManager === 'function') {
+    if (typeof VariableManager === 'function') {
         this.varManager = new PlayerVariableManager(this);
     }
 }
@@ -913,16 +902,10 @@ MacroPlayer.prototype.stopTimer = function (type) {
     timer = null;
 };
 
-/**
- * Removes and returns the top frame from the internal call stack.
- * Used by the test harness to keep legacy macro execution stacks in sync.
- * @returns {*} the removed frame or undefined when the stack is empty
- */
 MacroPlayer.prototype._popFrame = function () {
     if (this.callStack && this.callStack.length) {
-        return this.callStack.pop();
+        this.callStack.pop();
     }
-    return undefined;
 };
 
 
@@ -3895,7 +3878,7 @@ MacroPlayer.prototype.reset = function () {
     this.waitingForPassword = false;
 
     if (this.varManager && typeof this.varManager.resetLocalContext === 'function') {
-        this.varManager.resetLocalContext(this.currentLoop || 1);
+        this.varManager.resetLocalContext();
     }
 
     // downloads state
@@ -4788,7 +4771,10 @@ MacroPlayer.prototype.getColumnData = function (col) {
 // functions to access built-in VARiables
 MacroPlayer.prototype.getVar = function (idx) {
     if (this.varManager && typeof this.varManager.getVar === 'function') {
-        const name = /^VAR\d+$/i.test(String(idx)) ? idx : 'VAR' + imns.s2i(idx);
+        let name = idx;
+        if (typeof idx !== 'string' || /^\d+$/.test(idx)) {
+            name = 'VAR' + imns.s2i(idx);
+        }
         const value = this.varManager.getVar(name);
         if (typeof value !== 'undefined') {
             return value === null ? "" : value;
