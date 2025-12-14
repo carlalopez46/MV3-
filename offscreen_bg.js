@@ -245,7 +245,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 console.debug('[iMacros Offscreen] No handler for forwarded message:', topic);
                 // Return state: 'idle' to satisfy CSRecorder.onQueryStateCompleted
                 if (sendResponse) sendResponse({
-                    success: false,
+                    success: true, // ACKNOWLEDGE the message to stop retries, even if not handled
                     state: 'idle',
                     error: 'No handler found',
                     notHandled: true
