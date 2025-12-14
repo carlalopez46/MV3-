@@ -170,16 +170,32 @@ function sharedSave(save_data, overwrite, callback) {
                     if (chrome.runtime.lastError) {
                         console.error("[iMacros] Failed to store saveAs args:", chrome.runtime.lastError);
                     }
-                    var features = "titlebar=no,menubar=no,location=no," +
-                        "resizable=yes,scrollbars=no,status=no";
-                    window.open("saveAsDialog.html?key=" + dialogKey, null, features);
+
+                    // Use chrome.windows.create if reachable (MV3/SW friendly), fallback to window.open
+                    if (typeof chrome.windows !== 'undefined' && chrome.windows.create) {
+                        const features = {
+                            url: "saveAsDialog.html?key=" + dialogKey,
+                            type: "popup",
+                            width: 480,
+                            height: 350
+                        };
+                        chrome.windows.create(features);
+                    } else if (typeof window !== 'undefined' && window && typeof window.open === 'function') {
+                        // Fallback for contexts where chrome.windows is restricted but window.open might work
+                        const features = "titlebar=no,menubar=no,location=no," +
+                            "resizable=yes,scrollbars=no,status=no,width=480,height=350";
+                        window.open("saveAsDialog.html?key=" + dialogKey, "saveAsDialog", features);
+                    } else {
+                        console.error("[iMacros] Cannot open save dialog: neither chrome.windows.create nor window.open is available");
+                        // DO NOT fallback to bookmarks here silently; better to fail than save to wrong place
+                        if (callback) callback({ error: "Cannot open save dialog" });
+                    }
                 });
 
                 // The saveAsDialog will call save() again with file_id set
                 return;
             }
-            // If afio is not installed or window.open is unavailable (e.g., MV3 Service Worker),
-            // fall back to bookmark storage
+            // If afio is not installed, fall back to bookmark storage
             saveToBookmark(save_data, overwrite, callback);
         }).catch(function (err) {
             console.error("Error checking afio installation:", err);

@@ -123,6 +123,7 @@ await localStorageInitPromise;
 try {
     importScripts(
         'utils.js',
+        'bg_common.js',
         'badge.js',
         'promise-utils.js',
         'errorLogger.js',
@@ -1743,6 +1744,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse({ success: true });
         });
 
+        return true;
+    }
+
+    // --- 保存 (save) ---
+    if (msg.command === "save") {
+        console.log("[iMacros SW] Save request for:", msg.data && msg.data.name);
+        try {
+            // Use sharedSave from bg_common.js
+            sharedSave(msg.data, msg.overwrite, function (result) {
+                if (result && result.error) {
+                    sendResponse({ success: false, error: result.error });
+                } else {
+                    sendResponse({ success: true, result: result });
+                }
+            });
+        } catch (e) {
+            console.error("[iMacros SW] Save error:", e);
+            sendResponse({ success: false, error: e.message });
+        }
         return true;
     }
 
