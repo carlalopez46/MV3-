@@ -298,6 +298,7 @@ function saveDirectly() {
 function ok() {
     var macro_name = document.getElementById("macro-name");
     args.save_data.name = macro_name.value;
+    console.log("[iMacros] Saving macro as:", args.save_data.name);
 
     var overwrite = false;
 
@@ -369,7 +370,10 @@ function ok() {
                     console.error("[iMacros] Failed to save macro:", err);
                     alert("Save failed: " + err);
                 });
-            }).catch(console.error.bind(console));
+            }).catch(function (err) {
+                console.error("[iMacros] File existence check failed:", err);
+                alert("Error checking file: " + (err.message || err));
+            });
         });
     });
 }
