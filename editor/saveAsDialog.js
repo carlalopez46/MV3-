@@ -174,8 +174,11 @@ window.addEventListener("load", function () {
             okBtn.querySelector("span").innerText = "Save As";
         }
 
+        var filesRadioEl = document.getElementById("radio-files-tree");
+        var bookmarksRadioEl = document.getElementById("radio-bookmarks-tree");
+
         if (file_type) {
-            document.getElementById("radio-files-tree").checked = true;
+            filesRadioEl.checked = true;
         } else {
             // Default to Files if available, otherwise Bookmarks
             if (typeof afio !== 'undefined' && afio.getBackendType() !== 'none') {

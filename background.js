@@ -130,6 +130,7 @@ try {
         'VirtualFileService.js',
         'variable-manager.js',
         'AsyncFileIO.js',
+        'bg_common.js',
         'mv3_messaging_bus.js',
         'mv3_state_machine.js'
     );
@@ -1680,6 +1681,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return null;
     }
 
+    // --- 保存 (save) ---
+    if (msg.command === "save") {
+        console.log("[iMacros SW] Save request for:", msg.data && msg.data.name);
+
+        if (!msg.data || typeof msg.data !== 'object') {
+            sendResponse({ success: false, error: 'Invalid save data' });
+            return true;
+        }
+
+        try {
+            // Use sharedSave from bg_common.js
+            sharedSave(msg.data, msg.overwrite, function (result) {
+                if (result && result.error) {
+                    sendResponse({ success: false, error: result.error });
+                } else {
+                    sendResponse({ success: true, result: result });
+                }
+            });
+        } catch (e) {
+            console.error("[iMacros SW] Save error:", e);
+            sendResponse({ success: false, error: e.message });
+        }
+        return true;
+    }
+
     // --- 再生 (playMacro) ---
     if (msg.command === "playMacro") {
         console.log("[iMacros SW] Play request for:", msg.file_path);
@@ -2079,3 +2105,4 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // NOTE: MessagingBus class is defined in mv3_messaging_bus.js (imported via importScripts)
+})();
