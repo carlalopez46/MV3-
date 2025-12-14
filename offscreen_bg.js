@@ -110,7 +110,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         const ctx = (typeof context !== 'undefined' && context) ? context[winId] : null;
 
         let state = 'idle';
-        const response = { state };
+        const response = { state, success: true };
 
         if (ctx) {
             if (ctx.recorder && ctx.recorder.recording) {
