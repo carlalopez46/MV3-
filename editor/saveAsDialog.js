@@ -213,8 +213,13 @@ window.addEventListener("load", function () {
                 // Set default directory path if still not set
                 if (!directoryPath.value) {
                     afio.getDefaultDir("savepath").then(function (node) {
-                        directoryPath.value = node.path;
-                        directoryPath.dataset.path = node.path;
+                        var p = node.path;
+                        // Default to Macros folder if root is returned (common in File System Access)
+                        if (p === '/' || p === '' || p === '\\') {
+                            p = 'Macros';
+                        }
+                        directoryPath.value = p;
+                        directoryPath.dataset.path = p;
                     }).catch(function (err) {
                         console.error("Error getting default directory:", err);
                     });
