@@ -323,7 +323,16 @@ function saveDirectly() {
 
 function ok() {
     var macro_name = document.getElementById("macro-name");
-    args.save_data.name = macro_name.value;
+
+    try {
+        var normalizedName = normalizeMacroName(macro_name.value);
+        args.save_data.name = normalizedName;
+    } catch (e) {
+        alert(e.message || String(e));
+        macro_name.focus();
+        return;
+    }
+
     console.log("[iMacros] Saving macro as:", args.save_data.name);
 
     var overwrite = false;
@@ -402,6 +411,19 @@ function ok() {
             });
         });
     });
+}
+
+function normalizeMacroName(rawName) {
+    var trimmed = String(rawName || "").trim();
+
+    if (!trimmed) {
+        throw new Error("Macro name cannot be empty");
+    }
+
+    // Replace only characters that are invalid on common filesystems
+    var sanitized = trimmed.replace(/[\\/:*?"<>|]/g, "_");
+
+    return sanitized;
 }
 
 // Helper: send save request to background service worker

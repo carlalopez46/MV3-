@@ -180,8 +180,12 @@ Recorder.prototype.start = function () {
                 recordMode: recordMode
             }
         }, recorder.win_id);
-        // save intial commands
-        recorder.recordAction("VERSION BUILD=" + Storage.getChar("version").replace(/\./g, "") + " RECORDER=CR");
+        // save initial commands
+        const versionHeader = "VERSION BUILD=" + Storage.getChar("version").replace(/\./g, "") + " RECORDER=CR";
+        const headerPattern = /^\s*VERSION BUILD=/i;
+        if (!recorder.actions.length || !headerPattern.test(recorder.actions[0])) {
+            recorder.recordAction(versionHeader);
+        }
         recorder.recordAction("TAB T=1");
         if (!/^chrome:\/\//.test(tabs[0].url)) {
             console.log("[iMacros MV3 Recorder] Recording initial URL: " + tabs[0].url);
