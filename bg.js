@@ -344,10 +344,11 @@ function installSampleBookmarkletMacros() {
     const presentGlobals = [];
 
     // Helper function to safely check if a global exists
-    // Avoids eval() for security reasons
+    // MV3: Cannot use eval() or new Function() in extension pages
+    // We rely on globalThis/self which cover all globals declared with var/function
     function globalExists(name) {
         // Check globalThis first (works for var/function declarations)
-        if (typeof globalThis[name] !== 'undefined') {
+        if (typeof globalThis !== 'undefined' && typeof globalThis[name] !== 'undefined') {
             return true;
         }
 
@@ -356,15 +357,15 @@ function installSampleBookmarkletMacros() {
             return true;
         }
 
-        // Fallback: try direct access (works for const/let in same scope)
-        // This is safe because we're only checking existence, not executing
-        try {
-            // Use Function constructor instead of eval for better security
-            // This still accesses the global scope but is more controlled
-            return new Function('return typeof ' + name + ' !== "undefined"')();
-        } catch (e) {
-            return false;
+        // In window context, check window
+        if (typeof window !== 'undefined' && typeof window[name] !== 'undefined') {
+            return true;
         }
+
+        // If not found via globalThis/self/window, assume not available
+        // Note: const/let at module scope won't appear on globalThis, but all our
+        // dependencies are declared with var or function, so this should be sufficient
+        return false;
     }
 
     for (const name of requiredGlobals) {

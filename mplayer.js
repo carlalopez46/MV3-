@@ -3587,6 +3587,8 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
             chrome.scripting.executeScript({
                 target: { tabId: this.tab_id },
                 // Intentional global-scope execution of trusted macro JavaScript.
+                // Note: This func runs in the page context, not the extension context.
+                // eslint-disable-next-line no-eval
                 func: (code) => { return (0, eval)(code); },
                 args: [scriptCode]
             }, (results) => {
@@ -3604,7 +3606,7 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
             chrome.runtime.sendMessage({
                 command: 'SCRIPTING_EXECUTE',
                 tabId: this.tab_id,
-                func: '(code) => { return (0, eval)(code); }',
+                funcId: 'evalCode',
                 args: [scriptCode]
             }, executeScriptCallback);
         }

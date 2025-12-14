@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, copilot/**]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run MV3 Policy Audit
+        run: npm run audit:mv3
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run Tests
+        run: npm test
