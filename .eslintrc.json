@@ -68,6 +68,6 @@
     "samples/",
     "docs/",
     "sandbox.js",
-    "sandbox/"
+    "sandbox/**"
   ]
 }
