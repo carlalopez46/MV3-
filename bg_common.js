@@ -88,19 +88,19 @@ globalScope.afioCache = {
 globalScope.backgroundFileSyncBridge = null;
 
 globalScope.ensureBackgroundFileSyncBridge = function () {
-    if (backgroundFileSyncBridge || typeof FileSyncBridge === 'undefined' || typeof afio === 'undefined') {
-        return backgroundFileSyncBridge;
+    if (globalScope.backgroundFileSyncBridge || typeof FileSyncBridge === 'undefined' || typeof afio === 'undefined') {
+        return globalScope.backgroundFileSyncBridge;
     }
     if (typeof communicator === 'undefined') {
         return null;
     }
-    backgroundFileSyncBridge = new FileSyncBridge({
+    globalScope.backgroundFileSyncBridge = new FileSyncBridge({
         mode: 'background',
         vfs: afio._vfs,
         communicator: communicator
     });
-    backgroundFileSyncBridge.start();
-    return backgroundFileSyncBridge;
+    globalScope.backgroundFileSyncBridge.start();
+    return globalScope.backgroundFileSyncBridge;
 };
 
 // Also verify bridge on load
@@ -156,18 +156,46 @@ function sharedSave(save_data, overwrite, callback) {
     // If tree-type is "files" but file_id is not set, prompt user with saveAs dialog
     // to choose file location instead of falling back to bookmark storage
     if (Storage.getChar("tree-type") === "files" && !save_data.file_id) {
-        afioCache.isInstalled().then(function (installed) {
+        globalScope.afioCache.isInstalled().then(function (installed) {
             if (installed && typeof window !== 'undefined' && window && typeof window.open === 'function') {
                 // Open saveAs dialog to let user choose file location
-                var features = "titlebar=no,menubar=no,location=no," +
-                    "resizable=yes,scrollbars=no,status=no";
-                var win = window.open("saveAsDialog.html", null, features);
-                dialogUtils.setArgs(win, { save_data: save_data });
+                // Use storage + URL key strategy for robust MV3/Offscreen support
+                var dialogKey = 'saveAs_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                var storage = chrome.storage.session || chrome.storage.local;
+
+                var data = {};
+                data[dialogKey] = { save_data: save_data };
+
+                storage.set(data, function () {
+                    if (chrome.runtime.lastError) {
+                        console.error("[iMacros] Failed to store saveAs args:", chrome.runtime.lastError);
+                    }
+
+                    // Use chrome.windows.create if reachable (MV3/SW friendly), fallback to window.open
+                    if (typeof chrome.windows !== 'undefined' && chrome.windows.create) {
+                        const features = {
+                            url: "saveAsDialog.html?key=" + dialogKey,
+                            type: "popup",
+                            width: 480,
+                            height: 350
+                        };
+                        chrome.windows.create(features);
+                    } else if (typeof window !== 'undefined' && window && typeof window.open === 'function') {
+                        // Fallback for contexts where chrome.windows is restricted but window.open might work
+                        const features = "titlebar=no,menubar=no,location=no," +
+                            "resizable=yes,scrollbars=no,status=no,width=480,height=350";
+                        window.open("saveAsDialog.html?key=" + dialogKey, "saveAsDialog", features);
+                    } else {
+                        console.error("[iMacros] Cannot open save dialog: neither chrome.windows.create nor window.open is available");
+                        // DO NOT fallback to bookmarks here silently; better to fail than save to wrong place
+                        if (callback) callback({ error: "Cannot open save dialog" });
+                    }
+                });
+
                 // The saveAsDialog will call save() again with file_id set
                 return;
             }
-            // If afio is not installed or window.open is unavailable (e.g., MV3 Service Worker),
-            // fall back to bookmark storage
+            // If afio is not installed, fall back to bookmark storage
             saveToBookmark(save_data, overwrite, callback);
         }).catch(function (err) {
             console.error("Error checking afio installation:", err);
@@ -373,7 +401,7 @@ globalScope.installSampleMacroFiles = function () {
         return Promise.resolve();
     }
 
-    return afioCache.isInstalled().then(function (installed) {
+    return globalScope.afioCache.isInstalled().then(function (installed) {
         if (!installed) {
             return Promise.resolve();
         }
@@ -465,7 +493,11 @@ globalScope.installSampleBookmarkletMacros = function () {
 
     // Skip if bookmarks API is not available (e.g. not in manifest or restricted context)
     if (!chrome.bookmarks) {
-        console.warn("[iMacros] chrome.bookmarks API not available, skipping sample bookmarklets installation");
+        console.log("[iMacros] chrome.bookmarks API not available in this context (Offscreen), delegating installation to Service Worker");
+        // Delegate to Service Worker where bookmarks API is available
+        if (chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({ command: 'INSTALL_SAMPLE_BOOKMARKLETS' });
+        }
         return Promise.resolve();
     }
 

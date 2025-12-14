@@ -2,16 +2,32 @@
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
 
-var args;
-var dialogWindowId = null;
+let args;
+let dialogWindowId = null;
 
 window.addEventListener("load", function () {
-    // Primary MV3 path: request dialog args from background
     // Primary MV3 path: request dialog args from background with retry
-    chrome.windows.getCurrent(function (currentWindow) {
-        dialogWindowId = currentWindow.id;
-        requestArgs(5);
-    });
+    // Check for key in URL first (MV3/Offscreen compatibility)
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('key')) {
+        fallbackToSessionStorage();
+        return;
+    }
+
+    if (typeof chrome.windows !== 'undefined' && chrome.windows.getCurrent) {
+        chrome.windows.getCurrent(function (currentWindow) {
+            if (chrome.runtime.lastError || !currentWindow) {
+                console.warn("[iMacros] Failed to get current window:", chrome.runtime.lastError);
+                fallbackToSessionStorage();
+                return;
+            }
+            dialogWindowId = currentWindow.id;
+            requestArgs(5);
+        });
+    } else {
+        console.warn("[iMacros] chrome.windows API not available. Falling back to storage strategy.");
+        fallbackToSessionStorage();
+    }
 
     function requestArgs(retries) {
         chrome.runtime.sendMessage({
@@ -78,7 +94,11 @@ window.addEventListener("load", function () {
             args = result[dialogKey];
 
             // Clean up the session storage
-            storage.remove([dialogKey]);
+            storage.remove([dialogKey], function() {
+                if (chrome.runtime.lastError) {
+                    console.warn("[iMacros] Failed to clean up dialog key:", chrome.runtime.lastError);
+                }
+            });
 
             initializeWithAfio();
         });
@@ -99,11 +119,29 @@ window.addEventListener("load", function () {
 
         var mc = document.getElementById("main-container");
         var rc = mc.getBoundingClientRect();
-        window.resizeTo(rc.width + 30, rc.height + 30);
-        window.moveTo(window.opener.screenX + window.opener.outerWidth / 2 - 100,
-            window.opener.screenY + window.opener.outerHeight / 2 - 100);
+        // Resize to fit content, a bit larger for the new button
+        window.resizeTo(rc.width + 30, rc.height + 60);
+
+        if (window.opener && !window.opener.closed) {
+            try {
+                window.moveTo(
+                    window.opener.screenX + window.opener.outerWidth / 2 - 100,
+                    window.opener.screenY + window.opener.outerHeight / 2 - 100
+                );
+            } catch (e) {
+                // Ignore cross-origin blocking or other window access errors
+            }
+        }
+
         var macro_name = document.getElementById("macro-name");
-        macro_name.value = args.save_data.name || "Unnamed Macro";
+        // Strip extension for display if it's a file path or name
+        var name = args.save_data.name || "Unnamed Macro";
+        // keep only basename (avoid paths in the filename field)
+        name = String(name).split(/[\\/]/).pop();
+        // strip .iim for display
+        name = name.replace(/\.iim$/i, "");
+
+        macro_name.value = name;
         macro_name.select();
         macro_name.focus();
         macro_name.addEventListener("keypress", function (e) {
@@ -111,15 +149,44 @@ window.addEventListener("load", function () {
         });
 
         var file_type = !!args.save_data.file_id;
+
+        // Setup buttons
+        var okBtn = document.getElementById("ok-button");
+        var cancelBtn = document.getElementById("cancel-button");
+        var buttonPack = document.getElementById("buttonpack");
+
+        okBtn.addEventListener("click", ok);
+        cancelBtn.addEventListener("click", cancel);
+
+        // Add "Save" button if editing an existing file
         if (file_type) {
-            document.getElementById("radio-files-tree").checked = "yes";
-        } else {
-            document.getElementById("radio-bookmarks-tree").checked = "yes";
+            var saveBtn = document.createElement("div");
+            saveBtn.id = "save-button";
+            saveBtn.className = "button icon-button";
+            saveBtn.innerHTML = "<span>Save</span>";
+            saveBtn.style.marginRight = "10px";
+            saveBtn.addEventListener("click", saveDirectly);
+
+            // Insert before OK button
+            buttonPack.insertBefore(saveBtn, okBtn);
+
+            // Update OK button text to "Save As" to be clearer
+            okBtn.querySelector("span").innerText = "Save As";
         }
 
-        // Add event listeners for buttons
-        document.getElementById("ok-button").addEventListener("click", ok);
-        document.getElementById("cancel-button").addEventListener("click", cancel);
+        var filesRadioEl = document.getElementById("radio-files-tree");
+        var bookmarksRadioEl = document.getElementById("radio-bookmarks-tree");
+
+        if (file_type) {
+            filesRadioEl.checked = true;
+        } else {
+            // Default to Files if available, otherwise Bookmarks
+            if (typeof afio !== 'undefined' && afio.getBackendType() !== 'none') {
+                document.getElementById("radio-files-tree").checked = true;
+            } else {
+                document.getElementById("radio-bookmarks-tree").checked = true;
+            }
+        }
 
         // Add directory selection functionality
         var directoryBox = document.getElementById("directory-selector-box");
@@ -132,11 +199,38 @@ window.addEventListener("load", function () {
         function updateDirectoryBoxVisibility() {
             if (filesRadio.checked) {
                 directoryBox.style.display = "block";
-                // Set default directory path if not already set
+
+                // If we are editing a file, try to extract the directory from the file_id
+                if (file_type && args.save_data.file_id) {
+                    // file_id is typically the full path
+                    try {
+                        var path = String(args.save_data.file_id);
+                        var parts = path.split(/[\\/]/);
+                        if (parts.length > 1) {
+                            parts.pop(); // Remove filename
+                            var dir = parts.join("/"); // Normalize to forward slashes for internal use
+
+                            // Only update if currently empty or explicitly restoring from file_id
+                            if (!directoryPath.value || directoryPath.value === "") {
+                                directoryPath.value = dir;
+                                directoryPath.dataset.path = dir;
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Failed to parse directory from file_id:", e);
+                    }
+                }
+
+                // Set default directory path if still not set
                 if (!directoryPath.value) {
                     afio.getDefaultDir("savepath").then(function (node) {
-                        directoryPath.value = node.path;
-                        directoryPath.dataset.path = node.path;
+                        var p = node.path;
+                        // Default to Macros folder if root is returned (common in File System Access)
+                        if (p === '/' || p === '' || p === '\\') {
+                            p = 'Macros';
+                        }
+                        directoryPath.value = p;
+                        directoryPath.dataset.path = p;
                     }).catch(function (err) {
                         console.error("Error getting default directory:", err);
                     });
@@ -150,7 +244,6 @@ window.addEventListener("load", function () {
         filesRadio.addEventListener("change", updateDirectoryBoxVisibility);
         bookmarksRadio.addEventListener("change", updateDirectoryBoxVisibility);
 
-        // Handle browse button click
         // Handle browse button click
         browseButton.addEventListener("click", async function () {
             if (afio.getBackendType() === 'filesystem-access') {
@@ -197,9 +290,57 @@ window.addEventListener("load", function () {
 
 
 
+function saveDirectly() {
+    // Direct save overrides the existing file without checking or asking
+    // args.save_data.file_id holds the path to overwrite
+
+    if (!args.save_data.file_id) {
+        // Fallback to OK behavior if no file ID exists (should not happen if button is shown)
+        ok();
+        return;
+    }
+
+    // Ensure we are in file mode for consistency, though we use file_id directly
+    args.save_data.bookmark_id = "";
+
+    // If using File System Access API, write directly
+    if (afio.getBackendType() === 'filesystem-access') {
+        var node = afio.openNode(args.save_data.file_id);
+
+        afio.writeTextFile(node, args.save_data.source).then(function () {
+            // Notify background to refresh panels
+            chrome.runtime.sendMessage({ type: 'REFRESH_PANEL_TREE' });
+            window.close();
+        }).catch(function (err) {
+            console.error("Save failed:", err);
+            alert("Save failed: " + (err && err.message ? err.message : String(err)));
+        });
+        return;
+    }
+
+    // Default save mechanism for other backends
+    saveMacro(args.save_data, true).then(function () {
+        chrome.runtime.sendMessage({ type: 'REFRESH_PANEL_TREE' });
+        window.close();
+    }).catch(function (err) {
+        console.error("[iMacros] Failed to save macro:", err);
+        alert("Save failed: " + (err && err.message ? err.message : String(err)));
+    });
+}
+
 function ok() {
     var macro_name = document.getElementById("macro-name");
-    args.save_data.name = macro_name.value;
+
+    try {
+        var normalizedName = normalizeMacroName(macro_name.value);
+        args.save_data.name = normalizedName;
+    } catch (e) {
+        alert(e.message || String(e));
+        macro_name.focus();
+        return;
+    }
+
+    console.log("[iMacros] Saving macro as:", args.save_data.name);
 
     var overwrite = false;
 
@@ -271,9 +412,25 @@ function ok() {
                     console.error("[iMacros] Failed to save macro:", err);
                     alert("Save failed: " + err);
                 });
-            }).catch(console.error.bind(console));
+            }).catch(function (err) {
+                console.error("[iMacros] File existence check failed:", err);
+                alert("Error checking file: " + (err.message || err));
+            });
         });
     });
+}
+
+function normalizeMacroName(rawName) {
+    var trimmed = String(rawName || "").trim();
+
+    if (!trimmed) {
+        throw new Error("Macro name cannot be empty");
+    }
+
+    // Replace only characters that are invalid on common filesystems
+    var sanitized = trimmed.replace(/[\\/:*?"<>|]/g, "_");
+
+    return sanitized;
 }
 
 // Helper: send save request to background service worker

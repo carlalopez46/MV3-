@@ -1,49 +1,136 @@
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
-// Minimal localStorage shim to prevent ReferenceErrors during early importScripts
-// execution in the MV3 service worker environment. A more complete polyfill is
-// provided in utils.js, but we need this guard so that utils.js itself can load
-// without the platform-provided localStorage API.
-(function () {
-    var needsShim = false;
+const _LOCALSTORAGE_PREFIX = '__imacros_ls__:';
+
+function createLocalStoragePolyfill(cache, prefix) {
+    return {
+        getItem: function (key) {
+            return Object.prototype.hasOwnProperty.call(cache, key) ? cache[key] : null;
+        },
+        setItem: function (key, value) {
+            cache[key] = String(value);
+
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                const payload = {};
+                payload[prefix + key] = String(value);
+                chrome.storage.local.set(payload, function () {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[iMacros SW] Failed to persist localStorage key:', key, chrome.runtime.lastError);
+                    }
+                });
+            }
+        },
+        removeItem: function (key) {
+            delete cache[key];
+
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.remove(prefix + key, function () {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[iMacros SW] Failed to remove localStorage key:', key, chrome.runtime.lastError);
+                    }
+                });
+            }
+        },
+        clear: function () {
+            Object.keys(cache).forEach(function (k) {
+                delete cache[k];
+            });
+
+            if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+                chrome.storage.local.get(null, function (items) {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[iMacros SW] Failed to enumerate localStorage keys for clear:', chrome.runtime.lastError);
+                        return;
+                    }
+
+                    const keysToRemove = Object.keys(items || {}).filter(function (storageKey) {
+                        return storageKey.indexOf(prefix) === 0;
+                    });
+                    if (!keysToRemove.length) return;
+
+                    chrome.storage.local.remove(keysToRemove, function () {
+                        if (chrome.runtime && chrome.runtime.lastError) {
+                            console.warn('[iMacros SW] Failed to clear localStorage keys:', chrome.runtime.lastError);
+                        }
+                    });
+                });
+            }
+        },
+        key: function (index) {
+            return Object.keys(cache)[index] || null;
+        },
+        get length() {
+            return Object.keys(cache).length;
+        }
+    };
+}
+
+async function initializeLocalStoragePolyfill() {
+    let needsPolyfill = false;
     try {
-        // Check if localStorage exists and is accessible
-        needsShim = (typeof localStorage === 'undefined' || localStorage === null);
-    } catch (e) {
-        // ReferenceError in strict Service Worker environment
-        needsShim = true;
+        needsPolyfill = (typeof localStorage === 'undefined' || localStorage === null || localStorage.__isMinimalLocalStorageShim || localStorage.__isInMemoryShim);
+    } catch (err) {
+        needsPolyfill = true;
     }
 
-    if (needsShim) {
-        var memoryStore = new Map();
-        var shim = {
-            getItem: function (key) { return memoryStore.has(key) ? memoryStore.get(key) : null; },
-            setItem: function (key, value) { memoryStore.set(key, String(value)); },
-            removeItem: function (key) { memoryStore.delete(key); },
-            clear: function () { memoryStore.clear(); },
-            key: function (index) { return Array.from(memoryStore.keys())[index] || null; },
-            get length() { return memoryStore.size; },
-            __isMinimalLocalStorageShim: true,
-            __isInMemoryShim: true
-        };
-
-        // Set on all possible global scopes
-        if (typeof globalThis !== 'undefined') globalThis.localStorage = shim;
-        if (typeof self !== 'undefined') self.localStorage = shim;
+    if (!needsPolyfill) {
+        return;
     }
-})();
 
+    const cache = Object.create(null);
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+        try {
+            const items = await new Promise((resolve, reject) => {
+                chrome.storage.local.get(null, (result) => {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        reject(chrome.runtime.lastError);
+                        return;
+                    }
+                    resolve(result || {});
+                });
+            });
+
+            let hydratedCount = 0;
+            Object.keys(items).forEach((storageKey) => {
+                if (storageKey.indexOf(_LOCALSTORAGE_PREFIX) !== 0) return;
+                const key = storageKey.slice(_LOCALSTORAGE_PREFIX.length);
+                cache[key] = String(items[storageKey]);
+                hydratedCount++;
+            });
+            console.log(`[iMacros SW] localStorage cache loaded asynchronously: ${hydratedCount} items`);
+        } catch (err) {
+            console.error('[iMacros SW] Failed to hydrate localStorage cache:', err);
+            // Optional: Throwing here would prevent starting with an empty cache if that is critical
+            // throw err;
+        }
+    }
+
+    const polyfill = createLocalStoragePolyfill(cache, _LOCALSTORAGE_PREFIX);
+    polyfill.__isHydratedPolyfill = true;
+
+    if (typeof globalThis !== 'undefined') {
+        globalThis.localStorage = polyfill;
+        globalThis._localStorageData = cache;
+        globalThis._LOCALSTORAGE_PREFIX = _LOCALSTORAGE_PREFIX;
+    }
+}
+
+const localStorageInitPromise = initializeLocalStoragePolyfill();
+globalThis.localStorageInitPromise = localStorageInitPromise;
+await localStorageInitPromise;
 
 try {
     importScripts(
         'utils.js',
+        'bg_common.js',
         'badge.js',
         'promise-utils.js',
         'errorLogger.js',
         'VirtualFileService.js',
         'variable-manager.js',
         'AsyncFileIO.js',
+        'bg_common.js',
         'mv3_messaging_bus.js',
         'mv3_state_machine.js'
     );
@@ -51,32 +138,6 @@ try {
     console.error('Failed to import scripts:', e);
     throw e;
 }
-
-// Hydrate localStorage polyfill from chrome.storage.local
-// This is critical for MV3 Service Workers where localStorage is not available
-(function hydrateLocalStoragePolyfill() {
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(null, function (items) {
-            if (chrome.runtime.lastError) {
-                console.warn('[iMacros SW] Failed to hydrate localStorage polyfill:', chrome.runtime.lastError);
-                return;
-            }
-            if (items && typeof _localStorageData !== 'undefined') {
-                // Only hydrate keys with the localStorage namespace prefix
-                // This avoids polluting localStorage with unrelated extension data
-                var prefix = (typeof _LOCALSTORAGE_PREFIX === 'string') ? _LOCALSTORAGE_PREFIX : '__imacros_ls__:';
-                var hydratedCount = 0;
-                Object.keys(items).forEach(function (storageKey) {
-                    if (storageKey.indexOf(prefix) !== 0) return;
-                    var key = storageKey.slice(prefix.length);
-                    _localStorageData[key] = String(items[storageKey]);
-                    hydratedCount++;
-                });
-                console.log('[iMacros SW] localStorage polyfill hydrated with', hydratedCount, 'items');
-            }
-        });
-    }
-})();
 
 // Background Service Worker for iMacros MV3
 // Handles Offscreen Document lifecycle and event forwarding
@@ -92,8 +153,8 @@ const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
 });
 
 const sessionStorage = chrome.storage ? chrome.storage.session : null;
-const localStorage = chrome.storage ? chrome.storage.local : null;
-const storageCandidates = [sessionStorage, localStorage].filter(Boolean);
+const localStorageBackend = chrome.storage ? chrome.storage.local : null;
+const storageCandidates = [sessionStorage, localStorageBackend].filter(Boolean);
 
 function removeFromSessionOrLocal(keys) {
     if (!storageCandidates.length) return Promise.reject(new Error('Storage not available'));
@@ -145,8 +206,8 @@ async function performStorageWithFallback(method, payload) {
     throw lastError || new Error(`Storage ${method} failed`);
 }
 
-const executionStateStorage = sessionStorage || localStorage;
-const clearStaleExecutionState = executionStateStorage === localStorage
+const executionStateStorage = sessionStorage || localStorageBackend;
+const clearStaleExecutionState = executionStateStorage === localStorageBackend
     ? removeFromSessionOrLocal(['executionState']).catch((error) => {
         console.warn('[iMacros SW] Failed to clear persisted execution state on startup:', error);
     })
@@ -210,6 +271,16 @@ async function forwardToOffscreen(payload) {
     return messagingBus.sendRuntime({ target: 'offscreen', ...payload });
 }
 
+// Handle long-lived connections (e.g. from panel.js for lifecycle management)
+chrome.runtime.onConnect.addListener((port) => {
+    if (port.name === 'panel-lifecycle') {
+        console.log('[iMacros SW] Panel connected for lifecycle monitoring');
+        port.onDisconnect.addListener(() => {
+            console.log('[iMacros SW] Panel disconnected');
+        });
+    }
+});
+
 // Create Offscreen Document
 // Lock to prevent concurrent Offscreen creation attempts
 let creatingOffscreen = null;
@@ -218,17 +289,14 @@ async function createOffscreen() {
     if (creatingOffscreen) return creatingOffscreen;
 
     creatingOffscreen = (async () => {
-        try {
-            // Check if offscreen document already exists
-            const hasDocument = await chrome.offscreen.hasDocument();
-            if (hasDocument) {
-                // verify if it's responding? (Optional optimization)
-                // console.log('[iMacros SW] Offscreen document already exists');
+
+        // Check if offscreen document already exists using clients API (Service Worker)
+        if (self.clients) {
+            const clients = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+            const exists = clients.some(c => c.url.endsWith('offscreen.html'));
+            if (exists) {
                 return;
             }
-        } catch (e) {
-            console.error('[iMacros SW] Error checking offscreen document:', e);
-            // If check fails, we proceed to try creating it.
         }
 
         try {
@@ -443,6 +511,45 @@ if (chrome.downloads && chrome.downloads.onChanged) {
     });
 }
 
+// Helper function to execute clipboard write in a tab
+async function executeClipboardWrite(tab, text, sendResponse) {
+    // Skip restricted URLs - return success since clipboard is non-critical
+    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:')) {
+        console.warn('[iMacros SW] Cannot write clipboard on restricted URL:', tab.url);
+        sendResponse({ success: true, warning: 'Restricted URL skipped' });
+        return;
+    }
+
+    try {
+        // Use chrome.scripting.executeScript to write to clipboard in the tab's context
+        const results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: (textToWrite) => {
+                return navigator.clipboard.writeText(textToWrite)
+                    .then(() => ({ success: true }))
+                    .catch(err => ({ success: false, error: err.message }));
+            },
+            args: [text]
+        });
+
+        if (results && results[0] && results[0].result) {
+            const result = results[0].result;
+            if (result.success) {
+                console.log('[iMacros SW] Clipboard write successful via tab');
+                sendResponse({ success: true });
+            } else {
+                console.warn('[iMacros SW] Clipboard write failed in tab:', result.error);
+                sendResponse({ success: false, error: result.error });
+            }
+        } else {
+            sendResponse({ success: false, error: 'No result from script' });
+        }
+    } catch (err) {
+        console.error('[iMacros SW] executeScript failed for clipboard:', err);
+        sendResponse({ success: false, error: err.message });
+    }
+}
+
 
 // Keep-alive logic (optional, but good for stability)
 // If Offscreen sends a keep-alive message, we can respond to keep SW alive
@@ -456,6 +563,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     const isValidTabId = (value) => Number.isInteger(value) && value >= 0;
     const isValidObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
+
+    // Debug: Log all messages with command or type
+    if (msg.command || msg.type) {
+        console.log('[iMacros SW] Message received:', {
+            command: msg.command,
+            type: msg.type,
+            sender: sender.url || sender.id
+        });
+    }
 
     if (msg.keepAlive) {
         sendResponse({ alive: true });
@@ -731,6 +847,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // Handle openDialog request (proxy for Offscreen)
     if (msg.command === "openDialog") {
+        console.log('[iMacros SW] Received openDialog request:', msg);
         const createData = {
             url: msg.url.indexOf('://') === -1 ? chrome.runtime.getURL(msg.url) : msg.url,
             type: "popup",
@@ -766,6 +883,62 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
+    // Handle clipboard write request from Offscreen Document
+    // Offscreen Document cannot access clipboard, so we proxy through the active tab
+    if (msg.command === "CLIPBOARD_WRITE") {
+        const textToWrite = msg.text;
+
+        // Helper to check if a tab is usable for clipboard operations
+        const isUsableTab = (tab) => {
+            return tab && tab.url &&
+                !tab.url.startsWith('chrome://') &&
+                !tab.url.startsWith('chrome-extension://') &&
+                !tab.url.startsWith('about:') &&
+                !tab.url.startsWith('devtools://');
+        };
+
+        // Helper to find a usable tab from a list
+        const findUsableTab = (tabs) => {
+            if (!tabs || tabs.length === 0) return null;
+            return tabs.find(isUsableTab) || null;
+        };
+
+        // First, try to find an active web page tab in any window
+        chrome.tabs.query({ active: true }, (activeTabs) => {
+            if (chrome.runtime.lastError) {
+                console.error('[iMacros SW] CLIPBOARD_WRITE query error:', chrome.runtime.lastError);
+                sendResponse({ success: false, error: chrome.runtime.lastError.message });
+                return;
+            }
+
+            const usableActiveTab = findUsableTab(activeTabs);
+            if (usableActiveTab) {
+                executeClipboardWrite(usableActiveTab, textToWrite, sendResponse);
+                return;
+            }
+
+            // No usable active tab found - try to find any web page tab
+            chrome.tabs.query({}, (allTabs) => {
+                if (chrome.runtime.lastError) {
+                    console.warn('[iMacros SW] CLIPBOARD_WRITE fallback query error:', chrome.runtime.lastError);
+                    sendResponse({ success: false, error: 'No usable tab found' });
+                    return;
+                }
+
+                const usableTab = findUsableTab(allTabs);
+                if (usableTab) {
+                    console.log('[iMacros SW] Using fallback tab for clipboard:', usableTab.url);
+                    executeClipboardWrite(usableTab, textToWrite, sendResponse);
+                } else {
+                    console.warn('[iMacros SW] No web page tab found for clipboard write');
+                    // Return success anyway - clipboard is non-critical
+                    sendResponse({ success: true, warning: 'No web page tab available' });
+                }
+            });
+        });
+        return true;
+    }
+
     // Handle notification display request from Offscreen Document
     if (msg.command === "showNotification") {
         chrome.notifications.create(msg.notificationId, msg.options, (notificationId) => {
@@ -775,6 +948,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
         return true;
     }
+
+
 
     // --- UPDATE_BADGE: Proxy badge updates from Offscreen Document ---
     if (msg.type === 'UPDATE_BADGE') {
@@ -1506,6 +1681,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return null;
     }
 
+    // --- 保存 (save) ---
+    if (msg.command === "save") {
+        console.log("[iMacros SW] Save request for:", msg.data && msg.data.name);
+
+        if (!msg.data || typeof msg.data !== 'object') {
+            sendResponse({ success: false, error: 'Invalid save data' });
+            return true;
+        }
+
+        try {
+            // Use sharedSave from bg_common.js
+            sharedSave(msg.data, msg.overwrite, function (result) {
+                if (result && result.error) {
+                    sendResponse({ success: false, error: result.error });
+                } else {
+                    sendResponse({ success: true, result: result });
+                }
+            });
+        } catch (e) {
+            console.error("[iMacros SW] Save error:", e);
+            sendResponse({ success: false, error: e.message });
+        }
+        return true;
+    }
+
     // --- 再生 (playMacro) ---
     if (msg.command === "playMacro") {
         console.log("[iMacros SW] Play request for:", msg.file_path);
@@ -1570,6 +1770,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse({ success: true });
         });
 
+        return true;
+    }
+
+    // --- 保存 (save) ---
+    if (msg.command === "save") {
+        console.log("[iMacros SW] Save request for:", msg.data && msg.data.name);
+        try {
+            // Use sharedSave from bg_common.js
+            sharedSave(msg.data, msg.overwrite, function (result) {
+                if (result && result.error) {
+                    sendResponse({ success: false, error: result.error });
+                } else {
+                    sendResponse({ success: true, result: result });
+                }
+            });
+        } catch (e) {
+            console.error("[iMacros SW] Save error:", e);
+            sendResponse({ success: false, error: e.message });
+        }
         return true;
     }
 
@@ -1670,6 +1889,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse({ success: false, error: error ? error.message : "Unspecified error" });
         });
         return true; // Keep channel open for async response
+    }
+
+    // --- Forward messages from Content Scripts (Connector) to Offscreen ---
+    // Content Scripts use connector.postMessage which sends { topic: "...", data: ... }
+    // These need to be forwarded to Offscreen where the backend logic (communicator handlers) resides.
+    if (msg.topic && !msg.command && !msg.type && !msg.keepAlive) {
+        // Forward to Offscreen Document via FORWARD_MESSAGE command
+        // This maps to Offscreen's onMessage -> FORWARD_MESSAGE -> communicator._execHandlers
+        forwardToOffscreen({
+            command: 'FORWARD_MESSAGE',
+            topic: msg.topic,
+            data: msg.data,
+            tab_id: sender.tab ? sender.tab.id : null,
+            win_id: sender.tab ? sender.tab.windowId : null
+        }).then(response => {
+            sendResponse(response);
+        }).catch(error => {
+            // Suppress errors for common noise like channel closing during page unload
+            const isNoise = error && error.message && (
+                error.message.includes("closed") ||
+                error.message.includes("receiving end does not exist")
+            );
+            if (!isNoise) {
+                console.warn('[iMacros SW] Failed to forward generic topic message:', msg.topic, error);
+            }
+            sendResponse({
+                error: error ? error.message : "Forwarding failed",
+                state: 'idle'
+            });
+        });
+        return true; // Keep channel open
     }
 });
 
@@ -1816,6 +2066,8 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
 
 // Handle the runMacroByUrl command in the message listener
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+
+
     if (msg.command === 'runMacroByUrl' && msg.target === 'background') {
         // Forward to offscreen document
         sendMessageToOffscreen({
@@ -1831,8 +2083,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
+    if (msg.command === 'INSTALL_SAMPLE_BOOKMARKLETS') {
+        if (typeof globalScope !== 'undefined' && globalScope.installSampleBookmarkletMacros) {
+            console.log("[iMacros SW] Installing sample bookmarklets command received");
+            globalScope.installSampleBookmarkletMacros().catch(err => {
+                console.warn("[iMacros SW] Failed to install sample bookmarklets:", err);
+            });
+        }
+        // Respond immediately as installation is async and not critical for response
+        sendResponse({ success: true });
+        return false;
+    }
+
+
     // NOTE: openPanel command is handled by the main handler above (lines 221-302)
     // Do NOT add duplicate handler here - it causes panel to open twice
+
+
+
+    return false;
 });
 
 // NOTE: MessagingBus class is defined in mv3_messaging_bus.js (imported via importScripts)
+})();

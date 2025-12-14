@@ -1,10 +1,10 @@
 /* panel.js - MV3対応版 */
 
 // 選択中のマクロ情報を保持する変数
-var selectedMacro = null;
+let selectedMacro = null;
 
 // パネルの状態をキャッシュ
-var panelState = {
+let panelState = {
     isRecording: false,
     isPlaying: false,
     currentMacro: null
@@ -35,7 +35,7 @@ function getMacroPathAndName(macro) {
 }
 
 // パネルのウィンドウIDを保持
-var currentWindowId = null;
+let currentWindowId = null;
 
 // ウィンドウIDを取得
 function initWindowId() {
@@ -45,7 +45,8 @@ function initWindowId() {
         const winIdParam = urlParams.get('win_id');
 
         if (winIdParam) {
-            currentWindowId = parseInt(winIdParam);
+            // 安全のため基数10を指定 (Main側の記述を採用)
+            currentWindowId = parseInt(winIdParam, 10);
             console.log("[Panel] Current window ID from URL:", currentWindowId);
             resolve(currentWindowId);
             return;
@@ -78,8 +79,19 @@ function ensureWindowId() {
     return windowIdReadyPromise;
 }
 
+function handleMissingWindowId(context) {
+    const el = ensureStatusLineElement();
+    el.textContent = context || "Unable to determine window context.";
+    el.style.color = "#b00020";
+}
+
 function sendCommand(command, payload = {}) {
     return ensureWindowId().then(() => {
+        if (currentWindowId === null) {
+            console.warn(`[Panel] Skipping command ${command}: window ID unavailable`);
+            handleMissingWindowId("Unable to determine window context. Command not sent.");
+            return undefined;
+        }
         // 自動的にウィンドウIDを追加
         const message = {
             ...payload,
@@ -109,6 +121,11 @@ function sendCommand(command, payload = {}) {
 
 function requestStateUpdate() {
     return ensureWindowId().then(() => {
+        if (currentWindowId === null) {
+            console.warn("[Panel] Skipping state update: window ID unavailable");
+            handleMissingWindowId("Unable to determine window context. State unavailable.");
+            return undefined;
+        }
         return new Promise((resolve) => {
             chrome.runtime.sendMessage({
                 type: 'QUERY_STATE',
@@ -577,6 +594,50 @@ window.addEventListener("message", (event) => {
         play();
     }
 });
+
+// --- Extension Reload Detection ---
+// Establish a long-lived connection to detect when the extension context is invalidated (reloaded/updated)
+// --- Extension Reload/Lifecycle Detection ---
+// Maintain a connection to keep SW alive and detect when extension is reloaded.
+let lifeCyclePort = null;
+
+function connectToLifecycle() {
+    try {
+        lifeCyclePort = chrome.runtime.connect({ name: "panel-lifecycle" });
+        lifeCyclePort.onDisconnect.addListener(() => {
+            console.log("[Panel] Lifecycle port disconnected. Checking extension status...");
+            lifeCyclePort = null;
+
+            if (chrome.runtime.lastError) {
+                console.warn("[Panel] Port disconnected due to error:", chrome.runtime.lastError.message);
+            }
+
+            // Attempt to ping the runtime to see if it's still valid
+            try {
+                chrome.runtime.sendMessage({ keepAlive: true }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        // Runtime error -> Extension likely reloaded or context invalidated
+                        console.log("[Panel] Extension context appears invalid (ping failed). Reloading panel...");
+                        // Short delay to ensure the new context is ready
+                        setTimeout(() => window.location.reload(), 500);
+                    } else {
+                        // Response received -> SW just terminated, extension is still alive
+                        console.log("[Panel] Service Worker terminated (idle), reconnecting...");
+                        connectToLifecycle();
+                    }
+                });
+            } catch (e) {
+                // accessing chrome.runtime might throw if context is completely gone
+                console.log("[Panel] Extension context invalidated (exception). Reloading panel...");
+                setTimeout(() => window.location.reload(), 500);
+            }
+        });
+    } catch (e) {
+        console.error("[Panel] Failed to connect to background:", e);
+    }
+}
+
+connectToLifecycle();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.target === 'panel' && message.type === 'PANEL_STATE_UPDATE') {
