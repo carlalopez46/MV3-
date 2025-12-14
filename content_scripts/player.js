@@ -1731,50 +1731,88 @@ function getXYOffset(w) {
 }
 
 CSPlayer.prototype.onActivateElement = function (args, sendResponse) {
-    var el, sel;
-    if (args.selector) {
-        sel = args.selector;
-        el = document.querySelector(sel);
-    } else if (args.xpath) {
-        sel = args.xpath;
-        el = TagHandler.findByXPath(window.document, window.document.documentElement, sel);
-    }
+    try {
+        var el, sel;
+        if (args.selector === 'window') {
+            let { x_offset, y_offset } = getXYOffset(window)
+            sendResponse({
+                targetRect:
+                {
+                    left: 0,
+                    top: 0,
+                    bottom: window.innerHeight,
+                    right: window.innerWidth,
+                    width: window.innerWidth,
+                    height: window.innerHeight,
+                    xOffset: x_offset,
+                    yOffset: y_offset,
+                    pageXOffset: window.pageXOffset,
+                    pageYOffset: window.pageYOffset
+                },
+                isPasswordElement: false
+            });
+            return;
+        }
 
-    if (!el) {
+        if (args.selector) {
+            sel = args.selector;
+            el = document.querySelector(sel);
+        } else if (args.xpath) {
+            sel = args.xpath;
+            el = TagHandler.findByXPath(window.document, window.document.documentElement, sel);
+        }
+
+        if (!el) {
+            sendResponse({
+                error: normalize_error(
+                    new RuntimeError(
+                        "element specified by " +
+                        sel + " not found", 721
+                    )
+                )
+            })
+        } else {
+            // hack for handling select boxes in event mode
+            if (el.tagName.toLowerCase() == "option") {
+                el.selected = true
+            }
+            if (args.scroll) {
+                var pos = ClickHandler.findElementPosition(el);
+                window.scrollTo(pos.x - 100, pos.y - 100);
+            }
+
+            // Handle value setting for EVENT TYPE=INPUT
+            if (typeof args.value !== 'undefined') {
+                el.value = args.value;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+
+            var rect = el.getBoundingClientRect();
+            let { x_offset, y_offset } = getXYOffset(window)
+            sendResponse({
+                targetRect:
+                {
+                    left: rect.left,
+                    top: rect.top,
+                    bottom: rect.bottom,
+                    right: rect.right,
+                    width: rect.width,
+                    height: rect.height,
+                    xOffset: x_offset,
+                    yOffset: y_offset,
+                    pageXOffset: window.pageXOffset,
+                    pageYOffset: window.pageYOffset
+                },
+                isPasswordElement: el.type == "password"
+            });
+        }
+    } catch (e) {
+        console.error("[iMacros CSPlayer] onActivateElement error:", e);
         sendResponse({
             error: normalize_error(
-                new RuntimeError(
-                    "element specified by " +
-                    sel + " not found", 721
-                )
+                new RuntimeError(e.message || "Unknown error in onActivateElement", 1001)
             )
-        })
-    } else {
-        // hack for handling select boxes in event mode
-        if (el.tagName.toLowerCase() == "option") {
-            el.selected = true
-        }
-        if (args.scroll) {
-            var pos = ClickHandler.findElementPosition(el);
-            window.scrollTo(pos.x - 100, pos.y - 100);
-        }
-        var rect = el.getBoundingClientRect();
-        let { x_offset, y_offset } = getXYOffset(window)
-        sendResponse({
-            targetRect:
-            {
-                left: rect.left,
-                top: rect.top,
-                bottom: rect.bottom,
-                right: rect.right,
-                width: rect.width,
-                height: rect.height,
-                xOffset: x_offset,
-                yOffset: y_offset,
-                pageXOffset: window.pageXOffset,
-                pageYOffset: window.pageYOffset
-            },
-            isPasswordElement: el.type == "password"
         });
     }
 };
