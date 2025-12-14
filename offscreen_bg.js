@@ -8,7 +8,7 @@ worker via explicit messaging.
 
 //
 // Config
-/* global FileSyncBridge, afio, communicator */
+/* global FileSyncBridge, afio, communicator, dialogUtils */
 "use strict";
 
 //
