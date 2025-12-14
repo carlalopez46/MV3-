@@ -2,14 +2,13 @@
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
 
-var args;
-var dialogWindowId = null;
+let args;
+let dialogWindowId = null;
 
 window.addEventListener("load", function () {
-    // Primary MV3 path: request dialog args from background
     // Primary MV3 path: request dialog args from background with retry
     // Check for key in URL first (MV3/Offscreen compatibility)
-    var urlParams = new URLSearchParams(window.location.search);
+    const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.has('key')) {
         fallbackToSessionStorage();
         return;

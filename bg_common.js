@@ -173,7 +173,7 @@ function sharedSave(save_data, overwrite, callback) {
 
                     // Use chrome.windows.create if reachable (MV3/SW friendly), fallback to window.open
                     if (typeof chrome.windows !== 'undefined' && chrome.windows.create) {
-                        var features = {
+                        const features = {
                             url: "saveAsDialog.html?key=" + dialogKey,
                             type: "popup",
                             width: 480,
@@ -182,7 +182,7 @@ function sharedSave(save_data, overwrite, callback) {
                         chrome.windows.create(features);
                     } else if (typeof window !== 'undefined' && window && typeof window.open === 'function') {
                         // Fallback for contexts where chrome.windows is restricted but window.open might work
-                        var features = "titlebar=no,menubar=no,location=no," +
+                        const features = "titlebar=no,menubar=no,location=no," +
                             "resizable=yes,scrollbars=no,status=no,width=480,height=350";
                         window.open("saveAsDialog.html?key=" + dialogKey, "saveAsDialog", features);
                     } else {
