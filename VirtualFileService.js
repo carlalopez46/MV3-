@@ -339,10 +339,22 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             if (!path.startsWith('/')) {
                 path = '/' + path;
             }
-            if (path.length > 1 && path.endsWith('/')) {
-                path = path.slice(0, -1);
+            const parts = [];
+            path.split('/').forEach((part) => {
+                if (!part || part === '.') return;
+                if (part === '..') {
+                    if (parts.length > 0) {
+                        parts.pop();
+                    }
+                    return;
+                }
+                parts.push(part);
+            });
+            const normalized = '/' + parts.join('/');
+            if (normalized.length > 1 && normalized.endsWith('/')) {
+                return normalized.slice(0, -1);
             }
-            return path;
+            return normalized === '//' ? '/' : normalized;
         }
 
         _ensureDirPath(path) {
@@ -625,6 +637,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
                 nodes.push({
                     _path: nodePath,
                     _is_dir_int: nodeEntry.type === 'dir' ? 1 : 0,
+                    name: remainder,
                     path: nodePath,
                     is_dir: nodeEntry.type === 'dir'
                 });
@@ -635,7 +648,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
                     return nodes.filter((n) => n._is_dir_int === 1);
                 }
                 const regex = globToRegex(filter);
-                return nodes.filter((n) => regex.test(n._path));
+                return nodes.filter((n) => regex.test(n.name || n._path.split('/').pop() || ''));
             }
             return nodes;
         }
