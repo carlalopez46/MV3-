@@ -7,7 +7,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // Context to store browser window-specific information
 
 // Define global listeners to ensure stable references
-var _globalContextListeners = {
+const _globalContextListeners = {
     onCreated: function (w) {
         if (typeof context !== 'undefined' && context.onCreated) {
             context.onCreated(w);
@@ -25,7 +25,7 @@ var _globalContextListeners = {
     }
 };
 
-var context = {
+const context = {
     _initialized: false,
     _listenersAttached: false,
     _initPromises: {}, // Track ongoing initializations
@@ -152,7 +152,7 @@ var context = {
         }
 
         if (context[id]) {
-            var t;
+            let t;
             if (t = context[id].mplayer) {
                 t.terminate();
                 delete context[id].mplayer;
@@ -252,8 +252,8 @@ var context = {
     },
 
     on_df: function (dl, suggest) {
-        for (var i = 0; i < this.df_handlers.length; i++) {
-            var mplayer = context[this.df_handlers[i]].mplayer;
+        for (let i = 0; i < this.df_handlers.length; i++) {
+            const mplayer = context[this.df_handlers[i]].mplayer;
             if (mplayer && mplayer.onDeterminingFilename(dl, suggest))
                 return;
         }
@@ -264,4 +264,4 @@ var context = {
 
 // This event has a weird condition that an extension can register only
 // one listener. It is registered in attachListeners() now.
-context.df_handlers = new Array();
+context.df_handlers = [];

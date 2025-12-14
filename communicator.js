@@ -4,7 +4,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 // incapsulates all content scripts-extensions communications
 function Communicator() {
-    this.handlers = new Object();
+    this.handlers = Object.create(null);
     this.addListeners();
 }
 
@@ -18,7 +18,7 @@ Communicator.prototype.addListeners = function () {
 
             // sender.tab がない場合はバックグラウンド/ポップアップからのメッセージの可能性がある
             // タブIDがない場合は -1 などを割り当てるか、ハンドラ側で対応
-            let tabId = sender.tab ? sender.tab.id : -1;
+            const tabId = sender.tab ? sender.tab.id : -1;
 
             // 这里的 callback 是 sendResponse，但旧代码期望 callback() 形式
             // 需要适配
@@ -30,15 +30,15 @@ Communicator.prototype.addListeners = function () {
     if (typeof chrome.windows !== 'undefined' && chrome.windows.onRemoved) {
         chrome.windows.onRemoved.addListener((win_id) => {
             // remove all handlers bind to the window
-            for (var topic in this.handlers) {
-                var len = this.handlers[topic].length, i;
-                var junk = new Array();
-                for (i = 0; i < len; i++) {
+            for (const topic in this.handlers) {
+                const len = this.handlers[topic].length;
+                const junk = [];
+                for (let i = 0; i < len; i++) {
                     if (this.handlers[topic][i].win_id == win_id) {
                         junk.push(this.handlers[topic][i].handler);
                     }
                 }
-                for (i = 0; i < junk.length; i++) {
+                for (let i = 0; i < junk.length; i++) {
                     this.unregisterHandler(topic, junk[i]);
                 }
             }
@@ -49,14 +49,14 @@ Communicator.prototype.addListeners = function () {
 // register handlers for specific content script messages
 Communicator.prototype.registerHandler = function (topic, handler, win_id) {
     if (!(topic in this.handlers))
-        this.handlers[topic] = new Array();
+        this.handlers[topic] = [];
     this.handlers[topic].push({ handler: handler, win_id: win_id });
 };
 
 Communicator.prototype.unregisterHandler = function (topic, handler) {
     if (!(topic in this.handlers))
         return;
-    for (var i = 0; i < this.handlers[topic].length; i++) {
+    for (let i = 0; i < this.handlers[topic].length; i++) {
         if (this.handlers[topic][i].handler == handler) {
             this.handlers[topic].splice(i, 1);
             break;
@@ -70,14 +70,19 @@ Communicator.prototype.handleMessage = function (msg, tab_id, sendResponse) {
     if (msg.topic in this.handlers) {
         // tab_id が有効な場合のみタブ情報を取得
         if (tab_id !== -1 && chrome.tabs) {
-            chrome.tabs.get(tab_id, (tab) => {
-                if (chrome.runtime.lastError || !tab) {
-                    // タブが見つからない、またはコンテキストが違う場合は直接実行
-                    this._execHandlers(msg, tab_id, null, sendResponse);
-                    return;
-                }
-                this._execHandlers(msg, tab_id, tab.windowId, sendResponse);
-            });
+            try {
+                chrome.tabs.get(tab_id, (tab) => {
+                    if (chrome.runtime.lastError || !tab) {
+                        // タブが見つからない、またはコンテキストが違う場合は直接実行
+                        this._execHandlers(msg, tab_id, null, sendResponse);
+                        return;
+                    }
+                    this._execHandlers(msg, tab_id, tab.windowId, sendResponse);
+                });
+            } catch (err) {
+                console.error('[Communicator] Error getting tab:', err);
+                this._execHandlers(msg, tab_id, null, sendResponse);
+            }
         } else {
             this._execHandlers(msg, tab_id, null, sendResponse);
         }
@@ -96,18 +101,18 @@ Communicator.prototype._execHandlers = function (msg, tab_id, win_id, sendRespon
         return;
     }
     let handled = false;
-    this.handlers[msg.topic].forEach((x) => {
+    for (const x of this.handlers[msg.topic]) {
         if (x.win_id && win_id && x.win_id == win_id) {
             handled = true;
             x.handler(msg.data, tab_id, sendResponse);
-            return;
+            break;
         } else if (!x.win_id) {
             // browser-wide message handler
             handled = true;
             x.handler(msg.data, tab_id, sendResponse);
-            return;
+            break;
         }
-    });
+    }
     // If no handler matched (e.g., win_id mismatch), still send a response to close the channel
     if (!handled && sendResponse) {
         // Collect debug info
@@ -204,12 +209,25 @@ Communicator.prototype.broadcastMessage = function (topic, data, win_id) {
         // Direct access (Service Worker or extension page)
         const queryInfo = win_id ? { windowId: win_id } : {};
 
-        chrome.tabs.query(queryInfo, (tabs) => {
-            if (!tabs) return;
-            tabs.forEach((tab) => {
-                chrome.tabs.sendMessage(tab.id, { topic: topic, data: data }, () => { });
+        try {
+            chrome.tabs.query(queryInfo, (tabs) => {
+                if (chrome.runtime.lastError) {
+                    console.warn('[Communicator] broadcastMessage query error:', chrome.runtime.lastError.message);
+                    return;
+                }
+                if (!tabs) return;
+                for (const tab of tabs) {
+                    chrome.tabs.sendMessage(tab.id, { topic: topic, data: data }, () => {
+                        // Ignore errors for individual tabs
+                        if (chrome.runtime.lastError) {
+                            // Tab may not have content script
+                        }
+                    });
+                }
             });
-        });
+        } catch (err) {
+            console.error('[Communicator] broadcastMessage error:', err);
+        }
     } else {
         // Proxy through Service Worker (Offscreen Document)
         chrome.runtime.sendMessage({
@@ -224,4 +242,4 @@ Communicator.prototype.broadcastMessage = function (topic, data, win_id) {
     }
 };
 
-var communicator = new Communicator();
+const communicator = new Communicator();
