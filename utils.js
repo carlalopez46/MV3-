@@ -890,15 +890,21 @@ var Storage = {
     },
 
     isSet: function (key) {
+        if (typeof localStorage === "undefined") return false;
         return typeof (localStorage[key]) != "undefined";
     },
 
     setBool: function (key, value) {
-        localStorage[key] = Boolean(value);
+        if (typeof localStorage !== "undefined") {
+            localStorage[key] = Boolean(value);
+        }
         this._syncToChromeStorage(key, Boolean(value));
     },
 
     getBool: function (key, defaultValue) {
+        if (typeof localStorage === "undefined") {
+            return typeof defaultValue !== "undefined" ? defaultValue : false;
+        }
         var value = localStorage[key];
         if (typeof value === "undefined" || value === null) {
             return typeof defaultValue !== "undefined" ? defaultValue : false;
@@ -907,11 +913,16 @@ var Storage = {
     },
 
     setChar: function (key, value) {
-        localStorage[key] = String(value);
+        if (typeof localStorage !== "undefined") {
+            localStorage[key] = String(value);
+        }
         this._syncToChromeStorage(key, String(value));
     },
 
     getChar: function (key, defaultValue) {
+        if (typeof localStorage === "undefined") {
+            return typeof defaultValue !== "undefined" ? defaultValue : "";
+        }
         var value = localStorage[key];
         if (typeof value === "undefined" || value === null) {
             return typeof defaultValue !== "undefined" ? defaultValue : "";
@@ -922,12 +933,17 @@ var Storage = {
     setNumber: function (key, value) {
         var val = Number(value);
         if (!isNaN(val)) {
-            localStorage[key] = val;
+            if (typeof localStorage !== "undefined") {
+                localStorage[key] = val;
+            }
             this._syncToChromeStorage(key, val);
         }
     },
 
     getNumber: function (key, defaultValue) {
+        if (typeof localStorage === "undefined") {
+            return typeof defaultValue !== "undefined" ? defaultValue : 0;
+        }
         var value = localStorage[key];
         if (typeof value === "undefined" || value === null) {
             return typeof defaultValue !== "undefined" ? defaultValue : 0;
@@ -938,11 +954,16 @@ var Storage = {
 
     setObject: function (key, value) {
         var s = JSON.stringify(value);
-        localStorage[key] = s;
+        if (typeof localStorage !== "undefined") {
+            localStorage[key] = s;
+        }
         this._syncToChromeStorage(key, s);
     },
 
     getObject: function (key, defaultValue) {
+        if (typeof localStorage === "undefined") {
+            return typeof defaultValue !== "undefined" ? defaultValue : null;
+        }
         var s = localStorage[key];
         if (typeof s != "string" || s === null || s === "undefined") {
             return typeof defaultValue !== "undefined" ? defaultValue : null;

@@ -1118,6 +1118,13 @@ MacroPlayer.prototype.RegExpTable["event"] =
     "(?:\\s+modifiers\\s*=\\s*(" + im_strre + "))?";
 
 MacroPlayer.prototype.attachDebugger = function (version) {
+    if (this.isInternalURL(this.currentURL)) {
+        // Cannot attach to internal/restricted pages.
+        // Return resolved to avoid breaking flow immediately, but commands requiring debugger will likely fail.
+        // Alternatively, reject if we want to stop. But EVENT command catch block handles errors.
+        return Promise.reject(new RuntimeError("Cannot attach debugger to restricted page: " + this.currentURL, 711));
+    }
+
     return this.debuggerAttached ?
         Promise.resolve() : attach_debugger(this.tab_id, version).then(() => {
             this.debuggerAttached = true
@@ -1209,8 +1216,9 @@ function detach_debugger(tab_id) {
             chrome.debugger.detach({ tabId: tab_id }, function () {
                 if (chrome.runtime.lastError) {
                     if (chrome.runtime.lastError.message &&
-                        chrome.runtime.lastError.message.includes("Debugger is not attached")) {
-                        // Ignore if already detached
+                        (chrome.runtime.lastError.message.includes("Debugger is not attached") ||
+                            chrome.runtime.lastError.message.includes("Cannot access a chrome-extension"))) {
+                        // Ignore if already detached or if we can't access the page (e.g. extension page)
                         resolve();
                     } else {
                         reject(chrome.runtime.lastError);
@@ -1232,7 +1240,8 @@ function detach_debugger(tab_id) {
                 } else if (response && response.error) {
                     // Ignore if already detached
                     const errorMessage = typeof response.error === 'string' ? response.error : String(response.error);
-                    if (errorMessage.includes("Debugger is not attached")) {
+                    if (errorMessage.includes("Debugger is not attached") ||
+                        errorMessage.includes("Cannot access a chrome-extension")) {
                         resolve();
                     } else {
                         reject(new Error(errorMessage));

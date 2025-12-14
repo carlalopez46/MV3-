@@ -159,10 +159,22 @@ function sharedSave(save_data, overwrite, callback) {
         globalScope.afioCache.isInstalled().then(function (installed) {
             if (installed && typeof window !== 'undefined' && window && typeof window.open === 'function') {
                 // Open saveAs dialog to let user choose file location
-                var features = "titlebar=no,menubar=no,location=no," +
-                    "resizable=yes,scrollbars=no,status=no";
-                var win = window.open("saveAsDialog.html", null, features);
-                dialogUtils.setArgs(win, { save_data: save_data });
+                // Use storage + URL key strategy for robust MV3/Offscreen support
+                var dialogKey = 'saveAs_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                var storage = chrome.storage.session || chrome.storage.local;
+
+                var data = {};
+                data[dialogKey] = { save_data: save_data };
+
+                storage.set(data, function () {
+                    if (chrome.runtime.lastError) {
+                        console.error("[iMacros] Failed to store saveAs args:", chrome.runtime.lastError);
+                    }
+                    var features = "titlebar=no,menubar=no,location=no," +
+                        "resizable=yes,scrollbars=no,status=no";
+                    window.open("saveAsDialog.html?key=" + dialogKey, null, features);
+                });
+
                 // The saveAsDialog will call save() again with file_id set
                 return;
             }
