@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html translate="no">
 
 <head>
     <script src="utils.js"></script>
@@ -21,8 +21,10 @@
     <script src="mrecorder.js"></script>
     <script src="context.js"></script>
 
-    <script src="bg.js"></script>
+    <!-- Note: bg.js is NOT loaded here - it's for Service Worker only -->
+    <!-- Offscreen-specific logic is in offscreen_bg.js -->
 
+    <script src="dialogUtils.js"></script>
     <script src="offscreen.js"></script>
     <script src="offscreen_bg.js"></script>
 </head>
