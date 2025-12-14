@@ -12,6 +12,68 @@ of altering command semantics.
 // An object to encapsulate all operations for parsing
 // and playing macro commands
 
+// Basic logging stub to avoid runtime failures in test harnesses where
+// showInfo is not provided by the UI layer.
+if (typeof showInfo !== 'function') {
+    function showInfo(args) {
+        try {
+            console.info('[MacroPlayer] Info:', args);
+        } catch (e) {
+            // console may not be available in every embedding context
+        }
+    }
+}
+
+// Variable manager wrapper that keeps the legacy MacroPlayer variable
+// storage in sync with the newer VariableManager utility loaded by the
+// test harness.
+function PlayerVariableManager(player) {
+    VariableManager.call(this);
+    this.player = player;
+    this._syncVarsFromPlayer();
+}
+
+PlayerVariableManager.prototype = Object.create(VariableManager.prototype);
+PlayerVariableManager.prototype.constructor = PlayerVariableManager;
+
+PlayerVariableManager.prototype._syncVarsFromPlayer = function () {
+    if (!this.player || !Array.isArray(this.player.vars)) {
+        return;
+    }
+    for (let i = 0; i < this.player.vars.length; i++) {
+        if (typeof this.player.vars[i] !== 'undefined') {
+            this.globalVars.set('VAR' + i, this.player.vars[i]);
+        }
+    }
+};
+
+PlayerVariableManager.prototype.setVar = function (name, value) {
+    name = name.replace(/^!/, '');
+    VariableManager.prototype.setVar.call(this, name, value);
+
+    if (/^VAR\d+$/.test(name)) {
+        const idx = parseInt(name.slice(3), 10);
+        if (!Number.isNaN(idx)) {
+            this.player.vars[idx] = value;
+        }
+    }
+
+    if (name === 'LOOP') {
+        this.player.currentLoop = value;
+    }
+};
+
+PlayerVariableManager.prototype.resetLocalContext = function () {
+    VariableManager.prototype.resetLocalContext.call(this);
+    this.player.currentLoop = this.localContext.LOOP;
+};
+
+PlayerVariableManager.prototype.clearGlobalVars = function () {
+    VariableManager.prototype.clearGlobalVars.call(this);
+    this.player.vars = new Array();
+};
+
+// MacroPlayer implementation
 function MacroPlayer(win_id) {
     this.win_id = win_id;
     this.tab_id = null;
@@ -19,6 +81,7 @@ function MacroPlayer(win_id) {
     this.userVars = new Map();
     this.ports = new Object();
     this._ActionTable = new Object();
+    this.callStack = [];
     this.compileExpressions();
 
     this._onScriptError = this.onErrorOccurred.bind(this);
@@ -57,6 +120,10 @@ function MacroPlayer(win_id) {
     // listeners for download events
     this._onDownloadCreated = this.onDownloadCreated.bind(this);
     this._onDownloadChanged = this.onDownloadChanged.bind(this);
+
+    if (typeof VariableManager === 'function') {
+        this.varManager = new PlayerVariableManager(this);
+    }
 }
 
 // Helpers to work across Service Worker / Offscreen contexts
@@ -833,6 +900,12 @@ MacroPlayer.prototype.stopTimer = function (type) {
     clearInterval(timer.interval);
     this.timers.delete(type);
     timer = null;
+};
+
+MacroPlayer.prototype._popFrame = function () {
+    if (this.callStack && this.callStack.length) {
+        this.callStack.pop();
+    }
 };
 
 
@@ -3776,6 +3849,10 @@ MacroPlayer.prototype.reset = function () {
 
     this.waitingForPassword = false;
 
+    if (this.varManager && typeof this.varManager.resetLocalContext === 'function') {
+        this.varManager.resetLocalContext();
+    }
+
     // downloads state
     this.activeDownloads = new Map();
     this.waitForDownloadCompleted = false;
@@ -4665,6 +4742,17 @@ MacroPlayer.prototype.getColumnData = function (col) {
 
 // functions to access built-in VARiables
 MacroPlayer.prototype.getVar = function (idx) {
+    if (this.varManager && typeof this.varManager.getVar === 'function') {
+        let name = idx;
+        if (typeof idx !== 'string' || /^\d+$/.test(idx)) {
+            name = 'VAR' + imns.s2i(idx);
+        }
+        const value = this.varManager.getVar(name);
+        if (typeof value !== 'undefined') {
+            return value === null ? "" : value;
+        }
+    }
+
     var num = typeof idx === "string" ? imns.s2i(idx) : idx;
     return this.vars[num] || "";
 };
