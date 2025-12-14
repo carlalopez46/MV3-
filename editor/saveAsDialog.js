@@ -144,9 +144,9 @@ window.addEventListener("load", function () {
         }
 
         if (file_type) {
-            document.getElementById("radio-files-tree").checked = "yes";
+            document.getElementById("radio-files-tree").checked = true;
         } else {
-            document.getElementById("radio-bookmarks-tree").checked = "yes";
+            document.getElementById("radio-bookmarks-tree").checked = true;
         }
 
         // Add directory selection functionality
@@ -162,25 +162,27 @@ window.addEventListener("load", function () {
                 directoryBox.style.display = "block";
 
                 // If we are editing a file, try to extract the directory from the file_id
-                if (file_type && args.save_data.file_id && !directoryPath.value) {
+                if (file_type && args.save_data.file_id) {
                     // file_id is typically the full path
                     try {
-                        // Simple path parsing (supports both / and \)
                         var path = args.save_data.file_id;
                         var separator = path.indexOf("\\") !== -1 ? "\\" : "/";
                         var lastSepIndex = path.lastIndexOf(separator);
 
                         if (lastSepIndex !== -1) {
                             var dir = path.substring(0, lastSepIndex);
-                            directoryPath.value = dir;
-                            directoryPath.dataset.path = dir;
+                            // Only update if currently empty or explicitly restoring from file_id
+                            if (!directoryPath.value || directoryPath.value === "") {
+                                directoryPath.value = dir;
+                                directoryPath.dataset.path = dir;
+                            }
                         }
                     } catch (e) {
                         console.error("Failed to parse directory from file_id:", e);
                     }
                 }
 
-                // Set default directory path if not already set
+                // Set default directory path if still not set
                 if (!directoryPath.value) {
                     afio.getDefaultDir("savepath").then(function (node) {
                         directoryPath.value = node.path;
