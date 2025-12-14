@@ -1025,12 +1025,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // This avoids using new Function() which violates MV3 CSP
         const predefinedFunctions = {
             // Execute code string in global scope (for javascript: URLs in macros)
-            // Note: This function runs in the content script context (target tab),
-            // not in the Service Worker. eval is permitted in page contexts.
+            // Uses script element injection instead of eval() to avoid CSP violations
+            // on pages with strict Content-Security-Policy
             'evalCode': (code) => {
-                // Using indirect eval for global scope execution
-                // eslint-disable-next-line no-eval
-                return (0, eval)(code);
+                try {
+                    // Create a script element to execute the code
+                    // This approach works on more pages than eval()
+                    var script = document.createElement('script');
+                    script.textContent = code;
+                    (document.head || document.documentElement).appendChild(script);
+                    script.remove();
+                    return { success: true };
+                } catch (e) {
+                    return { error: e.message || String(e) };
+                }
             }
         };
 
@@ -1042,11 +1050,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         chrome.scripting.executeScript({
             target: { tabId: tabId },
+            world: 'MAIN', // Execute in page's main world
             func: funcToExecute,
             args: args || []
         }, (results) => {
             if (chrome.runtime.lastError) {
                 sendResponse({ error: chrome.runtime.lastError.message });
+            } else if (Array.isArray(results) && results[0]) {
+                var result = results[0].result;
+                if (result && result.error) {
+                    sendResponse({ error: result.error });
+                } else {
+                    sendResponse({ success: true, results: results });
+                }
             } else {
                 sendResponse({ success: true, results: results });
             }

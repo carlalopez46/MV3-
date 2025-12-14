@@ -3651,18 +3651,35 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
 
         if (chrome.scripting && chrome.scripting.executeScript) {
             // Direct access (Service Worker context)
+            // Use script element injection instead of eval() to avoid CSP violations
+            // on pages with strict Content-Security-Policy
             chrome.scripting.executeScript({
                 target: { tabId: this.tab_id },
-                // Intentional global-scope execution of trusted macro JavaScript.
-                // Note: This func runs in the page context, not the extension context.
-                // eslint-disable-next-line no-eval
-                func: (code) => { return (0, eval)(code); },
+                world: 'MAIN', // Execute in page's main world
+                func: (code) => {
+                    try {
+                        // Create a script element to execute the code
+                        // This approach works on more pages than eval()
+                        var script = document.createElement('script');
+                        script.textContent = code;
+                        (document.head || document.documentElement).appendChild(script);
+                        script.remove();
+                        return { success: true };
+                    } catch (e) {
+                        return { error: e.message || String(e) };
+                    }
+                },
                 args: [scriptCode]
             }, (results) => {
                 if (chrome.runtime.lastError) {
                     executeScriptCallback({ error: chrome.runtime.lastError.message });
-                } else if (Array.isArray(results) && results[0] && results[0].error) {
-                    executeScriptCallback({ error: results[0].error.message || String(results[0].error) });
+                } else if (Array.isArray(results) && results[0]) {
+                    var result = results[0].result;
+                    if (result && result.error) {
+                        executeScriptCallback({ error: result.error });
+                    } else {
+                        executeScriptCallback({ success: true });
+                    }
                 } else {
                     executeScriptCallback({ success: true });
                 }
