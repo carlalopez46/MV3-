@@ -107,17 +107,17 @@ if (_needsLocalStoragePolyfill) {
 }
 
 (function () {
-    var globalScope = typeof self !== 'undefined' ? self : window;
+    const globalScope = typeof self !== 'undefined' ? self : window;
 
     if (typeof window !== 'undefined' && window.postMessage) {
-        var timers = new Array();
-        var onMessage = function (event) {
+        const timers = [];
+        const onMessage = function (event) {
             if (event.source != window ||
                 !event.data.type ||
                 event.data.type != "asyncRun")
                 return;
 
-            var f = timers.shift();
+            const f = timers.shift();
             if (f) f();
         };
 
@@ -171,11 +171,11 @@ var imns = {
     // a string representation of an integer,
     // otherwise returns NaN
     s2i: function (num) {
-        var s = num.toString();
+        let s = num.toString();
         s = this.trim(s);
         if (!s.length)
             return Number.NaN;
-        var n = parseInt(s);
+        const n = parseInt(s);
         if (n.toString().length != s.length)
             return Number.NaN;
         return n;
@@ -183,7 +183,7 @@ var imns = {
 
     // escape \n, \t, etc. chars in line
     escapeLine: function (line) {
-        var values_to_escape = {
+        const values_to_escape = {
             "\\u005C": "\\\\",
             "\\u0000": "\\0",
             "\\u0008": "\\b",
@@ -208,7 +208,7 @@ var imns = {
         //          "\"": "\\\"",
         //          "'": "\\'"};
 
-        for (var x in values_to_escape) {
+        for (const x in values_to_escape) {
             line = line.replace(new RegExp(x, "g"), values_to_escape[x]);
         }
 
@@ -219,7 +219,7 @@ var imns = {
     wrap: function (line) {
         const line_re = new RegExp("^\"((?:\n|.)*)\"$");
 
-        var m = null;
+        let m = null;
         if (m = line.match(line_re)) { // it is a quoted string
             line = this.escapeLine(m[1]);
 
@@ -254,9 +254,9 @@ var imns = {
 
     unwrap: function (line) {
         const line_re = new RegExp("^\"((?:\n|.)*)\"$");
-        var m = null;
+        let m = null;
 
-        var handleSequence = function (s) {
+        const handleSequence = function (s) {
             if (s == "\\\\") {
                 return "\u005C";
             } else if (s == "\\0") {
@@ -279,7 +279,7 @@ var imns = {
                 return "\u0027"
             } else {
                 // function to replace \x|u sequence
-                var replaceChar = function (match_str, char_code) {
+                const replaceChar = function (match_str, char_code) {
                     return String.fromCharCode(parseInt("0x" + char_code));
                 };
                 if (/^\\x/.test(s))// replace \xXX by its value
@@ -289,7 +289,7 @@ var imns = {
             }
         };
 
-        var esc_re = new RegExp("\\\\(?:[0btnvfr\"\'\\\\]|x[\da-fA-F]{2}|u[\da-fA-F]{4})", "g");
+        const esc_re = new RegExp("\\\\(?:[0btnvfr\"\'\\\\]|x[\da-fA-F]{2}|u[\da-fA-F]{4})", "g");
 
         if (m = line.match(line_re)) {
             line = m[1];        // 'unquote' the line
@@ -305,16 +305,16 @@ var imns = {
     },
 
     formatDate: function (str, date) {
-        var prependDate = function (str, num) {
-            str = str.toString();
-            var x = imns.s2i(str), y = imns.s2i(num);
+        const prependDate = function (dateStr, num) {
+            let s = dateStr.toString();
+            const x = imns.s2i(s), y = imns.s2i(num);
             if (isNaN(x) || isNaN(y))
-                return;
-            while (str.length < num)
-                str = '0' + str;
-            return str;
+                return s;
+            while (s.length < num)
+                s = '0' + s;
+            return s;
         };
-        var now = date ? date : new Date();
+        const now = date ? date : new Date();
         str = str.replace(/yyyy/g, prependDate(now.getFullYear(), 4));
         str = str.replace(/yy/g, now.getFullYear().toString().substr(-2));
         str = str.replace(/mm/g, prependDate(now.getMonth() + 1, 2));
@@ -328,10 +328,11 @@ var imns = {
 
     // escape chars which are of special meaning in regexp
     escapeREChars: function (str) {
-        var chars = "^$.+?=!:|\\/()[]{}", res = "", i, j;
+        const chars = "^$.+?=!:|\\/()[]{}";
+        let res = "";
 
-        for (i = 0; i < str.length; i++) {
-            for (j = 0; j < chars.length; j++) {
+        for (let i = 0; i < str.length; i++) {
+            for (let j = 0; j < chars.length; j++) {
                 if (str[i] == chars[j]) {
                     res += "\\";
                     break;
