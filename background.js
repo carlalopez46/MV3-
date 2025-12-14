@@ -1025,12 +1025,38 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // This avoids using new Function() which violates MV3 CSP
         const predefinedFunctions = {
             // Execute code string in global scope (for javascript: URLs in macros)
-            // Note: This function runs in the content script context (target tab),
-            // not in the Service Worker. eval is permitted in page contexts.
+            // Uses script element injection instead of eval() to avoid CSP violations
+            // on pages with strict Content-Security-Policy
             'evalCode': (code) => {
-                // Using indirect eval for global scope execution
-                // eslint-disable-next-line no-eval
-                return (0, eval)(code);
+                try {
+                    // Generate a unique property name to store the result
+                    var resultProp = '__imacros_eval_result_' + Math.random().toString(36).substr(2, 9);
+                    // Wrap the code to capture its result and any errors
+                    var wrappedCode = 'try { window["' + resultProp + '"] = (function(){ return (' + code + '); })(); } catch(e) { window["' + resultProp + '_error"] = e && (e.message || String(e)); }';
+
+                    // Create a script element to execute the code
+                    var script = document.createElement('script');
+                    script.textContent = wrappedCode;
+                    (document.head || document.documentElement).appendChild(script);
+                    script.remove();
+
+                    // Retrieve the result or error
+                    var error, value;
+                    if (window.hasOwnProperty(resultProp + '_error')) {
+                        error = window[resultProp + '_error'];
+                        delete window[resultProp + '_error'];
+                    } else {
+                        value = window[resultProp];
+                    }
+                    delete window[resultProp];
+
+                    if (typeof error !== 'undefined') {
+                        return { error: error };
+                    }
+                    return { success: true, value: value };
+                } catch (e) {
+                    return { error: e.message || String(e) };
+                }
             }
         };
 
@@ -1042,13 +1068,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         chrome.scripting.executeScript({
             target: { tabId: tabId },
+            world: 'MAIN', // Execute in page's main world
             func: funcToExecute,
             args: args || []
         }, (results) => {
             if (chrome.runtime.lastError) {
                 sendResponse({ error: chrome.runtime.lastError.message });
+            } else if (!Array.isArray(results) || results.length === 0 || !results[0]) {
+                sendResponse({ error: 'Script execution failed or returned no result' });
             } else {
-                sendResponse({ success: true, results: results });
+                var result = results[0].result;
+                if (!result) {
+                    sendResponse({ error: 'Script execution did not return a result' });
+                } else if (result.error) {
+                    sendResponse({ error: result.error });
+                } else {
+                    sendResponse({ success: true, value: result.value, results: results });
+                }
             }
         });
         return true;

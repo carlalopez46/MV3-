@@ -116,7 +116,7 @@ async function persistRecordedMacro(ctx, win_id) {
 
     if (treeType === "files") {
         try {
-            const installed = await afioCache.isInstalled();
+            const installed = await afio.isInstalled();
             if (installed) {
                 try {
                     const node = await afio.getDefaultDir("savepath");
@@ -625,7 +625,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 
     // set default directories
     if (!Storage.getBool("default-dirs-set")) {
-        afioCache.isInstalled().then(function (installed) {
+        afio.isInstalled().then(function (installed) {
             if (!installed)
                 return;
             var dirs = ["datapath", "savepath", "downpath"];
@@ -651,7 +651,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     nm_connector.startServer();
 
     // Set afio-installed
-    afioCache.isInstalled().then(function (installed) {
+    afio.isInstalled().then(function (installed) {
         Storage.setBool("afio-installed", installed);
     }).catch(err => {
         logError("Failed to check afio installation status: " + err.message);
@@ -831,7 +831,7 @@ function getLimits() {
         maxIterations: 99999
     }
 
-    return afioCache.isInstalled().then(
+    return afio.isInstalled().then(
         installed => {
             if (installed) {
                 return afio.queryLimits().then(limits => {
