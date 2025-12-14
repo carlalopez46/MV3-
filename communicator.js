@@ -110,7 +110,20 @@ Communicator.prototype._execHandlers = function (msg, tab_id, win_id, sendRespon
     });
     // If no handler matched (e.g., win_id mismatch), still send a response to close the channel
     if (!handled && sendResponse) {
-        sendResponse({ state: 'idle', notHandled: true });
+        // Collect debug info
+        const debugInfo = this.handlers[msg.topic].map(h => ({
+            handlerWinId: h.win_id,
+            handlerWinIdType: typeof h.win_id,
+            targetWinId: win_id,
+            targetWinIdType: typeof win_id
+        }));
+        console.warn("[Communicator] No handler matched for topic:", msg.topic, "Debug:", debugInfo);
+
+        sendResponse({
+            state: 'idle',
+            notHandled: true,
+            debug: debugInfo
+        });
     }
 };
 
