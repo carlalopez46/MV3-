@@ -492,7 +492,7 @@ window.addEventListener("load", async function () {
     // record modes
     const record_modes = ["conventional", "event"];
     const record_radio = $("#record-mode-" + Storage.getChar("record-mode"));
-    if (!record_radio) {
+    if (!record_radio.length) {
         alert("Unknown record mode type: " + Storage.getChar("record-mode"))
     } else {
         record_radio.prop("checked", true)

@@ -105,14 +105,16 @@ const nm_connector = {
     onCapture: function (clientId, args) {
         const win_id = this.clients[clientId].win_id;
         let type;
-        if (/^.*\.(\w+)$/.test(args.path)) {
-            if (RegExp.$1 == "jpg") {
+        const extMatch = args.path.match(/^.*\.(\w+)$/);
+        if (extMatch) {
+            const ext = extMatch[1];
+            if (ext == "jpg") {
                 type = "jpeg";
-            } else if (RegExp.$1 == "png") {
+            } else if (ext == "png") {
                 type = "png";
             } else {
                 this.sendResponse(clientId,
-                    "Unsupported type " + RegExp.$1, -1);
+                    "Unsupported type " + ext, -1);
                 return;
             }
         } else {

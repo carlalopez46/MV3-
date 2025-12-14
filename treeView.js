@@ -284,7 +284,6 @@ const TreeView = {
                         let url = x[0].url;
                         // change macro name in URL
                         try {
-                            const m = url.match(/, n = \"([^\"]+)\";/);
                             url = url.replace(
                                     /, n = \"[^\"]+\";/,
                                 ", n = \"" + encodeURIComponent(new_name) + "\";"
@@ -476,10 +475,8 @@ const TreeView = {
             });
 
             jQuery('#jstree_container').on('select_node.jstree', function (e, data) {
-                const element = e.target;
-                TreeView.selectedItem = element;
+                TreeView.selectedItem = data.node.original;
                 if (data.node.type == 'macro') {
-                    TreeView.selectedItem.type = "macro";
                     const div = document.getElementById("imacros-bookmark-div");
                     if (div.hasAttribute("file_id"))
                         div.removeAttribute("file_id");
@@ -499,7 +496,6 @@ const TreeView = {
                 }
                 //folder
                 else {
-                    TreeView.selectedItem.type = "folder";
                     window.top.onSelectionChanged(false);
                 }
             });
