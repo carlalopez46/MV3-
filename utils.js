@@ -9,8 +9,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 var _localStorageData = Object.create(null);
 // Namespace prefix to avoid conflicts with other chrome.storage.local data
 var _LOCALSTORAGE_PREFIX = '__imacros_ls__:';
-// Flag to track if hydration has been completed
-var _localStorageHydrated = false;
+// Flag to track if hydration has been completed (exposed globally for external checks)
 
 // Check if localStorage needs polyfill - use try-catch to safely handle ReferenceError in Service Workers
 var _needsLocalStoragePolyfill = false;
@@ -107,45 +106,50 @@ if (_needsLocalStoragePolyfill) {
         });
     }
 
+    // Expose hydration status flag globally for external checks
+    _global.localStorageHydrated = false;
+
     // Hydrate localStorage from chrome.storage.local on startup
     // This ensures Service Worker restart doesn't lose data
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-        var hydratePromise = new Promise(function (resolve) {
-            chrome.storage.local.get(null, function (items) {
-                if (chrome.runtime && chrome.runtime.lastError) {
-                    console.warn('[localStorage polyfill] Failed to hydrate:', chrome.runtime.lastError);
-                    _localStorageHydrated = true;
-                    resolve();
-                    return;
-                }
-
-                var hydratedCount = 0;
-                Object.keys(items || {}).forEach(function (storageKey) {
-                    if (storageKey.indexOf(_LOCALSTORAGE_PREFIX) !== 0) return;
-                    var key = storageKey.slice(_LOCALSTORAGE_PREFIX.length);
-                    // Only hydrate if not already set (don't overwrite in-memory data)
-                    if (!Object.prototype.hasOwnProperty.call(_localStorageData, key)) {
-                        _localStorageData[key] = String(items[storageKey]);
-                        hydratedCount++;
-                    }
-                });
-
-                _localStorageHydrated = true;
-                console.log('[localStorage polyfill] Hydrated', hydratedCount, 'items from chrome.storage.local');
-                resolve();
+        // If a prior bundle already started hydration, reuse it
+        if (_global.localStorageInitPromise) {
+            _global.localStorageInitPromise.finally(function () {
+                _global.localStorageHydrated = true;
             });
-        });
+        } else {
+            var hydratePromise = new Promise(function (resolve) {
+                chrome.storage.local.get(null, function (items) {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[localStorage polyfill] Failed to hydrate:', chrome.runtime.lastError);
+                        _global.localStorageHydrated = true;
+                        resolve();
+                        return;
+                    }
 
-        // Expose the hydration promise globally so other scripts can wait for it
-        if (!_global.localStorageInitPromise) {
+                    var hydratedCount = 0;
+                    Object.keys(items || {}).forEach(function (storageKey) {
+                        if (storageKey.indexOf(_LOCALSTORAGE_PREFIX) !== 0) return;
+                        var key = storageKey.slice(_LOCALSTORAGE_PREFIX.length);
+                        // Only hydrate if not already set (don't overwrite in-memory data)
+                        if (!Object.prototype.hasOwnProperty.call(_localStorageData, key)) {
+                            _localStorageData[key] = String(items[storageKey]);
+                            hydratedCount++;
+                        }
+                    });
+
+                    _global.localStorageHydrated = true;
+                    console.log('[localStorage polyfill] Hydrated', hydratedCount, 'items from chrome.storage.local');
+                    resolve();
+                });
+            });
             _global.localStorageInitPromise = hydratePromise;
         }
     } else {
-        _localStorageHydrated = true;
+        _global.localStorageHydrated = true;
         // Expose a resolved promise if chrome.storage is not available
-        var _resolvedPromise = Promise.resolve();
-        if (typeof _global !== 'undefined' && !_global.localStorageInitPromise) {
-            _global.localStorageInitPromise = _resolvedPromise;
+        if (!_global.localStorageInitPromise) {
+            _global.localStorageInitPromise = Promise.resolve();
         }
     }
 }

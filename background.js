@@ -1029,13 +1029,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             // on pages with strict Content-Security-Policy
             'evalCode': (code) => {
                 try {
+                    // Generate a unique property name to store the result
+                    var resultProp = '__imacros_eval_result_' + Math.random().toString(36).substr(2, 9);
+                    // Wrap the code to capture its result and any errors
+                    var wrappedCode = 'try { window["' + resultProp + '"] = (function(){ return (' + code + '); })(); } catch(e) { window["' + resultProp + '_error"] = e && (e.message || String(e)); }';
+
                     // Create a script element to execute the code
-                    // This approach works on more pages than eval()
                     var script = document.createElement('script');
-                    script.textContent = code;
+                    script.textContent = wrappedCode;
                     (document.head || document.documentElement).appendChild(script);
                     script.remove();
-                    return { success: true };
+
+                    // Retrieve the result or error
+                    var error, value;
+                    if (window.hasOwnProperty(resultProp + '_error')) {
+                        error = window[resultProp + '_error'];
+                        delete window[resultProp + '_error'];
+                    } else {
+                        value = window[resultProp];
+                    }
+                    delete window[resultProp];
+
+                    if (typeof error !== 'undefined') {
+                        return { error: error };
+                    }
+                    return { success: true, value: value };
                 } catch (e) {
                     return { error: e.message || String(e) };
                 }
@@ -1056,15 +1074,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }, (results) => {
             if (chrome.runtime.lastError) {
                 sendResponse({ error: chrome.runtime.lastError.message });
-            } else if (Array.isArray(results) && results[0]) {
+            } else if (!Array.isArray(results) || results.length === 0 || !results[0]) {
+                sendResponse({ error: 'Script execution failed or returned no result' });
+            } else {
                 var result = results[0].result;
-                if (result && result.error) {
+                if (!result) {
+                    sendResponse({ error: 'Script execution did not return a result' });
+                } else if (result.error) {
                     sendResponse({ error: result.error });
                 } else {
-                    sendResponse({ success: true, results: results });
+                    sendResponse({ success: true, value: result.value, results: results });
                 }
-            } else {
-                sendResponse({ success: true, results: results });
             }
         });
         return true;
