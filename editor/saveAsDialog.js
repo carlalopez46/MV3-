@@ -66,7 +66,11 @@ window.addEventListener("load", function () {
             args = result[dialogKey];
 
             // Clean up the session storage
-            storage.remove([dialogKey]);
+            storage.remove([dialogKey], function() {
+                if (chrome.runtime.lastError) {
+                    console.warn("[iMacros] Failed to clean up dialog key:", chrome.runtime.lastError);
+                }
+            });
 
             initializeWithAfio();
         });

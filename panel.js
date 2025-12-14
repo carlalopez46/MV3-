@@ -628,8 +628,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 document.addEventListener("DOMContentLoaded", () => {
     console.log("[Panel] DOMContentLoaded");
 
-    // ウィンドウIDを初期化
-    windowIdReadyPromise = initWindowId();
+    // Ensure window ID is initialized lazily
+    ensureWindowId();
 
     // イベントリスナーの登録
     const addListener = (id, handler) => {

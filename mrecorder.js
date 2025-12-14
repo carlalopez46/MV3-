@@ -644,6 +644,12 @@ Recorder.prototype.packKeyPressEvent = function (extra) {
     if (!(this.encryptKeypressEvent = extra.encrypt))
         return  // do nothing
 
+    if (!this.password || !this.canEncrypt) {
+        console.warn("Skipping encryption for keypress: password not set or encryption disabled");
+        this.encryptKeypressEvent = false;
+        return;
+    }
+
     const ch_re = new RegExp("^event type=keypress selector=\"([^\"]+)\"" +
         " char=\"([^\"]+)\"", "i")
     let cur = this.popLastAction()

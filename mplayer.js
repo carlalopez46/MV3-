@@ -1015,6 +1015,10 @@ MacroPlayer.prototype.RegExpTable["event"] =
     "(?:\\s+modifiers\\s*=\\s*("+im_strre+"))?";
 
 MacroPlayer.prototype.attachDebugger = function(version) {
+    if (this.isInternalURL(this.currentURL)) {
+        // Reject to prevent debugger operations on restricted pages; callers handle this gracefully.
+        return Promise.reject(new RuntimeError("Cannot attach debugger to restricted page: " + this.currentURL, 711));
+    }
     return this.debuggerAttached ?
         Promise.resolve() : attach_debugger(this.tab_id, version).then(() => {
             this.debuggerAttached = true
