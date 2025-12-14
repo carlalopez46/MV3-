@@ -17,7 +17,7 @@ function canUseNativeMessaging() {
         typeof chrome.runtime.sendNativeMessage === 'function';
 }
 
-var nm_connector = {
+const nm_connector = {
     // Native module connection status
     isConnected: false,
     port: null,
@@ -32,12 +32,14 @@ var nm_connector = {
             return;
         }
 
+        const self = this;
+
         function attach(win) {
             // MV3: Initialize context before opening panel or executing macros
             // This ensures context[win.id] exists when native host sends commands
             if (!context || typeof context.init !== 'function') {
                 console.error('[nm_connector] Context object not available');
-                nm_connector.sendResponse(clientId, "Failed to initialize: context not available", -1);
+                self.sendResponse(clientId, "Failed to initialize: context not available", -1);
                 return;
             }
             context.init(win.id).then(function () {
@@ -48,13 +50,13 @@ var nm_connector = {
                 }
             }).catch(function (err) {
                 console.error('[nm_connector] Failed to initialize context:', err);
-                nm_connector.sendResponse(clientId, "Failed to initialize: " + (err.message || err), -1);
+                self.sendResponse(clientId, "Failed to initialize: " + (err.message || err), -1);
             });
         }
 
         function cacheClient(win) {
-            nm_connector.clients[clientId] = { win_id: win.id };
-            nm_connector.sendResponse(clientId, "OK", 1);
+            self.clients[clientId] = { win_id: win.id };
+            self.sendResponse(clientId, "OK", 1);
         }
 
         function openNewBrowser() {
@@ -74,11 +76,12 @@ var nm_connector = {
         } else {            // reuse any of the "free" existing window
             if (chrome.windows && chrome.windows.getAll) {
                 chrome.windows.getAll({ windowTypes: ['normal'] }, function (windows) {
-                    var i, j, saved = false;
-                    for (i = 0; i < windows.length; i++) {
-                        var win = windows[i], found = false;
-                        for (j in nm_connector.clients) {
-                            if (nm_connector.clients[j].win_id == win.id) {
+                    let saved = false;
+                    for (let i = 0; i < windows.length; i++) {
+                        const win = windows[i];
+                        let found = false;
+                        for (const j in self.clients) {
+                            if (self.clients[j].win_id == win.id) {
                                 found = true; break;
                             }
                         }
@@ -100,15 +103,15 @@ var nm_connector = {
 
 
     onCapture: function (clientId, args) {
-        var win_id = nm_connector.clients[clientId].win_id;
-        var type;
+        const win_id = this.clients[clientId].win_id;
+        let type;
         if (/^.*\.(\w+)$/.test(args.path)) {
             if (RegExp.$1 == "jpg") {
                 type = "jpeg";
             } else if (RegExp.$1 == "png") {
                 type = "png";
             } else {
-                nm_connector.sendResponse(clientId,
+                this.sendResponse(clientId,
                     "Unsupported type " + RegExp.$1, -1);
                 return;
             }
@@ -126,8 +129,8 @@ var nm_connector = {
                 );
                 return;
             }
-            var f = null;
-            var pathPromise;
+            let f = null;
+            let pathPromise;
             if (__is_full_path(args.path)) {
                 f = afio.openNode(args.path);
                 pathPromise = Promise.resolve(f);
@@ -144,9 +147,23 @@ var nm_connector = {
                 chrome.tabs.captureVisibleTab(
                     win_id, { format: type },
                     function (data) {
-                        var re = /data\:([\w-]+\/[\w-]+)?(?:;(base64))?,(.+)/;
-                        var m = re.exec(data);
-                        var imageData = {
+                        if (chrome.runtime.lastError) {
+                            nm_connector.sendResponse(
+                                clientId,
+                                "Could not capture tab: " + chrome.runtime.lastError.message, -2
+                            );
+                            return;
+                        }
+                        const re = /data\:([\w-]+\/[\w-]+)?(?:;(base64))?,(.+)/;
+                        const m = re.exec(data);
+                        if (!m) {
+                            nm_connector.sendResponse(
+                                clientId,
+                                "Could not parse captured data", -2
+                            );
+                            return;
+                        }
+                        const imageData = {
                             image: m[3],
                             encoding: m[2],
                             mimeType: m[1]
@@ -173,7 +190,7 @@ var nm_connector = {
 
 
     onPlay: function (clientId, args) {
-        var x, win_id = this.clients[clientId].win_id;
+        const win_id = this.clients[clientId].win_id;
 
         // MV3: Ensure context is initialized before playing macro
         if (!context[win_id] || !context[win_id]._initialized) {
@@ -182,7 +199,7 @@ var nm_connector = {
             return;
         }
 
-        for (x in args.vars) { // save user vars if any
+        for (const x in args.vars) { // save user vars if any
             context[win_id].mplayer.setUserVar(x, args.vars[x]);
         }
 
@@ -191,7 +208,7 @@ var nm_connector = {
         }
 
         if (/^CODE:((?:\n|.)+)$/.test(args.source)) { // if macro is embedded
-            var val = RegExp.$1;
+            let val = RegExp.$1;
             val = val.replace(/\[sp\]/ig, ' ');
             val = val.replace(/\[br\]/ig, '\n');
             val = val.replace(/\[lf\]/ig, '\r');
@@ -218,18 +235,18 @@ var nm_connector = {
         }
 
         // try to load macro from file otherwise
-        var name = args.source;
+        let name = args.source;
         if (!isMacroFile(name))
             name += ".iim";
 
-        var filePromise;
+        let filePromise;
         if (__is_full_path(name)) {
             // full path is given
             filePromise = Promise.resolve(afio.openNode(name));
         } else {
             filePromise = afio.getDefaultDir("savepath").then(function (node) {
-                var file = afio.openNode(node.path);
-                var nodes = name.split(__psep()).reverse();
+                const file = afio.openNode(node.path);
+                const nodes = name.split(__psep()).reverse();
                 while (nodes.length)
                     file.append(nodes.pop());
                 return file;
@@ -285,9 +302,10 @@ var nm_connector = {
 
 
     handleCommand: function (clientId, cmd) {
+        let request;
         try {
             // console.debug("handleCommand %s for clientId %d", cmd, clientId);
-            var request = JSON.parse(cmd);
+            request = JSON.parse(cmd);
         } catch (e) {
             console.error(e);
             // should never happen
@@ -310,8 +328,8 @@ var nm_connector = {
                 this.sendResponse(clientId, "OK", 1);
                 break;
 
-            case "exit":
-                var win_id = this.clients[clientId].win_id;
+            case "exit": {
+                const win_id = this.clients[clientId].win_id;
                 if (chrome.windows && chrome.windows.getAll) {
                     chrome.windows.getAll(null, function (windows) {
                         if (windows.length == 1) {
@@ -319,7 +337,7 @@ var nm_connector = {
                             // The chrome.processes API mentioned in older documentation was never
                             // released for extensions. Using -1 as a placeholder, which is sufficient
                             // for the current use case (signaling the last window closure).
-                            var pid = -1;
+                            const pid = -1;
                             nm_connector.sendResponse(clientId, "OK", 1,
                                 { waitForProcessId: pid });
                         } else {
@@ -327,6 +345,9 @@ var nm_connector = {
                         }
 
                         chrome.windows.remove(win_id, function () {
+                            if (chrome.runtime.lastError) {
+                                console.warn('[nm_connector] Error removing window:', chrome.runtime.lastError.message);
+                            }
                             delete nm_connector.clients[clientId];
                         });
                     });
@@ -334,22 +355,22 @@ var nm_connector = {
                     console.log('[nm_connector] chrome.windows not available for exit command');
                     nm_connector.sendResponse(clientId, "OK", 1);
                 }
-
                 break;
+            }
 
-            case "show":
-                var win_id = this.clients[clientId].win_id;
-                var args = {
+            case "show": {
+                const show_win_id = this.clients[clientId].win_id;
+                const showArgs = {
                     message: request.args.message,
                     errorCode: 1,
-                    win_id: win_id,
+                    win_id: show_win_id,
                     macro: null
                 };
 
-                showInfo(args);
+                showInfo(showArgs);
                 this.sendResponse(clientId, "OK", 1);
-
                 break;
+            }
 
             case "capture":
                 this.onCapture(clientId, request.args);
@@ -367,7 +388,7 @@ var nm_connector = {
 
     startServer: function (args) {
         const si_host = "com.ipswitch.imacros.host";
-        this.clients = new Object();
+        this.clients = Object.create(null);
         this.isConnected = false;
 
         try {
@@ -404,7 +425,7 @@ var nm_connector = {
                 }
             });
 
-            var init_msg = { type: 'init' };
+            const init_msg = { type: 'init' };
             if (args)
                 init_msg.ac_pipe = args;
 
@@ -448,7 +469,7 @@ var nm_connector = {
         }
         message += " (" + errorCode + ")";
 
-        var result = {
+        const result = {
             status: message,
             errorCode: errorCode
         };

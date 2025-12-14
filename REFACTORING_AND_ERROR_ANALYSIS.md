@@ -22,6 +22,8 @@ This document tracks the refactoring of `var` to `const`/`let`, conversion of ca
 | `context.js` | ✅ Complete | Converted var to const/let, replaced `new Array()` with `[]` |
 | `utils.js` | ✅ Partial | Converted internal functions, kept global var for Service Worker compatibility |
 | `badge.js` | ✅ Complete | Converted var to const, added try-catch error handling |
+| `nm_connector.js` | ✅ Complete | Converted var to const/let, added try-catch, fixed scoping issues |
+| `panel.js` | ✅ Already modern | Uses let/const throughout |
 
 ### Phase 2: Error Handling Improvements
 
@@ -29,6 +31,8 @@ This document tracks the refactoring of `var` to `const`/`let`, conversion of ca
 - `communicator.js:handleMessage()` - Wrapped chrome.tabs.get call
 - `communicator.js:broadcastMessage()` - Wrapped chrome.tabs.query call  
 - `badge.js:forAllTabs()` - Wrapped chrome.windows.getAll call
+- `nm_connector.js:onCapture()` - Added chrome.runtime.lastError handling
+- `nm_connector.js:handleCommand()` - Fixed switch statement scoping with block scopes
 
 ---
 
