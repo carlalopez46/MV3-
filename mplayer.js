@@ -61,6 +61,11 @@ function MacroPlayer(win_id) {
 
 // Helpers to work across Service Worker / Offscreen contexts
 function hasTabsAPI() {
+    // In Offscreen Document, we prefer delegating tab operations to Service Worker
+    // to ensure full access and consistency.
+    if (typeof window !== 'undefined' && window.location && window.location.pathname.endsWith('offscreen.html')) {
+        return false;
+    }
     return (typeof chrome !== "undefined" && chrome && chrome.tabs && typeof chrome.tabs.query === "function");
 }
 
@@ -227,6 +232,104 @@ function mpGetActiveTab(mplayer, callback, errorCallback) {
                 errorCallback && errorCallback(response && response.error);
             } else {
                 callback(response.tab || null);
+            }
+        });
+    }
+}
+
+// Helper to check if chrome.windows API is available
+function hasWindowsAPI() {
+    if (typeof window !== 'undefined' && window.location && window.location.pathname.endsWith('offscreen.html')) {
+        return false;
+    }
+    return (typeof chrome !== "undefined" && chrome && chrome.windows && typeof chrome.windows.get === "function");
+}
+
+// Helper to get window info
+function mpGetWindow(mplayer, windowId, getInfo, callback) {
+    if (hasWindowsAPI()) {
+        chrome.windows.get(windowId, getInfo || {}, win => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] WINDOW_GET error:", chrome.runtime.lastError);
+                callback(null);
+            } else {
+                callback(win);
+            }
+        });
+    } else {
+        chrome.runtime.sendMessage({
+            command: "WINDOW_GET",
+            windowId: windowId,
+            getInfo: getInfo || {}
+        }, response => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] WINDOW_GET error:", chrome.runtime.lastError);
+                callback(null);
+            } else if (!response || response.error) {
+                console.error("[MacroPlayer] WINDOW_GET failed:", response && response.error);
+                callback(null);
+            } else {
+                callback(response.window || null);
+            }
+        });
+    }
+}
+
+// Helper to update window
+function mpUpdateWindow(mplayer, windowId, updateInfo, callback) {
+    if (hasWindowsAPI()) {
+        chrome.windows.update(windowId, updateInfo, win => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] WINDOW_UPDATE error:", chrome.runtime.lastError);
+                callback && callback(null);
+            } else {
+                callback && callback(win);
+            }
+        });
+    } else {
+        chrome.runtime.sendMessage({
+            command: "WINDOW_UPDATE",
+            windowId: windowId,
+            updateInfo: updateInfo
+        }, response => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] WINDOW_UPDATE error:", chrome.runtime.lastError);
+                callback && callback(null);
+            } else if (!response || response.error) {
+                console.error("[MacroPlayer] WINDOW_UPDATE failed:", response && response.error);
+                callback && callback(null);
+            } else {
+                callback && callback(response.window || null);
+            }
+        });
+    }
+}
+
+// Helper to capture visible tab
+function mpCaptureVisibleTab(mplayer, windowId, options, callback) {
+    if (hasTabsAPI() && chrome.tabs.captureVisibleTab) {
+        chrome.tabs.captureVisibleTab(windowId, options, dataUrl => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] CAPTURE_VISIBLE_TAB error:", chrome.runtime.lastError);
+                callback(null);
+            } else {
+                callback(dataUrl);
+            }
+        });
+    } else {
+        chrome.runtime.sendMessage({
+            command: "CAPTURE_VISIBLE_TAB",
+            windowId: windowId,
+            options: options
+        }, response => {
+            if (chrome.runtime.lastError) {
+                console.error("[MacroPlayer] CAPTURE_VISIBLE_TAB error:", chrome.runtime.lastError);
+                callback(null);
+            } else if (!response || response.error) {
+                console.error("[MacroPlayer] CAPTURE_VISIBLE_TAB failed:", response && response.error);
+                callback(null);
+            } else {
+                callback(response.dataUrl || null);
             }
         });
     }
@@ -1376,6 +1479,11 @@ MacroPlayer.prototype.dispatchMouseEvent = function (details) {
     });
 };
 
+MacroPlayer.prototype.RegExpTable["event"] =
+    "type\\s*=\\s*(" + im_strre + ")" +
+    "(?:\\s+(selector|xpath)\\s*=\\s*(" + im_strre + "))?" +
+    "(?:\\s+(button|key|char|point|value)\\s*=\\s*(" + im_strre + "))?" +
+    "(?:\\s+modifiers\\s*=\\s*(" + im_strre + "))?";
 
 MacroPlayer.prototype.ActionTable["event"] = function (cmd) {
     var type = imns.unwrap(this.expandVariables(cmd[1], "event1")).toLowerCase();
@@ -1389,13 +1497,19 @@ MacroPlayer.prototype.ActionTable["event"] = function (cmd) {
     var data = { scroll: true };
     data[selector_type || "selector"] = selector || ":root";
 
+    if (type === "input" && value_type === "value") {
+        data.value = value;
+    }
+
     this.attachDebugger().then(
         () => communicator.sendMessage(
             "activate-element", data, this.tab_id, this.currentFrame
         )
     ).then(response => {
         if (!response) {
-            throw new RuntimeError(chrome.runtime.lastError.message);
+            const msg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ?
+                chrome.runtime.lastError.message : "Unknown error in activate-element";
+            throw new RuntimeError(msg);
         }
         else if (response.error)
             throw new RuntimeError(
@@ -1410,8 +1524,8 @@ MacroPlayer.prototype.ActionTable["event"] = function (cmd) {
         var char = "";
         var point = null;
 
-        if (!value_type) {
-            ; // do nothing
+        if (!value_type || value_type === "value") {
+            ; // do nothing (value handled in activate-element)
         } else if (value_type == "button") {
             button = imns.s2i(value);
             if (isNaN(button))
@@ -1431,7 +1545,7 @@ MacroPlayer.prototype.ActionTable["event"] = function (cmd) {
             point = { x: parseFloat(m[1]), y: parseFloat(m[2]) };
         }
         return Promise.resolve().then(() => {
-            if (/^mouse/.test(type)) {
+            if (/^mouse|hover/.test(type)) {
                 var details = {
                     type: type,
                     point: point,
@@ -1516,6 +1630,11 @@ MacroPlayer.prototype.ActionTable["events"] = function (cmd) {
             "activate-element", data, this.tab_id, this.currentFrame
         )
     ).then(response => {
+        if (!response) {
+            const msg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ?
+                chrome.runtime.lastError.message : "Unknown error in activate-element";
+            throw new RuntimeError(msg);
+        }
         if (response.error)
             throw new RuntimeError(
                 response.error.message, response.error.errnum
@@ -2126,8 +2245,7 @@ MacroPlayer.prototype.RegExpTable["prompt"] =
     "(?:\\s+(" + im_strre + "))?)?\\s*$";
 
 MacroPlayer.prototype.ActionTable["prompt"] = function (cmd) {
-    if (this.noContentPage("PROMPT"))
-        return;
+
 
     var x = {};
     x.text = imns.unwrap(this.expandVariables(cmd[1], "prompt1"));
@@ -2466,8 +2584,14 @@ MacroPlayer.prototype.doSplitCycle = function (canvas, ctx, moves, type, callbac
             { x: move.x_offset, y: move.y_offset },
             this.tab_id,
             () => {
-                chrome.tabs.captureVisibleTab(
+                mpCaptureVisibleTab(
+                    mplayer,
                     this.win_id, { format: type }, dataURL => {
+                        if (!dataURL) {
+                            console.error("[MacroPlayer] captureVisibleTab failed");
+                            callback(null);
+                            return;
+                        }
                         let img = new Image(move.width, move.height)
                         img.src = dataURL
                         img.onload = () => {
@@ -2762,27 +2886,31 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
             return;
         case "!timeout": case "!timeout_page":
             var x = imns.s2i(param);
-            if (isNaN(x) || x <= 0)
-                throw new BadParameter("!TIMEOUT must be positive integer");
+            if (isNaN(x) || x < 0)
+                throw new BadParameter("!TIMEOUT must be non-negative integer");
             this.timeout = x;
             this.timeout_tag = Math.round(this.timeout / 10);
             break;
         case "!timeout_tag": case "!timeout_step":
             var x = imns.s2i(param);
-            if (isNaN(x) || x <= 0)
-                throw new BadParameter("!TIMEOUT_TAG must be positive integer");
+            if (isNaN(x) || x < 0)
+                throw new BadParameter("!TIMEOUT_TAG must be non-negative integer");
             this.timeout_tag = x;
+            // User convenience: if STEP timeout is 0 (no wait), also reduce page timeout to avoid perceived hang
+            if (x === 0 && this.timeout > 1) {
+                this.timeout = 1;
+            }
             break;
         case "!timeout_download":
             var x = imns.s2i(param);
-            if (isNaN(x) || x <= 0)
-                throw new BadParameter("!TIMEOUT_DOWNLOAD must be positive integer");
+            if (isNaN(x) || x < 0)
+                throw new BadParameter("!TIMEOUT_DOWNLOAD must be non-negative integer");
             this.timeout_download = x;
             break;
         case "!timeout_macro":
             var x = parseFloat(param);
-            if (isNaN(x) || x <= 0)
-                throw new BadParameter("!TIMEOUT_MACRO must be positive number");
+            if (isNaN(x) || x < 0)
+                throw new BadParameter("!TIMEOUT_MACRO must be non-negative number");
             this.globalTimer.setMacroTimeout(x);
             break;
         case "!clipboard":
@@ -2915,14 +3043,19 @@ MacroPlayer.prototype.ActionTable["size"] = function (cmd) {
         throw new BadParameter("positive integer", 2)
 
     var mplayer = this;
-    chrome.windows.get(this.win_id, { populate: false }, function (w) {
+    mpGetWindow(this, this.win_id, { populate: false }, function (w) {
+        if (!w) {
+            mplayer.handleError(new RuntimeError("Failed to get window info", 999));
+            return;
+        }
         communicator.postMessage(
             "query-page-dimensions",
             {}, mplayer.tab_id,
             function (dmns) {
                 var delta_x = w.width - dmns.win_w;
                 var delta_y = w.height - dmns.win_h;
-                chrome.windows.update(
+                mpUpdateWindow(
+                    mplayer,
                     mplayer.win_id,
                     { width: x + delta_x, height: y + delta_y },
                     function () {

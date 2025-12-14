@@ -243,8 +243,21 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 communicator._execHandlers(msg, tab_id, win_id, sendResponse);
             } else {
                 console.debug('[iMacros Offscreen] No handler for forwarded message:', topic);
-                if (sendResponse) sendResponse({ success: false, error: 'No handler found' });
+                // Return state: 'idle' to satisfy CSRecorder.onQueryStateCompleted
+                if (sendResponse) sendResponse({
+                    success: false,
+                    state: 'idle',
+                    error: 'No handler found',
+                    notHandled: true
+                });
             }
+        } else {
+            // Communicator not ready
+            if (sendResponse) sendResponse({
+                success: false,
+                state: 'idle',
+                error: 'Communicator not available'
+            });
         }
         return true;
     }
@@ -816,7 +829,46 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     sendResponse({ success: true, result: result });
                 });
             } catch (err) {
+                console.error("Error saving macro:", err);
                 sendResponse({ success: false, error: err.message || String(err) });
+            }
+            return true;
+        }
+
+        // Handle GET_DIALOG_ARGS from background (forwarded from dialog window)
+        if (request.type === 'GET_DIALOG_ARGS') {
+            const winId = parseInt(request.windowId);
+
+            // Function to attempt retrieving args with retries
+            const tryGetArgs = (attemptsLeft) => {
+                try {
+                    const args = dialogUtils.getDialogArgs(winId);
+                    sendResponse({ success: true, args: args });
+                } catch (e) {
+                    if (attemptsLeft > 0) {
+                        // Retry after a short delay (race condition handling)
+                        console.log(`[Offscreen] waiting for dialog args (winId: ${winId}), attempts left: ${attemptsLeft}`);
+                        setTimeout(() => tryGetArgs(attemptsLeft - 1), 200);
+                    } else {
+                        console.error("[Offscreen] GET_DIALOG_ARGS error after retries:", e);
+                        sendResponse({ success: false, error: e.message });
+                    }
+                }
+            };
+
+            tryGetArgs(30); // Try for ~6 seconds
+            return true;
+        }
+
+        // Handle SET_DIALOG_RESULT from background (forwarded from dialog window)
+        if (request.type === 'SET_DIALOG_RESULT') {
+            try {
+                const winId = parseInt(request.windowId);
+                dialogUtils.setDialogResult(winId, request.response);
+                sendResponse({ success: true });
+            } catch (e) {
+                console.error("[Offscreen] SET_DIALOG_RESULT error:", e);
+                sendResponse({ success: false, error: e.message });
             }
             return true;
         }

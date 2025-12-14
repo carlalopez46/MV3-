@@ -772,7 +772,9 @@ Recorder.prototype.onTabActivated = function (activeInfo) {
 
         var cmd = "TAB T=" + (cur + 1);
         console.log("[DEBUG-REC] Recording command:", cmd);
-        recorder.recordAction(cmd);
+        if (recorder.recording) {
+            recorder.recordAction(cmd);
+        }
     }).catch(function (err) {
         logError("Failed to get tab in onTabActivated: " + (err.message || err), { tabId: activeInfo.tabId });
     });

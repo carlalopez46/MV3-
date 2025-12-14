@@ -465,7 +465,11 @@ globalScope.installSampleBookmarkletMacros = function () {
 
     // Skip if bookmarks API is not available (e.g. not in manifest or restricted context)
     if (!chrome.bookmarks) {
-        console.warn("[iMacros] chrome.bookmarks API not available, skipping sample bookmarklets installation");
+        console.log("[iMacros] chrome.bookmarks API not available in this context (Offscreen), delegating installation to Service Worker");
+        // Delegate to Service Worker where bookmarks API is available
+        if (chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({ command: 'INSTALL_SAMPLE_BOOKMARKLETS' });
+        }
         return Promise.resolve();
     }
 
