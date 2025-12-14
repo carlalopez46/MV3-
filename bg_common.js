@@ -157,7 +157,7 @@ function sharedSave(save_data, overwrite, callback) {
     // to choose file location instead of falling back to bookmark storage
     if (Storage.getChar("tree-type") === "files" && !save_data.file_id) {
         globalScope.afioCache.isInstalled().then(function (installed) {
-            if (installed && typeof window !== 'undefined' && window && typeof window.open === 'function') {
+            if (installed) {
                 // Open saveAs dialog to let user choose file location
                 // Use storage + URL key strategy for robust MV3/Offscreen support
                 var dialogKey = 'saveAs_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -169,17 +169,45 @@ function sharedSave(save_data, overwrite, callback) {
                 storage.set(data, function () {
                     if (chrome.runtime.lastError) {
                         console.error("[iMacros] Failed to store saveAs args:", chrome.runtime.lastError);
+                        if (callback) callback({ error: "Failed to store saveAs args: " + chrome.runtime.lastError.message });
+                        return;
                     }
-                    var features = "titlebar=no,menubar=no,location=no," +
-                        "resizable=yes,scrollbars=no,status=no";
-                    window.open("saveAsDialog.html?key=" + dialogKey, null, features);
+
+                    var dialogUrl = "saveAsDialog.html?key=" + dialogKey;
+
+                    if (typeof chrome.windows !== 'undefined' && chrome.windows.create) {
+                        var createOptions = {
+                            url: dialogUrl,
+                            type: "popup",
+                            width: 480,
+                            height: 350
+                        };
+
+                        chrome.windows.create(createOptions, function () {
+                            if (chrome.runtime.lastError) {
+                                console.error("[iMacros] Failed to open save dialog:", chrome.runtime.lastError);
+                                if (callback) callback({ error: chrome.runtime.lastError.message });
+                            }
+                        });
+                    } else if (typeof window !== 'undefined' && window && typeof window.open === 'function') {
+                        // Fallback for contexts where chrome.windows is restricted but window.open might work
+                        var windowFeatures = "titlebar=no,menubar=no,location=no," +
+                            "resizable=yes,scrollbars=no,status=no,width=480,height=350";
+                        var dialogWindow = window.open(dialogUrl, "saveAsDialog", windowFeatures);
+                        if (!dialogWindow) {
+                            console.error("[iMacros] Failed to open save dialog with window.open");
+                            if (callback) callback({ error: "Failed to open save dialog" });
+                        }
+                    } else {
+                        console.error("[iMacros] Cannot open save dialog: neither chrome.windows.create nor window.open is available");
+                        if (callback) callback({ error: "Cannot open save dialog" });
+                    }
                 });
 
                 // The saveAsDialog will call save() again with file_id set
                 return;
             }
-            // If afio is not installed or window.open is unavailable (e.g., MV3 Service Worker),
-            // fall back to bookmark storage
+            // If afio is not installed or dialog cannot be opened, fall back to bookmark storage
             saveToBookmark(save_data, overwrite, callback);
         }).catch(function (err) {
             console.error("Error checking afio installation:", err);

@@ -2,8 +2,8 @@
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
 
-var args;
-var dialogWindowId = null;
+let args;
+let dialogWindowId = null;
 
 window.addEventListener("load", function () {
     // Primary MV3 path: request dialog args from background
@@ -171,10 +171,33 @@ window.addEventListener("load", function () {
             okBtn.querySelector("span").innerText = "Save As";
         }
 
+        var filesRadioEl = document.getElementById("radio-files-tree");
+        var bookmarksRadioEl = document.getElementById("radio-bookmarks-tree");
+
         if (file_type) {
-            document.getElementById("radio-files-tree").checked = true;
+            filesRadioEl.checked = true;
         } else {
-            document.getElementById("radio-bookmarks-tree").checked = true;
+            bookmarksRadioEl.checked = true;
+
+            var afioCandidate = (typeof afio !== 'undefined' && afio) ? afio : (typeof window !== 'undefined' ? window.afio : undefined);
+
+            var selectFilesIfAvailable = function () {
+                if (typeof afioCandidate !== 'undefined' && afioCandidate && typeof afioCandidate.getBackendType === 'function') {
+                    var backendType = afioCandidate.getBackendType();
+                    if (backendType && backendType !== 'none') {
+                        filesRadioEl.checked = true;
+                        bookmarksRadioEl.checked = false;
+                    }
+                }
+            };
+
+            if (afioCandidate && afioCandidate._initPromise && typeof afioCandidate._initPromise.then === 'function') {
+                afioCandidate._initPromise.then(selectFilesIfAvailable).catch(function (err) {
+                    console.error('[iMacros] afio initialization failed while setting default storage:', err);
+                });
+            } else {
+                selectFilesIfAvailable();
+            }
         }
 
         // Add directory selection functionality

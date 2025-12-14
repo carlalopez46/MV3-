@@ -1,10 +1,10 @@
 /* panel.js - MV3対応版 */
 
 // 選択中のマクロ情報を保持する変数
-var selectedMacro = null;
+let selectedMacro = null;
 
 // パネルの状態をキャッシュ
-var panelState = {
+let panelState = {
     isRecording: false,
     isPlaying: false,
     currentMacro: null
@@ -35,7 +35,7 @@ function getMacroPathAndName(macro) {
 }
 
 // パネルのウィンドウIDを保持
-var currentWindowId = null;
+let currentWindowId = null;
 
 // ウィンドウIDを取得
 function initWindowId() {
@@ -78,8 +78,19 @@ function ensureWindowId() {
     return windowIdReadyPromise;
 }
 
+function handleMissingWindowId(context) {
+    const el = ensureStatusLineElement();
+    el.textContent = context || "Unable to determine window context.";
+    el.style.color = "#b00020";
+}
+
 function sendCommand(command, payload = {}) {
     return ensureWindowId().then(() => {
+        if (currentWindowId === null) {
+            console.warn(`[Panel] Skipping command ${command}: window ID unavailable`);
+            handleMissingWindowId("Unable to determine window context. Command not sent.");
+            return undefined;
+        }
         // 自動的にウィンドウIDを追加
         const message = {
             ...payload,
@@ -109,6 +120,11 @@ function sendCommand(command, payload = {}) {
 
 function requestStateUpdate() {
     return ensureWindowId().then(() => {
+        if (currentWindowId === null) {
+            console.warn("[Panel] Skipping state update: window ID unavailable");
+            handleMissingWindowId("Unable to determine window context. State unavailable.");
+            return undefined;
+        }
         return new Promise((resolve) => {
             chrome.runtime.sendMessage({
                 type: 'QUERY_STATE',
