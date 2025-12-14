@@ -1231,10 +1231,11 @@ function detach_debugger(tab_id) {
                     reject(chrome.runtime.lastError);
                 } else if (response && response.error) {
                     // Ignore if already detached
-                    if (response.error.includes("Debugger is not attached")) {
+                    const errorMessage = typeof response.error === 'string' ? response.error : String(response.error);
+                    if (errorMessage.includes("Debugger is not attached")) {
                         resolve();
                     } else {
-                        reject(new Error(response.error));
+                        reject(new Error(errorMessage));
                     }
                 } else {
                     resolve();
