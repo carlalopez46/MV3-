@@ -90,6 +90,7 @@ Recorder.prototype.start = function () {
     this.writeEncryptionType = true;
     this.password = null;
     this.canEncrypt = true
+    this.keypressEncryptWarningShown = false
     context.updateState(this.win_id, "recording");
     // MV3: Send message to panel
     try {
