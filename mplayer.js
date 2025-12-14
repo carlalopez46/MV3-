@@ -1075,9 +1075,17 @@ MacroPlayer.prototype.ActionTable["add"] = function (cmd) {
         var num = imns.s2i(m[1]);
         var n1 = imns.s2i(this.getVar(num)), n2 = imns.s2i(param);
         if (!isNaN(n1) && !isNaN(n2)) {
-            this.vars[num] = (n1 + n2).toString();
+            if (this.varManager && typeof this.varManager.setVar === 'function') {
+                this.varManager.setVar('VAR' + num, (n1 + n2).toString());
+            } else {
+                this.vars[num] = (n1 + n2).toString();
+            }
         } else {
-            this.vars[num] = this.getVar(num) + param;
+            if (this.varManager && typeof this.varManager.setVar === 'function') {
+                this.varManager.setVar('VAR' + num, this.getVar(num) + param);
+            } else {
+                this.vars[num] = this.getVar(num) + param;
+            }
         }
     } else if ((arr = cmd[1].match(/^!extract$/i))) {
         this.addExtractData(param);
@@ -2406,7 +2414,12 @@ MacroPlayer.prototype.onPromptComplete = function (data) {
     if (data && typeof (data.varname) != "undefined") {
         this.setUserVar(data.varname, data.value);
     } else if (data && typeof (data.varnum) != "undefined") {
-        this.vars[imns.s2i(data.varnum)] = data.value;
+        const idx = imns.s2i(data.varnum);
+        if (this.varManager && typeof this.varManager.setVar === 'function') {
+            this.varManager.setVar('VAR' + idx, data.value);
+        } else {
+            this.vars[idx] = data.value;
+        }
     }
     this.next("PROMPT");
 };
@@ -2942,18 +2955,23 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
             this.dataSourceFolder = afio.openNode(param);
             this.dataSourceFolder.exists().then(exists => {
                 if (!exists) {
-                    throw new RuntimeError(
+                    this.handleError(new RuntimeError(
                         "can not write to FOLDER_DATASOURCE: " +
                         param + " does not exist or not accessible.", 732
-                    );
+                    ));
+                    return Promise.reject({ handled: true });
                 }
+                return true;
             }).then(() => {
                 this.next("SET");
             }).catch(err => {
-                throw new RuntimeError(
+                if (err && err.handled) {
+                    return;
+                }
+                this.handleError(new RuntimeError(
                     "can not open FOLDER_DATASOURCE: " +
-                    param + ", error " + err.message, 732
-                );
+                    param + ", error " + (err && err.message ? err.message : err), 732
+                ));
             });
             return;
         case "!folder_download":
@@ -2965,18 +2983,23 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
             this.defDownloadFolder = afio.openNode(param);
             this.defDownloadFolder.exists().then(exists => {
                 if (!exists) {
-                    throw new RuntimeError(
+                    this.handleError(new RuntimeError(
                         "can not write to FOLDER_DOWNLOAD: " +
                         param + " does not exist or not accessible.", 732
-                    );
+                    ));
+                    return Promise.reject({ handled: true });
                 }
+                return true;
             }).then(() => {
                 this.next("SET");
             }).catch(err => {
-                throw new RuntimeError(
+                if (err && err.handled) {
+                    return;
+                }
+                this.handleError(new RuntimeError(
                     "can not open FOLDER_DOWNLOAD: " +
-                    param + ", error " + err.message, 732
-                );
+                    param + ", error " + (err && err.message ? err.message : err), 732
+                ));
             });
             return;
         case "!timeout": case "!timeout_page":
@@ -3112,7 +3135,12 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
             break;
         default:
             if (this.limits.varsRe.test(cmd[1])) {
-                this.vars[imns.s2i(RegExp.$1)] = param;
+                const idx = imns.s2i(RegExp.$1);
+                if (this.varManager && typeof this.varManager.setVar === 'function') {
+                    this.varManager.setVar('VAR' + idx, param);
+                } else {
+                    this.vars[idx] = param;
+                }
             } else if (/^!\S+$/.test(cmd[1])) {
                 throw new BadParameter("Unsupported variable " + cmd[1]);
             } else {
