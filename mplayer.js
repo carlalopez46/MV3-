@@ -83,6 +83,7 @@ function MacroPlayer(win_id) {
     this._ActionTable = new Object();
     this.callStack = [];
     this.loopStack = [];
+    this.runNestLevel = 0;
     this.compileExpressions();
 
     this._onScriptError = this.onErrorOccurred.bind(this);
@@ -124,6 +125,48 @@ function MacroPlayer(win_id) {
 
     if (typeof VariableManager === 'function') {
         this.varManager = new PlayerVariableManager(this);
+    }
+}
+
+/**
+ * Build list of candidate macro paths to try when resolving a macro name.
+ * Tries with .iim extension first, then raw name (if not already has extension).
+ * @param {string} macroPath - The macro path/name to resolve
+ * @returns {string[]} Array of candidate paths to try in order
+ */
+MacroPlayer.prototype._buildMacroCandidates = function (macroPath) {
+    if (!macroPath) return [];
+    
+    // If path already has a known extension, return as-is
+    if (/\.\w+$/i.test(macroPath)) {
+        return [macroPath];
+    }
+    
+    // Check for hidden files (start with dot but no extension after)
+    const lastSegment = macroPath.split(/[\/\\]/).pop();
+    if (lastSegment.startsWith('.') && !/\.\w+$/.test(lastSegment)) {
+        return [macroPath];
+    }
+    
+    // Try with default .iim extension first, then raw name
+    return [macroPath + '.iim', macroPath];
+};
+
+/**
+ * Reset variable state for a new standalone macro run.
+ * Clears all user variables and resets VAR array.
+ */
+MacroPlayer.prototype.resetVariableStateForNewMacro = function () {
+    // Clear legacy VAR array
+    this.vars = new Array();
+    
+    // Clear user variables map
+    this.userVars.clear();
+    
+    // Reset VariableManager if available
+    if (this.varManager) {
+        this.varManager.clearGlobalVars();
+        this.varManager.resetLocalContext();
     }
 }
 
@@ -905,7 +948,30 @@ MacroPlayer.prototype.stopTimer = function (type) {
 
 MacroPlayer.prototype._popFrame = function () {
     if (this.callStack && this.callStack.length) {
-        this.callStack.pop();
+        const frame = this.callStack.pop();
+        
+        // Restore caller state from the frame
+        if (frame) {
+            // Restore loop stack if saved
+            if (frame.loopStack !== undefined) {
+                this.loopStack = frame.loopStack;
+            }
+            
+            // Restore local context if saved
+            if (frame.localContextSnapshot && this.varManager && this.varManager.restoreLocalContext) {
+                this.varManager.restoreLocalContext(frame.localContextSnapshot);
+            }
+            
+            // Restore autoplay suppression state
+            if (frame.autoplaySuppressed !== undefined) {
+                this.autoplaySuppressed = frame.autoplaySuppressed;
+            }
+        }
+        
+        // Decrement nesting level
+        if (this.runNestLevel > 0) {
+            this.runNestLevel--;
+        }
     }
 };
 
@@ -3588,6 +3654,8 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
             chrome.scripting.executeScript({
                 target: { tabId: this.tab_id },
                 // Intentional global-scope execution of trusted macro JavaScript.
+                // Note: This func runs in the page context, not the extension context.
+                // eslint-disable-next-line no-eval
                 func: (code) => { return (0, eval)(code); },
                 args: [scriptCode]
             }, (results) => {
@@ -3605,7 +3673,7 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
             chrome.runtime.sendMessage({
                 command: 'SCRIPTING_EXECUTE',
                 tabId: this.tab_id,
-                func: '(code) => { return (0, eval)(code); }',
+                funcId: 'evalCode',
                 args: [scriptCode]
             }, executeScriptCallback);
         }
@@ -3994,63 +4062,58 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
     const match = rawArg.match(/macro\s*=\s*(.*)/i);
     const macroPath = match ? match[1] : rawArg;
 
-    const resolvedPath = await this.resolveMacroPath(macroPath);
-    const loaded = await Promise.resolve(
-        this.loadMacroFile ? this.loadMacroFile(resolvedPath) : null
-    );
-    const source = loaded != null ? loaded : await this.loadMacroFileFromFs(resolvedPath);
-    if (source == null)
+    // Build list of candidate paths to try (with .iim extension first)
+    const candidates = this._buildMacroCandidates(macroPath);
+    
+    // Increment nesting level
+    this.runNestLevel++;
+    
+    let source = null;
+    let resolvedPath = null;
+    
+    // Try each candidate path in order
+    for (const candidate of candidates) {
+        resolvedPath = await this.resolveMacroPath(candidate);
+        const loaded = await Promise.resolve(
+            this.loadMacroFile ? this.loadMacroFile(resolvedPath) : null
+        );
+        if (loaded != null) {
+            source = loaded;
+            break;
+        }
+        
+        // Try loading from filesystem
+        try {
+            source = await this.loadMacroFileFromFs(resolvedPath);
+            if (source != null) break;
+        } catch (e) {
+            // Continue to next candidate
+        }
+    }
+    
+    if (source == null) {
+        this.runNestLevel--;
         throw new RuntimeError("Macro '" + macroPath + "' not found", 701);
+    }
 
     const macro = typeof source === "string" ? this.parseInlineMacro(source) : source;
     macro.name = macro.name || macroPath;
     macro.file_id = macro.file_id || resolvedPath;
 
-    const frame = {
-        actions: this.actions,
-        action_stack: this.action_stack,
-        source: this.source,
-        currentMacro: this.currentMacro,
-        file_id: this.file_id,
-        bookmark_id: this.bookmark_id,
-        client_id: this.client_id,
-        callback: this.callback,
-        limits: this.limits,
-        times: this.times,
-        currentLoop: this.currentLoop,
-        cycledReplay: this.cycledReplay,
-        firstLoop: this.firstLoop,
-        loopStack: this.loopStack ? (typeof structuredClone === "function"
-            ? structuredClone(this.loopStack)
-            : JSON.parse(JSON.stringify(this.loopStack))) : []
+    // Save caller state on callStack for restoration after RUN completes
+    const callerFrame = {
+        loopStack: this.loopStack ? JSON.parse(JSON.stringify(this.loopStack)) : [],
+        localContextSnapshot: this.varManager ? this.varManager.snapshotLocalContext() : null,
+        autoplaySuppressed: this.autoplaySuppressed
     };
-
-    this.callStack.push(frame);
-    this.loopStack = [];
-
-    try {
-        await new Promise((resolve) => {
-            this.play(macro, this.limits, resolve);
-        });
-    } finally {
-        const previous = this.callStack.pop();
-        if (previous) {
-            this.actions = previous.actions;
-            this.action_stack = previous.action_stack;
-            this.source = previous.source;
-            this.currentMacro = previous.currentMacro;
-            this.file_id = previous.file_id;
-            this.bookmark_id = previous.bookmark_id;
-            this.client_id = previous.client_id;
-            this.callback = previous.callback;
-            this.limits = previous.limits;
-            this.times = previous.times;
-            this.currentLoop = previous.currentLoop;
-            this.cycledReplay = previous.cycledReplay;
-            this.firstLoop = previous.firstLoop;
-            this.loopStack = previous.loopStack;
-        }
-    }
+    this.callStack.push(callerFrame);
+    
+    // Clear autoplay suppression for nested execution
+    this.autoplaySuppressed = false;
+    
+    this.play(macro, this.limits);
+    
+    // Note: runNestLevel is decremented in _popFrame()
 };
 
 

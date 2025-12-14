@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+Session.vim
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary files
+tmp/
+.tmp/
+*.tmp
+
+# Lock files may be committed, but these are sometimes generated
+# package-lock.json - keep this!
+
+# Test artifacts
+coverage/
+.nyc_output/

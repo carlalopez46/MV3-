@@ -4,7 +4,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 // Handy wrapper for browser action functions
 // (badge is not really good naming for the object)
-var badge = {
+const badge = {
     // execute callback for all tabs in window
     // callback is function(tab) {...}
     forAllTabs: function (win_id, callback) {
@@ -13,19 +13,23 @@ var badge = {
             return;
         }
 
-        chrome.windows.getAll({ populate: true }, function (ws) {
-            if (chrome.runtime.lastError) {
-                console.warn('[badge] Error getting windows:', chrome.runtime.lastError.message);
-                return;
-            }
-            ws.forEach(function (win) {
-                if (win.id == win_id && Array.isArray(win.tabs)) {
-                    win.tabs.forEach(function (tab) {
-                        callback(tab);
-                    });
+        try {
+            chrome.windows.getAll({ populate: true }, function (ws) {
+                if (chrome.runtime.lastError) {
+                    console.warn('[badge] Error getting windows:', chrome.runtime.lastError.message);
+                    return;
+                }
+                for (const win of ws) {
+                    if (win.id == win_id && Array.isArray(win.tabs)) {
+                        for (const tab of win.tabs) {
+                            callback(tab);
+                        }
+                    }
                 }
             });
-        });
+        } catch (err) {
+            console.error('[badge] forAllTabs error:', err);
+        }
     },
 
     _sendToSW: function (method, win_id, arg) {

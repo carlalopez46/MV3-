@@ -1004,13 +1004,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     // --- SCRIPTING_EXECUTE: Proxy chrome.scripting.executeScript from Offscreen Document ---
+    // MV3: Cannot use new Function() to dynamically create functions.
+    // Instead, use predefined function identifiers that map to real function references.
     if (msg.command === 'SCRIPTING_EXECUTE') {
         if (!isOffscreenSender) {
             return rejectInvalidSender();
         }
 
-        const { tabId, func, args } = msg;
-        if (!isValidTabId(tabId) || typeof func !== 'string' || (args !== undefined && !Array.isArray(args))) {
+        const { tabId, funcId, args } = msg;
+        if (!isValidTabId(tabId) || (args !== undefined && !Array.isArray(args))) {
             sendResponse({ error: 'invalid input' });
             return true;
         }
@@ -1019,9 +1021,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             return true;
         }
 
+        // Map of predefined functions that can be executed in content script context
+        // This avoids using new Function() which violates MV3 CSP
+        const predefinedFunctions = {
+            // Execute code string in global scope (for javascript: URLs in macros)
+            // Note: This function runs in the content script context (target tab),
+            // not in the Service Worker. eval is permitted in page contexts.
+            'evalCode': (code) => {
+                // Using indirect eval for global scope execution
+                // eslint-disable-next-line no-eval
+                return (0, eval)(code);
+            }
+        };
+
+        const funcToExecute = predefinedFunctions[funcId];
+        if (!funcToExecute) {
+            sendResponse({ error: `Unknown function identifier: ${funcId}` });
+            return true;
+        }
+
         chrome.scripting.executeScript({
             target: { tabId: tabId },
-            func: new Function('return (' + func + ')(...arguments)'),
+            func: funcToExecute,
             args: args || []
         }, (results) => {
             if (chrome.runtime.lastError) {
