@@ -1,6 +1,7 @@
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
+/* global chrome */
 
 // Some utility functions
 // MV3 Service Worker Polyfill for localStorage
