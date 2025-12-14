@@ -1,11 +1,13 @@
 # MV3 Error Audit and Fix Log
 
 ## Addressed items
+
 | Category | File:Line | Description |
 | --- | --- | --- |
 | Code / lastError handling | bg.js:157-206 | Action button handler used nested callbacks, risked leaving `chrome.runtime.lastError` unhandled when switching tabs and mixed control flow for paused/recording states. Refactored to async/await with explicit tab update promise and try/catch to surface failures. |
 | Code / MV3 callback ergonomics | bg.js:211-254 | Sample bookmarklet installer relied on callback pyramid without consistent error trapping; `chrome.bookmarks.getChildren` errors could propagate silently. Converted to async/await with uniform try/catch. |
 | Code / missing error propagation | bg.js:312-333 | Sample macro bulk installer mixed callbacks and promise reducers, making bookmark tree failures hard to reproduce and recover from. Rewritten to sequential async/await with explicit rejection handling. |
+
 
 ## Reproduction points (pre-fix)
 - Trigger the browser action while a macro recording was paused; failures in `chrome.tabs.update` could silently abort resume because the callback swallowed `lastError`.

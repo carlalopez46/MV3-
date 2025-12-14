@@ -65,7 +65,7 @@ function onPanelLoaded(panel, panelWindowId) {
     }
     console.error("Can not find windowId for panel %O with panelWindowId %s. Context panelIds: %O",
         panel, panelWindowId, contextPanelIds);
-    throw new Error("Can not find windowId for panel!");
+    throw new Error("Cannot find windowId for panel!");
 }
 
 function getContextForWindow(win_id) {
@@ -77,7 +77,7 @@ function getContextForWindow(win_id) {
 function updateTabActive(tabId) {
     return new Promise((resolve, reject) => {
         chrome.tabs.update(tabId, { active: true }, () => {
-            if (chrome.runtime && chrome.runtime.lastError) {
+            if (chrome.runtime?.lastError) {
                 reject(new Error(chrome.runtime.lastError.message));
                 return;
             }
@@ -89,7 +89,13 @@ function updateTabActive(tabId) {
 function saveMacro(macro, overwrite = true) {
     return new Promise((resolve, reject) => {
         try {
-            save(macro, overwrite, () => resolve());
+            save(macro, overwrite, (result) => {
+                if (result && result.error) {
+                    reject(new Error(result.error));
+                    return;
+                }
+                resolve(result);
+            });
         } catch (error) {
             reject(error);
         }
@@ -127,7 +133,16 @@ async function persistRecordedMacro(ctx, win_id) {
                         path: macro.file_id,
                         error: err
                     });
-                    edit(macro, true);
+                    try {
+                        await saveMacro(macro, true);
+                        edit(macro, true);
+                    } catch (saveErr) {
+                        logError('Failed to save #Current.iim fallback after file write error: ' + saveErr.message, {
+                            context: 'recording_stop',
+                            path: macro.file_id,
+                            error: saveErr
+                        });
+                    }
                 }
                 return;
             }
@@ -141,13 +156,29 @@ async function persistRecordedMacro(ctx, win_id) {
                 tree_type: 'files',
                 error: err
             });
-            await saveMacro(macro, true);
-            edit(macro, true);
+            try {
+                await saveMacro(macro, true);
+                edit(macro, true);
+            } catch (saveErr) {
+                logError('Failed to save #Current.iim after file system check error: ' + saveErr.message, {
+                    context: 'recording_stop',
+                    tree_type: 'files',
+                    error: saveErr
+                });
+            }
         }
     } else {
         console.log('[iMacros MV3] Saving #Current.iim to Bookmarks tab');
-        await saveMacro(macro, true);
-        edit(macro, true);
+        try {
+            await saveMacro(macro, true);
+            edit(macro, true);
+        } catch (err) {
+            logError('Failed to save #Current.iim to Bookmarks tab: ' + err.message, {
+                context: 'recording_stop',
+                tree_type: 'bookmarks',
+                error: err
+            });
+        }
     }
 }
 
@@ -198,7 +229,7 @@ if (typeof chrome !== 'undefined' && chrome.action && chrome.action.onClicked) {
             }
 
             if (recorder.recording) {
-                recorder.stop();
+                await Promise.resolve(recorder.stop());
                 await persistRecordedMacro(ctx, win_id);
             }
         } catch (err) {
