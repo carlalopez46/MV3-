@@ -1160,8 +1160,12 @@ Recorder.prototype.onAuthRequired = function (details, callback) {
             },
             { width: 350, height: 170 }
         ).then((response) => {
-            if (response && typeof callback === "function") {
-                callback(response);
+            if (typeof callback === "function") {
+                if (response && (response.cancelled || response.canceled)) {
+                    callback({ cancel: true });
+                } else {
+                    callback(response);
+                }
             }
         }).catch((err) => {
             console.error("[iMacros] Failed to open login dialog:", err);
@@ -1288,19 +1292,29 @@ Recorder.prototype.addListeners = function () {
         const cm_title = "Automate Save As command";
         // Generate unique ID for context menu item (required in MV3)
         const cm_id = `imacros-save-as-${this.win_id}`;
-
-        chrome.contextMenus.remove(cm_id, () => {
-            // Ignore removal errors (menu may not exist)
-            this.cm_id = chrome.contextMenus.create(
-                { id: cm_id, title: cm_title, contexts: ["link", "audio", "video", "image"] },
-                () => {
-                    if (chrome.runtime.lastError) {
+        this.cm_id = chrome.contextMenus.create(
+            { id: cm_id, title: cm_title, contexts: ["link", "audio", "video", "image"] },
+            () => {
+                if (chrome.runtime.lastError) {
+                    if (chrome.runtime.lastError.message &&
+                        chrome.runtime.lastError.message.includes("duplicate id")) {
+                        chrome.contextMenus.update(
+                            cm_id,
+                            { title: cm_title, contexts: ["link", "audio", "video", "image"] },
+                            () => {
+                                if (chrome.runtime.lastError) {
+                                    console.debug("[Recorder] Context menu update error:", chrome.runtime.lastError.message);
+                                    this.cm_id = null;
+                                }
+                            }
+                        );
+                    } else {
                         console.debug("[Recorder] Context menu create error:", chrome.runtime.lastError.message);
                         this.cm_id = null;
                     }
                 }
-            );
-        });
+            }
+        );
     }
 
     // network events
