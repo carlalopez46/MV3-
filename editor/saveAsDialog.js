@@ -8,10 +8,27 @@ var dialogWindowId = null;
 window.addEventListener("load", function () {
     // Primary MV3 path: request dialog args from background
     // Primary MV3 path: request dialog args from background with retry
-    chrome.windows.getCurrent(function (currentWindow) {
-        dialogWindowId = currentWindow.id;
-        requestArgs(5);
-    });
+    // Check for key in URL first (MV3/Offscreen compatibility)
+    var urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('key')) {
+        fallbackToSessionStorage();
+        return;
+    }
+
+    if (typeof chrome.windows !== 'undefined' && chrome.windows.getCurrent) {
+        chrome.windows.getCurrent(function (currentWindow) {
+            if (chrome.runtime.lastError || !currentWindow) {
+                console.warn("[iMacros] Failed to get current window:", chrome.runtime.lastError);
+                fallbackToSessionStorage();
+                return;
+            }
+            dialogWindowId = currentWindow.id;
+            requestArgs(5);
+        });
+    } else {
+        console.warn("[iMacros] chrome.windows API not available. Falling back to storage strategy.");
+        fallbackToSessionStorage();
+    }
 
     function requestArgs(retries) {
         chrome.runtime.sendMessage({
