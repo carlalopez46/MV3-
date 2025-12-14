@@ -259,7 +259,7 @@ function mpGetWindow(mplayer, windowId, getInfo, callback) {
     } else {
         chrome.runtime.sendMessage({
             command: "WINDOW_GET",
-            windowId: windowId,
+            win_id: windowId,
             getInfo: getInfo || {}
         }, response => {
             if (chrome.runtime.lastError) {
@@ -289,7 +289,7 @@ function mpUpdateWindow(mplayer, windowId, updateInfo, callback) {
     } else {
         chrome.runtime.sendMessage({
             command: "WINDOW_UPDATE",
-            windowId: windowId,
+            win_id: windowId,
             updateInfo: updateInfo
         }, response => {
             if (chrome.runtime.lastError) {
@@ -318,8 +318,8 @@ function mpCaptureVisibleTab(mplayer, windowId, options, callback) {
         });
     } else {
         chrome.runtime.sendMessage({
-            command: "CAPTURE_VISIBLE_TAB",
-            windowId: windowId,
+            command: "TAB_CAPTURE",
+            win_id: windowId,
             options: options
         }, response => {
             if (chrome.runtime.lastError) {

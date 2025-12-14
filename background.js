@@ -218,17 +218,14 @@ async function createOffscreen() {
     if (creatingOffscreen) return creatingOffscreen;
 
     creatingOffscreen = (async () => {
-        try {
-            // Check if offscreen document already exists
-            const hasDocument = await chrome.offscreen.hasDocument();
-            if (hasDocument) {
-                // verify if it's responding? (Optional optimization)
-                // console.log('[iMacros SW] Offscreen document already exists');
+
+        // Check if offscreen document already exists using clients API (Service Worker)
+        if (self.clients) {
+            const clients = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+            const exists = clients.some(c => c.url.endsWith('offscreen.html'));
+            if (exists) {
                 return;
             }
-        } catch (e) {
-            console.error('[iMacros SW] Error checking offscreen document:', e);
-            // If check fails, we proceed to try creating it.
         }
 
         try {
@@ -881,44 +878,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
-    // Handle openEditorWindow request from Offscreen Document
-    if (msg.command === "openEditorWindow") {
-        const editorData = msg.editorData;
 
-        // In MV3, we need to pass data to the editor carefully. 
-        // We can't access window.opener in the new window.
-        // We will store the data in a temporary variable that the editor can fetch, 
-        // or rely on the editor requesting its initial data via message.
-        // For now, let's use the 'editorData' global variable approach if it works, 
-        // or better, have the editor query the background page (Service Worker).
-
-        // Store data in a map keyed by something (maybe we don't have a concept of 'current editor' easily).
-        // A simple approach is to use a global variable 'currentEditorData' in the SW, 
-        // and have the editor fetch it on load.
-        // LIMITATION: Only one editor can be opened at a time with this simple global.
-
-        globalThis.currentEditorData = editorData;
-
-        chrome.windows.create({
-            url: "editor/editor.html",
-            type: "popup",
-            width: 700,
-            height: 550
-        }, (win) => {
-            if (chrome.runtime.lastError) {
-                console.error('[iMacros SW] Failed to open editor:', chrome.runtime.lastError);
-                sendResponse({ success: false, error: chrome.runtime.lastError.message });
-            } else {
-                console.log('[iMacros SW] Editor opened with ID:', win.id);
-                // Optionally map window ID to data if we want to support multiple editors
-                if (!globalThis.editorDataMap) globalThis.editorDataMap = new Map();
-                globalThis.editorDataMap.set(win.id, editorData);
-
-                sendResponse({ success: true });
-            }
-        });
-        return true;
-    }
 
     // --- UPDATE_BADGE: Proxy badge updates from Offscreen Document ---
     if (msg.type === 'UPDATE_BADGE') {
@@ -1991,217 +1951,7 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
 
 // Handle the runMacroByUrl command in the message listener
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    // Debug logging to trace command handling
-    if (msg.command && (msg.command.startsWith('TAB_') || msg.command === 'GET_ACTIVE_TAB')) {
-        console.log('[iMacros SW] Received tab command:', msg.command, msg);
-    }
 
-    // --- Tab API Proxy for Offscreen Document ---
-    // Offscreen Document delegates tab operations to Service Worker via these commands
-
-    if (msg.command === "TAB_GET") {
-        try {
-            chrome.tabs.get(msg.tab_id, (tab) => {
-                if (chrome.runtime.lastError) {
-                    console.error('[iMacros SW] TAB_GET error:', chrome.runtime.lastError);
-                    sendResponse({ error: chrome.runtime.lastError.message });
-                } else {
-                    sendResponse({ tab: tab });
-                }
-            });
-        } catch (e) {
-            console.error('[iMacros SW] TAB_GET sync error:', e);
-            sendResponse({ error: e.message });
-        }
-        return true;
-    }
-
-    if (msg.command === "TAB_CREATE") {
-        try {
-            chrome.tabs.create(msg.createProperties, (tab) => {
-                if (chrome.runtime.lastError) {
-                    console.error('[iMacros SW] TAB_CREATE error:', chrome.runtime.lastError);
-                    sendResponse({ error: chrome.runtime.lastError.message });
-                } else {
-                    sendResponse({ tab: tab });
-                }
-            });
-        } catch (e) {
-            console.error('[iMacros SW] TAB_CREATE sync error:', e);
-            sendResponse({ error: e.message });
-        }
-        return true;
-    }
-
-    if (msg.command === "TAB_QUERY") {
-        try {
-            chrome.tabs.query(msg.queryInfo, (tabs) => {
-                if (chrome.runtime.lastError) {
-                    console.error('[iMacros SW] TAB_QUERY error:', chrome.runtime.lastError);
-                    sendResponse({ error: chrome.runtime.lastError.message });
-                } else {
-                    sendResponse({ tabs: tabs });
-                }
-            });
-        } catch (e) {
-            console.error('[iMacros SW] TAB_QUERY sync error:', e);
-            sendResponse({ error: e.message });
-        }
-        return true;
-    }
-
-    if (msg.command === "TAB_REMOVE") {
-        try {
-            chrome.tabs.remove(msg.tab_ids, () => {
-                if (chrome.runtime.lastError) {
-                    console.error('[iMacros SW] TAB_REMOVE error:', chrome.runtime.lastError);
-                    sendResponse({ error: chrome.runtime.lastError.message });
-                } else {
-                    sendResponse({ success: true });
-                }
-            });
-        } catch (e) {
-            console.error('[iMacros SW] TAB_REMOVE sync error:', e);
-            sendResponse({ error: e.message });
-        }
-        return true;
-    }
-
-    if (msg.command === "TAB_UPDATE") {
-        try {
-            chrome.tabs.update(msg.tab_id, msg.updateProperties, (tab) => {
-                if (chrome.runtime.lastError) {
-                    if (chrome.runtime.lastError.message.includes('No tab with id')) {
-                        sendResponse({ tab: null });
-                    } else {
-                        console.error('[iMacros SW] TAB_UPDATE error:', chrome.runtime.lastError);
-                        sendResponse({ error: chrome.runtime.lastError.message });
-                    }
-                } else {
-                    sendResponse({ tab: tab });
-                }
-            });
-        } catch (e) {
-            console.error('[iMacros SW] TAB_UPDATE sync error:', e);
-            sendResponse({ error: e.message });
-        }
-        return true;
-    }
-
-    if (msg.command === "GET_ACTIVE_TAB") {
-        try {
-            chrome.tabs.query({ active: true, windowId: msg.win_id }, (tabs) => {
-                if (chrome.runtime.lastError) {
-                    console.error('[iMacros SW] GET_ACTIVE_TAB error:', chrome.runtime.lastError);
-                    sendResponse({ error: chrome.runtime.lastError.message });
-                } else {
-                    sendResponse({ tab: tabs && tabs[0] ? tabs[0] : null });
-                }
-            });
-        } catch (e) {
-            console.error('[iMacros SW] GET_ACTIVE_TAB sync error:', e);
-            sendResponse({ error: e.message });
-        }
-        return true;
-    }
-
-    if (msg.command === "SEND_TO_TAB") {
-        const { tab_id, message } = msg;
-        try {
-            chrome.tabs.sendMessage(tab_id, message, (response) => {
-                if (chrome.runtime.lastError) {
-                    console.warn('[iMacros SW] SEND_TO_TAB error:', chrome.runtime.lastError.message);
-                    sendResponse({ error: chrome.runtime.lastError.message });
-                } else {
-                    sendResponse(response);
-                }
-            });
-        } catch (e) {
-            console.error('[iMacros SW] SEND_TO_TAB sync error:', e);
-            sendResponse({ error: e.message });
-        }
-        return true;
-    }
-
-    if (msg.command === "BROADCAST_TO_WINDOW") {
-        const { win_id, message } = msg;
-        const queryInfo = win_id ? { windowId: win_id } : {};
-        try {
-            chrome.tabs.query(queryInfo, (tabs) => {
-                if (chrome.runtime.lastError) {
-                    console.error('[iMacros SW] BROADCAST_TO_WINDOW query error:', chrome.runtime.lastError);
-                    sendResponse({ error: chrome.runtime.lastError.message });
-                    return;
-                }
-                if (tabs) {
-                    tabs.forEach((tab) => {
-                        chrome.tabs.sendMessage(tab.id, message, () => {
-                            // Ignore errors for individual tabs
-                            if (chrome.runtime.lastError) { /* ignore */ }
-                        });
-                    });
-                }
-                sendResponse({ success: true, count: tabs ? tabs.length : 0 });
-            });
-        } catch (e) {
-            console.error('[iMacros SW] BROADCAST_TO_WINDOW sync error:', e);
-            sendResponse({ error: e.message });
-        }
-        return true;
-    }
-
-    // --- Window API Proxy for Offscreen Document ---
-    if (msg.command === "WINDOW_GET") {
-        try {
-            chrome.windows.get(msg.windowId, msg.getInfo || {}, (win) => {
-                if (chrome.runtime.lastError) {
-                    console.error('[iMacros SW] WINDOW_GET error:', chrome.runtime.lastError);
-                    sendResponse({ error: chrome.runtime.lastError.message });
-                } else {
-                    sendResponse({ window: win });
-                }
-            });
-        } catch (e) {
-            console.error('[iMacros SW] WINDOW_GET sync error:', e);
-            sendResponse({ error: e.message });
-        }
-        return true;
-    }
-
-    if (msg.command === "WINDOW_UPDATE") {
-        try {
-            chrome.windows.update(msg.windowId, msg.updateInfo || {}, (win) => {
-                if (chrome.runtime.lastError) {
-                    console.error('[iMacros SW] WINDOW_UPDATE error:', chrome.runtime.lastError);
-                    sendResponse({ error: chrome.runtime.lastError.message });
-                } else {
-                    sendResponse({ window: win });
-                }
-            });
-        } catch (e) {
-            console.error('[iMacros SW] WINDOW_UPDATE sync error:', e);
-            sendResponse({ error: e.message });
-        }
-        return true;
-    }
-
-    // --- Tab Capture API Proxy for Offscreen Document ---
-    if (msg.command === "CAPTURE_VISIBLE_TAB") {
-        try {
-            chrome.tabs.captureVisibleTab(msg.windowId, msg.options || {}, (dataUrl) => {
-                if (chrome.runtime.lastError) {
-                    console.error('[iMacros SW] CAPTURE_VISIBLE_TAB error:', chrome.runtime.lastError);
-                    sendResponse({ error: chrome.runtime.lastError.message });
-                } else {
-                    sendResponse({ dataUrl: dataUrl });
-                }
-            });
-        } catch (e) {
-            console.error('[iMacros SW] CAPTURE_VISIBLE_TAB sync error:', e);
-            sendResponse({ error: e.message });
-        }
-        return true;
-    }
 
     if (msg.command === 'runMacroByUrl' && msg.target === 'background') {
         // Forward to offscreen document

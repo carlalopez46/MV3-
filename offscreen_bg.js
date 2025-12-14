@@ -837,7 +837,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
         // Handle GET_DIALOG_ARGS from background (forwarded from dialog window)
         if (request.type === 'GET_DIALOG_ARGS') {
-            const winId = parseInt(request.windowId);
+            const winId = parseInt(request.windowId, 10);
+            if (!Number.isInteger(winId) || winId <= 0) {
+                console.error("[Offscreen] Invalid windowId for GET_DIALOG_ARGS:", request.windowId);
+                sendResponse({ success: false, error: "Invalid windowId" });
+                return true;
+            }
 
             // Function to attempt retrieving args with retries
             const tryGetArgs = (attemptsLeft) => {
@@ -863,7 +868,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         // Handle SET_DIALOG_RESULT from background (forwarded from dialog window)
         if (request.type === 'SET_DIALOG_RESULT') {
             try {
-                const winId = parseInt(request.windowId);
+                const winId = parseInt(request.windowId, 10);
+                if (!Number.isInteger(winId) || winId <= 0) {
+                    console.error("[Offscreen] Invalid windowId for SET_DIALOG_RESULT:", request.windowId);
+                    sendResponse({ success: false, error: "Invalid windowId" });
+                    return true;
+                }
                 dialogUtils.setDialogResult(winId, request.response);
                 sendResponse({ success: true });
             } catch (e) {
@@ -1887,28 +1897,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         return true; // async response
     }
 
-    // Handle dialog interactions (PROMPT, etc.)
-    if (request.type === 'SET_DIALOG_RESULT') {
-        try {
-            dialogUtils.setDialogResult(request.windowId, request.response);
-            sendResponse({ success: true });
-        } catch (e) {
-            console.error('[iMacros MV3] Error setting dialog result:', e);
-            sendResponse({ success: false, error: e.toString() });
-        }
-        return true;
-    }
 
-    if (request.type === 'GET_DIALOG_ARGS') {
-        try {
-            var args = dialogUtils.getArgs(request.windowId);
-            sendResponse({ success: true, args: args });
-        } catch (e) {
-            console.error('[iMacros MV3] Error getting dialog args:', e);
-            sendResponse({ success: false, error: e.toString() });
-        }
-        return true;
-    }
 
     // Handle panel initialization
     if (request.type === 'PANEL_LOADED') {
