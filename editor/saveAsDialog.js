@@ -101,15 +101,26 @@ window.addEventListener("load", function () {
         var rc = mc.getBoundingClientRect();
         // Resize to fit content, a bit larger for the new button
         window.resizeTo(rc.width + 30, rc.height + 60);
-        window.moveTo(window.opener.screenX + window.opener.outerWidth / 2 - 100,
-            window.opener.screenY + window.opener.outerHeight / 2 - 100);
+
+        if (window.opener && !window.opener.closed) {
+            try {
+                window.moveTo(
+                    window.opener.screenX + window.opener.outerWidth / 2 - 100,
+                    window.opener.screenY + window.opener.outerHeight / 2 - 100
+                );
+            } catch (e) {
+                // Ignore cross-origin blocking or other window access errors
+            }
+        }
 
         var macro_name = document.getElementById("macro-name");
         // Strip extension for display if it's a file path or name
         var name = args.save_data.name || "Unnamed Macro";
-        if (/\.iim$/i.test(name)) {
-            name = name.substring(0, name.length - 4);
-        }
+        // keep only basename (avoid paths in the filename field)
+        name = String(name).split(/[\\/]/).pop();
+        // strip .iim for display
+        name = name.replace(/\.iim$/i, "");
+
         macro_name.value = name;
         macro_name.select();
         macro_name.focus();
@@ -165,12 +176,12 @@ window.addEventListener("load", function () {
                 if (file_type && args.save_data.file_id) {
                     // file_id is typically the full path
                     try {
-                        var path = args.save_data.file_id;
-                        var separator = path.indexOf("\\") !== -1 ? "\\" : "/";
-                        var lastSepIndex = path.lastIndexOf(separator);
+                        var path = String(args.save_data.file_id);
+                        var parts = path.split(/[\\/]/);
+                        if (parts.length > 1) {
+                            parts.pop(); // Remove filename
+                            var dir = parts.join("/"); // Normalize to forward slashes for internal use
 
-                        if (lastSepIndex !== -1) {
-                            var dir = path.substring(0, lastSepIndex);
                             // Only update if currently empty or explicitly restoring from file_id
                             if (!directoryPath.value || directoryPath.value === "") {
                                 directoryPath.value = dir;
@@ -246,7 +257,6 @@ window.addEventListener("load", function () {
 
 
 
-
 function saveDirectly() {
     // Direct save overrides the existing file without checking or asking
     // args.save_data.file_id holds the path to overwrite
@@ -270,17 +280,18 @@ function saveDirectly() {
             window.close();
         }).catch(function (err) {
             console.error("Save failed:", err);
-            alert("Save failed: " + err);
+            alert("Save failed: " + (err && err.message ? err.message : String(err)));
         });
         return;
     }
 
     // Default save mechanism for other backends
     saveMacro(args.save_data, true).then(function () {
+        chrome.runtime.sendMessage({ type: 'REFRESH_PANEL_TREE' });
         window.close();
     }).catch(function (err) {
         console.error("[iMacros] Failed to save macro:", err);
-        alert("Save failed: " + err);
+        alert("Save failed: " + (err && err.message ? err.message : String(err)));
     });
 }
 
