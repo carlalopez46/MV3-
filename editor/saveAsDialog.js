@@ -8,10 +8,27 @@ var dialogWindowId = null;
 window.addEventListener("load", function () {
     // Primary MV3 path: request dialog args from background
     // Primary MV3 path: request dialog args from background with retry
-    chrome.windows.getCurrent(function (currentWindow) {
-        dialogWindowId = currentWindow.id;
-        requestArgs(5);
-    });
+    // Check for key in URL first (MV3/Offscreen compatibility)
+    var urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('key')) {
+        fallbackToSessionStorage();
+        return;
+    }
+
+    if (typeof chrome.windows !== 'undefined' && chrome.windows.getCurrent) {
+        chrome.windows.getCurrent(function (currentWindow) {
+            if (chrome.runtime.lastError || !currentWindow) {
+                console.warn("[iMacros] Failed to get current window:", chrome.runtime.lastError);
+                fallbackToSessionStorage();
+                return;
+            }
+            dialogWindowId = currentWindow.id;
+            requestArgs(5);
+        });
+    } else {
+        console.warn("[iMacros] chrome.windows API not available. Falling back to storage strategy.");
+        fallbackToSessionStorage();
+    }
 
     function requestArgs(retries) {
         chrome.runtime.sendMessage({
@@ -196,8 +213,13 @@ window.addEventListener("load", function () {
                 // Set default directory path if still not set
                 if (!directoryPath.value) {
                     afio.getDefaultDir("savepath").then(function (node) {
-                        directoryPath.value = node.path;
-                        directoryPath.dataset.path = node.path;
+                        var p = node.path;
+                        // Default to Macros folder if root is returned (common in File System Access)
+                        if (p === '/' || p === '' || p === '\\') {
+                            p = 'Macros';
+                        }
+                        directoryPath.value = p;
+                        directoryPath.dataset.path = p;
                     }).catch(function (err) {
                         console.error("Error getting default directory:", err);
                     });
@@ -297,6 +319,7 @@ function saveDirectly() {
 
 function ok() {
     var macro_name = document.getElementById("macro-name");
+
     try {
         var normalizedName = normalizeMacroName(macro_name.value);
         args.save_data.name = normalizedName;
@@ -305,6 +328,8 @@ function ok() {
         macro_name.focus();
         return;
     }
+
+    console.log("[iMacros] Saving macro as:", args.save_data.name);
 
     var overwrite = false;
 
@@ -376,7 +401,10 @@ function ok() {
                     console.error("[iMacros] Failed to save macro:", err);
                     alert("Save failed: " + err);
                 });
-            }).catch(console.error.bind(console));
+            }).catch(function (err) {
+                console.error("[iMacros] File existence check failed:", err);
+                alert("Error checking file: " + (err.message || err));
+            });
         });
     });
 }

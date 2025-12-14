@@ -80,7 +80,11 @@
     "web_accessible_resources": [
         {
             "resources": [
-                "skin/logo24.png"
+                "skin/logo24.png",
+                "panel.html",
+                "fileView.html",
+                "macroView.html",
+                "treeView.html"
             ],
             "matches": [
                 "<all_urls>"

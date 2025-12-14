@@ -102,7 +102,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (request.target !== 'offscreen') return;
 
     const msgLabel = request.type || request.command;
-    console.log('[iMacros Offscreen] Received message:', msgLabel, request);
+    if (msgLabel !== 'QUERY_STATE' && msgLabel !== 'TAB_UPDATED') {
+        console.log('[iMacros Offscreen] Received message:', msgLabel, request);
+    }
 
     // Handle quick state query from Service Worker or panel
     if (request.type === 'QUERY_STATE') {
@@ -110,7 +112,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         const ctx = (typeof context !== 'undefined' && context) ? context[winId] : null;
 
         let state = 'idle';
-        const response = { state };
+        const response = { state, success: true };
 
         if (ctx) {
             if (ctx.recorder && ctx.recorder.recording) {
@@ -245,7 +247,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 console.debug('[iMacros Offscreen] No handler for forwarded message:', topic);
                 // Return state: 'idle' to satisfy CSRecorder.onQueryStateCompleted
                 if (sendResponse) sendResponse({
-                    success: false,
+                    success: true, // ACKNOWLEDGE the message to stop retries, even if not handled
                     state: 'idle',
                     error: 'No handler found',
                     notHandled: true
