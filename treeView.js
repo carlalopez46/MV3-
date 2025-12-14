@@ -110,17 +110,27 @@ window.addEventListener("iMacrosRunMacro", function(evt) {
 function getiMacrosFolderId() {
     return new Promise((resolve, reject) => {
         chrome.bookmarks.getTree(tree => {
+            if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+                return;
+            }
             // first find iMacros subtree or create if not found
             // Note: This code duplicates logic in bg.js::ensureBookmarkFolderCreated().
             // Future refactoring: Extract to a shared utility function to avoid duplication.
-            let iMacrosFolder = tree[0].children[0].children.find(
+            const iMacrosFolder = tree[0].children[0].children.find(
                 child => child.title == "iMacros"
             )
             if (typeof iMacrosFolder == "undefined") {
-                let bookmarksPanelId = tree[0].children[0].id
+                const bookmarksPanelId = tree[0].children[0].id
                 chrome.bookmarks.create(
                     {parentId: bookmarksPanelId, title: "iMacros"},
-                    folder => resolve(folder.id)
+                    folder => {
+                        if (chrome.runtime.lastError) {
+                            reject(new Error(chrome.runtime.lastError.message));
+                            return;
+                        }
+                        resolve(folder.id)
+                    }
                 )
             } else {
                 resolve(iMacrosFolder.id)
@@ -129,7 +139,7 @@ function getiMacrosFolderId() {
     })
 }
 
-var TreeView = {
+const TreeView = {
     // build tree from iMacros bookmarks folder
     build: function () {
         getiMacrosFolderId().then(id => TreeView.buildSubTree_jstree(id))
@@ -150,6 +160,11 @@ var TreeView = {
         }
 
         chrome.bookmarks.getSubTree(id, function (treeNodes) {
+            if (chrome.runtime.lastError) {
+                console.error("Error getting bookmark subtree:", chrome.runtime.lastError.message);
+                return;
+            }
+            
             const createNode = function(text, id, type, hasChildren) {
                 return {
                     'text': text,
@@ -168,7 +183,7 @@ var TreeView = {
                         return true
                     }
                 }).map(node => {
-                    let rv = {a_attr: {}}
+                    const rv = {a_attr: {}}
                     if (node.url) {
                         rv.type = "macro"
                         rv.a_attr.bookmarklet = node.url
@@ -188,15 +203,15 @@ var TreeView = {
                 })
             }
 
-            let data = mapTree(treeNodes);
+            const data = mapTree(treeNodes);
             if (!data[0].state) {
                 data[0].state = {opened: true}
             }
 
-            let onNewFolder = function () {
-                var new_name = prompt("Enter new folder name", "New folder");
-                var item = TreeView.selectedItem;
-                var root_id;
+            const onNewFolder = function () {
+                let new_name = prompt("Enter new folder name", "New folder");
+                const item = TreeView.selectedItem;
+                let root_id;
                 if (item.type == "folder") {
                     root_id = item.id;
                 } else {
@@ -204,9 +219,15 @@ var TreeView = {
                 }
 
                 chrome.bookmarks.getChildren(root_id, function (arr) {
+                    if (chrome.runtime.lastError) {
+                        console.error("Error getting bookmark children:", chrome.runtime.lastError.message);
+                        return;
+                    }
                     // add ...(n) to the folder name if such name already present
-                    var names = {}, count = 0, stop = false;
-                    for (var i = 0; i < arr.length; i++) {
+                    const names = {};
+                    let count = 0;
+                    let stop = false;
+                    for (let i = 0; i < arr.length; i++) {
                         names[arr[i].title] = true;
                     }
                     while (!stop && count < arr.length + 1) {
@@ -227,31 +248,43 @@ var TreeView = {
                             title: new_name
                         },
                         function (folder) {
+                            if (chrome.runtime.lastError) {
+                                console.error("Error creating folder:", chrome.runtime.lastError.message);
+                                return;
+                            }
                             TreeView.buildSubTree(folder.id);
                         }
                     );
                 });
             }
 
-            let onRename = function () {
-                var item = TreeView.selectedItem;
+            const onRename = function () {
+                const item = TreeView.selectedItem;
                 if (!item) {
                     alert("Error: no item selected");
                     return;
                 }
-                var bookmark_id = item.id;
-                var old_name = item.text;
-                var new_name = prompt("Enter new name", old_name);
+                const bookmark_id = item.id;
+                const old_name = item.text;
+                const new_name = prompt("Enter new name", old_name);
                 if (!new_name)
                     return;
                 if (item.type == "folder") {
-                    chrome.bookmarks.update(bookmark_id, { title: new_name });
+                    chrome.bookmarks.update(bookmark_id, { title: new_name }, function() {
+                        if (chrome.runtime.lastError) {
+                            console.error("Error renaming folder:", chrome.runtime.lastError.message);
+                        }
+                    });
                 } else if (item.type == "macro") {
                     chrome.bookmarks.get(bookmark_id, function (x) {
-                        var url = x[0].url;
+                        if (chrome.runtime.lastError) {
+                            console.error("Error getting bookmark:", chrome.runtime.lastError.message);
+                            return;
+                        }
+                        let url = x[0].url;
                         // change macro name in URL
                         try {
-                            var m = url.match(/, n = \"([^\"]+)\";/);
+                            const m = url.match(/, n = \"([^\"]+)\";/);
                             url = url.replace(
                                     /, n = \"[^\"]+\";/,
                                 ", n = \"" + encodeURIComponent(new_name) + "\";"
@@ -260,39 +293,52 @@ var TreeView = {
                             console.error(e);
                         }
                         chrome.bookmarks.update(
-                            bookmark_id, { title: new_name, url: url }
+                            bookmark_id, { title: new_name, url: url },
+                            function() {
+                                if (chrome.runtime.lastError) {
+                                    console.error("Error updating bookmark:", chrome.runtime.lastError.message);
+                                }
+                            }
                         );
                     });
                 }
             }
 
-            let onRemove = function () {
-                var item = TreeView.selectedItem;
+            const onRemove = function () {
+                const item = TreeView.selectedItem;
                 if (!item) {
                     alert("Error: no item selected");
                     return;
                 }
-                var bookmark_id = item.id;
+                const bookmark_id = item.id;
                 if (!bookmark_id) {
                     alert("Can not delete " + item.type + " " + item.text);
                     return;
                 }
 
                 if (item.type == "macro") {
-                    var yes = confirm("Are you sure you want to remove macro " +
+                    const yes = confirm("Are you sure you want to remove macro " +
                                       item.text +
                                       " ?");
                     if (yes) {
                         chrome.bookmarks.remove(bookmark_id, function () {
+                            if (chrome.runtime.lastError) {
+                                console.error("Error removing bookmark:", chrome.runtime.lastError.message);
+                                return;
+                            }
                             TreeView.selectedItem = null;
                         });
                     }
                 } else if (item.type == "folder") {
-                    var yes = confirm("Are you sure you want to remove folder " +
+                    const yes = confirm("Are you sure you want to remove folder " +
                                       item.text +
                                       " and all its contents?");
                     if (yes)
                         chrome.bookmarks.removeTree(bookmark_id, function () {
+                            if (chrome.runtime.lastError) {
+                                console.error("Error removing bookmark tree:", chrome.runtime.lastError.message);
+                                return;
+                            }
                             TreeView.selectedItem = null;
                         });
                 }
@@ -301,7 +347,7 @@ var TreeView = {
             const customMenu = function(node) {
                 TreeView.selectedItem = node.original;
 
-                var items = {
+                const items = {
                     'Edit': {
                         'label': 'Edit',
                         'action': function () { window.top.edit(); }
@@ -367,7 +413,13 @@ var TreeView = {
 
             const getChildren = function(bookmarkId) {
                 return new Promise((resolve, reject) => {
-                    chrome.bookmarks.getChildren(bookmarkId, resolve)
+                    chrome.bookmarks.getChildren(bookmarkId, (children) => {
+                        if (chrome.runtime.lastError) {
+                            reject(new Error(chrome.runtime.lastError.message));
+                            return;
+                        }
+                        resolve(children);
+                    })
                 })
             }
 
@@ -379,7 +431,7 @@ var TreeView = {
             }
 
             const findInsertionIndex = function(srcNode, subTree) {
-                let place = subTree.find(node => {
+                const place = subTree.find(node => {
                     if (srcNode.url && node.url) {
                         return namePrecedes(srcNode.title, node.title)
                     } else if (!srcNode.url && node.url) {
@@ -394,17 +446,17 @@ var TreeView = {
             }
 
             jQuery(document).on('dnd_stop.vakata', function (e, data) {
-                let sourceId = data.element.getAttribute("bookmark_id")
-                let targetId = data.event.target.getAttribute("bookmark_id")
+                const sourceId = data.element.getAttribute("bookmark_id")
+                const targetId = data.event.target.getAttribute("bookmark_id")
                 chrome.bookmarks.get([sourceId, targetId], (bookmarks) => {
                     if (chrome.runtime.lastError) {
                         console.error("Error getting bookmarks for drag-and-drop:", chrome.runtime.lastError.message);
                         return;
                     }
-                    let [src, tgt] = bookmarks;
-                    let parentId = tgt.url? tgt.parentId : tgt.id
+                    const [src, tgt] = bookmarks;
+                    const parentId = tgt.url? tgt.parentId : tgt.id
                     getChildren(parentId).then(children => {
-                        let index = findInsertionIndex(src, children)
+                        const index = findInsertionIndex(src, children)
                         console.log("insertion index", index)
                         chrome.bookmarks.move(
                             src.id,
@@ -424,17 +476,17 @@ var TreeView = {
             });
 
             jQuery('#jstree_container').on('select_node.jstree', function (e, data) {
-                var element = e.target;
+                const element = e.target;
                 TreeView.selectedItem = element;
                 if (data.node.type == 'macro') {
                     TreeView.selectedItem.type = "macro";
-                    var div = document.getElementById("imacros-bookmark-div");
+                    const div = document.getElementById("imacros-bookmark-div");
                     if (div.hasAttribute("file_id"))
                         div.removeAttribute("file_id");
                     div.setAttribute("bookmark_id", data.node.id);
                     div.setAttribute("name", data.node.text);
-                    var bookmarklet = data.node.a_attr.bookmarklet;
-                    var m = /var e_m64 = "([^"]+)"/.exec(bookmarklet);
+                    const bookmarklet = data.node.a_attr.bookmarklet;
+                    const m = /var e_m64 = "([^"]+)"/.exec(bookmarklet);
                     if (!m) {
                         console.error("Can not parse bookmarklet " + data.node.text);
                         return;
@@ -454,7 +506,7 @@ var TreeView = {
 
             jQuery('#jstree_container').on('dblclick.jstree', function (e, data) {
 
-                var target_node = jQuery('#jstree_container').jstree(true).get_node(e.target.getAttribute("bookmark_id"));
+                const target_node = jQuery('#jstree_container').jstree(true).get_node(e.target.getAttribute("bookmark_id"));
 
                 if (target_node.type == 'macro') {
                     setTimeout(function () { window.top.play(); }, 200);
