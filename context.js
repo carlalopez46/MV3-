@@ -67,28 +67,28 @@ const context = {
 
     updateState: function (win_id, state) {
         const startFocusGuard = (tabId) => {
-            if (!Number.isInteger(tabId) || !chrome.runtime || !chrome.runtime.sendMessage) return;
-            try {
-                chrome.runtime.sendMessage({
-                    command: 'FOCUS_GUARD_START',
-                    tabId: tabId,
-                    winId: win_id
-                });
-            } catch (e) {
-                console.warn('[iMacros] Failed to start focus guard:', e);
-            }
+            if (!Number.isInteger(tabId) || typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) return;
+            chrome.runtime.sendMessage({
+                command: 'FOCUS_GUARD_START',
+                tabId: tabId,
+                winId: win_id
+            }, () => {
+                if (chrome.runtime.lastError) {
+                    console.warn('[iMacros] Failed to start focus guard:', chrome.runtime.lastError.message);
+                }
+            });
         };
 
         const stopFocusGuard = () => {
-            if (!chrome.runtime || !chrome.runtime.sendMessage) return;
-            try {
-                chrome.runtime.sendMessage({
-                    command: 'FOCUS_GUARD_STOP',
-                    winId: win_id
-                });
-            } catch (e) {
-                console.warn('[iMacros] Failed to stop focus guard:', e);
-            }
+            if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) return;
+            chrome.runtime.sendMessage({
+                command: 'FOCUS_GUARD_STOP',
+                winId: win_id
+            }, () => {
+                if (chrome.runtime.lastError) {
+                    console.warn('[iMacros] Failed to stop focus guard:', chrome.runtime.lastError.message);
+                }
+            });
         };
 
         // set browser action icon
