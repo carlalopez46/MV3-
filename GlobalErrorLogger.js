@@ -457,7 +457,7 @@
         /**
          * エラーの重要度を判定
          */
-        _determineSeverity(message, details = {}) {
+        _determineSeverity(message, _details = {}) {
             const msgLower = (message || '').toLowerCase();
 
             // クリティカル: システムが初期化できない、主要機能が完全に動作しない
