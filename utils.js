@@ -1349,7 +1349,12 @@ var dialogUtils = (function () {
     };
 })();
 
-let cachedManifestVersion = null;
+// Allow utils.js to be evaluated multiple times (e.g., across MV3 contexts)
+// without throwing a SyntaxError for redeclaring the cached version variable.
+// Using `var` keeps the global writable/reusable while preserving the cached
+// value if it was already set in a previous evaluation.
+// eslint-disable-next-line no-var
+var cachedManifestVersion = typeof cachedManifestVersion !== 'undefined' ? cachedManifestVersion : null;
 
 function getSafeManifestVersion() {
     if (cachedManifestVersion) return cachedManifestVersion;
