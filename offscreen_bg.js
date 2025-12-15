@@ -16,6 +16,10 @@ worker via explicit messaging.
 // MacroPlayer pull sources from the chunked VirtualFileService storage.
 const virtualFileService = typeof VirtualFileService === "function" ? new VirtualFileService() : null;
 let vfsReadyPromise = null;
+const VIRTUAL_RUN_HOOK_MAX_ATTEMPTS = 10;
+const VIRTUAL_RUN_HOOK_RETRY_MS = 250;
+let virtualRunHookAttempts = 0;
+let virtualRunHookTimer = null;
 
 async function ensureVirtualFileService() {
     if (!virtualFileService) {
@@ -29,12 +33,12 @@ async function ensureVirtualFileService() {
 
 function installVirtualRunHook() {
     if (!virtualFileService || typeof MacroPlayer === "undefined") {
-        return;
+        return false;
     }
 
     const proto = MacroPlayer.prototype;
     if (proto.loadMacroFile && proto.loadMacroFile.__virtualHookInstalled) {
-        return;
+        return true;
     }
 
     const originalLoader = proto.loadMacroFile;
@@ -57,11 +61,37 @@ function installVirtualRunHook() {
         }
     };
     proto.loadMacroFile.__virtualHookInstalled = true;
+    return true;
 }
 
-// Initialize the virtual RUN hook immediately so MacroPlayer can resolve
-// nested macros from the virtual filesystem without relying on the native host.
-installVirtualRunHook();
+function ensureVirtualRunHookInstalled() {
+    if (installVirtualRunHook()) {
+        if (virtualRunHookTimer) {
+            clearInterval(virtualRunHookTimer);
+            virtualRunHookTimer = null;
+        }
+        return;
+    }
+
+    if (virtualRunHookAttempts >= VIRTUAL_RUN_HOOK_MAX_ATTEMPTS) {
+        return;
+    }
+
+    if (!virtualRunHookTimer) {
+        virtualRunHookTimer = setInterval(() => {
+            virtualRunHookAttempts += 1;
+            if (installVirtualRunHook() || virtualRunHookAttempts >= VIRTUAL_RUN_HOOK_MAX_ATTEMPTS) {
+                clearInterval(virtualRunHookTimer);
+                virtualRunHookTimer = null;
+            }
+        }, VIRTUAL_RUN_HOOK_RETRY_MS);
+    }
+}
+
+// Initialize the virtual RUN hook and, if MacroPlayer is not ready yet, retry a
+// few times to catch late script loads. This keeps the VFS-backed RUN support
+// active regardless of load order.
+ensureVirtualRunHookInstalled();
 
 //
 // Common logic moved to bg_common.js

@@ -53,19 +53,6 @@
   },
   "overrides": [
     {
-      "files": ["**/*"],
-      "excludedFiles": [
-        "AsyncFileIO.js",
-        "VirtualFileService.js",
-        "WindowsPathMappingService.js",
-        "promptDialog.js"
-      ],
-      "rules": {
-        "no-unused-vars": "off",
-        "no-undef": "off"
-      }
-    },
-    {
       "files": ["background.js"],
       "parserOptions": {
         "sourceType": "module"
