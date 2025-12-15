@@ -75,11 +75,38 @@
 ## Known Limitations in MV3
 
 ### 🚫 User-Agent Modification Not Supported
-**Command**: `SET !USERAGENT <value>`  
-**Status**: NOT AVAILABLE IN MV3  
-**Reason**: Chrome security policy prevents extensions from modifying User-Agent headers  
-**Workaround**: None available - this is a platform restriction  
+**Command**: `SET !USERAGENT <value>`
+**Status**: NOT AVAILABLE IN MV3
+**Reason**: Chrome security policy prevents extensions from modifying User-Agent headers
+**Workaround**: None available - this is a platform restriction
 **User Impact**: Macros using `!USERAGENT` will log warnings but continue execution
+
+### ⚠️ Additional MV2 → MV3 Compatibility Risks
+
+#### 1. RUN Command Omission
+**Status**: ❌ NOT IMPLEMENTED IN MV3 ENGINE
+**Impact**: Macros that call `RUN <file>` to chain sub-macros or JavaScript files will fail with an unknown-command error.
+**Notes**: MV2 supported recursive execution by enqueueing the child macro; MV3 `mplayer.js` currently lacks equivalent parsing/dispatch logic.
+
+#### 2. TAG Command – File Upload
+**Status**: ⚠️ REQUIRES DEBUGGER ATTACHMENT
+**Impact**: `TAG ... TYPE=INPUT:FILE CONTENT=...` now relies on the Chrome Debugger API; Chrome shows a "debugging this browser" bar and user cancellation stops the upload.
+**Notes**: This replaces the more permissive MV2 approach and introduces a user-visible permission prompt during playback.
+
+#### 3. SAVEAS Command – Native Messaging Required
+**Status**: ⚠️ DEPENDS ON FILE IO INTERFACE
+**Impact**: Without the native File IO host, `SAVEAS` throws `RuntimeError("SAVEAS requires File IO interface installed", 660)` and stops execution.
+**Notes**: Only `MHT`, `HTM`, `TXT`, `EXTRACT`, `PNG`, and `JPEG` types are supported; legacy formats such as `TYPE=CPL` are not.
+
+#### 4. ONDOWNLOAD Command – CHECKSUM Removed
+**Status**: ⚠️ CHECKSUM PARAMETER UNSUPPORTED
+**Impact**: Specifying `CHECKSUM` triggers an `UnsupportedCommand` error; downloads continue only without integrity validation.
+**Notes**: Direct folder selection beyond the default location also requires the native File IO host due to Chrome download restrictions.
+
+#### 5. SET Command Variables & Dialog Surfacing
+**Status**: ⚠️ BEHAVIOR MAY DIFFER
+**Impact**: Dialog-driven prompts (e.g., `!EXTRACT_TEST_POPUP`) can be blocked or fail to surface in the foreground because MV3 relies on service worker + offscreen windows rather than persistent background pages.
+**Notes**: Encrypted variable handling (`!ENCRYPTION`/`STOREDKEY`) uses a different key-management model from MV2, so previously saved secrets may need re-entry.
 
 ---
 

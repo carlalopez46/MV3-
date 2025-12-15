@@ -10,7 +10,7 @@
             "matches": [
                 "http://*/*",
                 "https://*/*",
-                "file://*"
+                "file:///*"
             ],
             "run_at": "document_start",
             "all_frames": false
@@ -26,7 +26,7 @@
             "matches": [
                 "http://*/*",
                 "https://*/*",
-                "file://*"
+                "file:///*"
             ],
             "run_at": "document_idle",
             "all_frames": true

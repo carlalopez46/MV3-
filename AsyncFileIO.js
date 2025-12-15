@@ -2,6 +2,7 @@
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
 
+/* exported afio */
 // Provides access to files using Native Messaging Host technology with fallback to File System Access API and virtual filesystem
 var afio = (function () {
     'use strict';
@@ -261,7 +262,7 @@ var afio = (function () {
         }
     }
 
-    async function ensureFileSystemAccessInitialized(reason) {
+    async function ensureFileSystemAccessInitialized(_reason) {
         if (backend === BACKEND_FILESYSTEM_ACCESS && fsAccess) {
             // すでに初期化済み
             if (fsAccess.ready) {
