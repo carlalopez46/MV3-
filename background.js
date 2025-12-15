@@ -2166,6 +2166,8 @@ const FocusGuard = (() => {
         enabled = true;
         macroTabId = tabId;
         macroWinId = winId;
+        // Reset throttle so the initial refocus isn't rate-limited by a prior run
+        lastKick = 0;
 
         try {
             await chrome.alarms.clear(FOCUS_GUARD_ALARM);
