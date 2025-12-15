@@ -118,7 +118,9 @@ async function initializeLocalStoragePolyfill() {
 
 const localStorageInitPromise = initializeLocalStoragePolyfill();
 globalThis.localStorageInitPromise = localStorageInitPromise;
-await localStorageInitPromise;
+localStorageInitPromise.catch((err) => {
+    console.warn('[iMacros SW] localStorage init failed:', err);
+});
 
 try {
     importScripts(
@@ -2133,8 +2135,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
 
-    // NOTE: openPanel command is handled by the main handler above (lines 221-302)
-    // Do NOT add duplicate handler here - it causes panel to open twice
+// NOTE: openPanel command is handled by the main handler above (lines 221-302)
+// Do NOT add duplicate handler here - it causes panel to open twice
 
 
 
