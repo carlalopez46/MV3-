@@ -8,9 +8,11 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // Give the background/offscreen worker enough time to register dialog args
 // before abandoning the prompt. The offscreen handler retries for ~6 seconds,
 // so mirror that window here to avoid closing the dialog prematurely.
+const RETRY_DELAY_MS = 200;
+const DIALOG_ARGS_RETRY_WINDOW_MS = 6000;
 const DIALOG_ARGS_RETRY_WINDOW_MS = 6000;
 const RETRY_DELAY_MS = 200;
-const MAX_RETRY_ATTEMPTS = Math.ceil(DIALOG_ARGS_RETRY_WINDOW_MS / RETRY_DELAY_MS);
+const MAX_RETRY_ATTEMPTS = DIALOG_ARGS_RETRY_WINDOW_MS / RETRY_DELAY_MS;
 
 let promptInput = null;
 let okButton = null;
