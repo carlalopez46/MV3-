@@ -507,7 +507,7 @@ chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
     forwardToOffscreen({
         type: 'TAB_DETACHED',
         tabId: tabId,
-        detachInfo: detachInfo
+        attachInfo: detachInfo
     }).catch((error) => logForwardingError('TAB_DETACHED', error));
 });
 
@@ -1996,8 +1996,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 });
 
-// Forward tab update events to Offscreen Document for macro player
-
 // Global notification click listener
 chrome.notifications.onClicked.addListener(function (n_id) {
     console.log('[iMacros SW] Notification clicked:', n_id);
@@ -2275,11 +2273,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 });
 
+/**
+ * ★修正点:
+ *  - ここから下の FocusGuard イベントリスナーは「この一箇所だけ」で登録
+ *  - ensureForeground / handleTabRemoved の未処理 Promise を避けるため .catch を追加
+ *  - 末尾の重複 “Focus Guard Integration” ブロックは削除（マージコンフリクトも同時に解消）
+ */
 chrome.tabs.onActivated.addListener((info) => {
     const state = FocusGuard.getState();
     if (!state.enabled) return;
     if (info.tabId !== state.tabId) {
-        FocusGuard.ensureForeground('tabs.onActivated');
+        FocusGuard.ensureForeground('tabs.onActivated').catch((err) => {
+            console.warn('[iMacros SW] FocusGuard ensureForeground failed (tabs.onActivated):', err);
+        });
     }
 });
 
@@ -2288,17 +2294,23 @@ chrome.windows.onFocusChanged.addListener((winId) => {
     if (!state.enabled) return;
     if (winId === chrome.windows.WINDOW_ID_NONE) return;
     if (winId !== state.winId) {
-        FocusGuard.ensureForeground('windows.onFocusChanged');
+        FocusGuard.ensureForeground('windows.onFocusChanged').catch((err) => {
+            console.warn('[iMacros SW] FocusGuard ensureForeground failed (windows.onFocusChanged):', err);
+        });
     }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-    FocusGuard.handleTabRemoved(tabId);
+    FocusGuard.handleTabRemoved(tabId).catch((err) => {
+        console.warn('[iMacros SW] FocusGuard handleTabRemoved failed:', err);
+    });
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm && alarm.name === FOCUS_GUARD_ALARM) {
-        FocusGuard.ensureForeground('alarm');
+        FocusGuard.ensureForeground('alarm').catch((err) => {
+            console.warn('[iMacros SW] FocusGuard ensureForeground failed (alarm):', err);
+        });
     }
 });
 
@@ -2368,7 +2380,6 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
 // Handle the runMacroByUrl command in the message listener
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
-
     if (msg.command === 'runMacroByUrl' && msg.target === 'background') {
         // Forward to offscreen document
         sendMessageToOffscreen({
@@ -2396,58 +2407,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return false;
     }
 
-
     // NOTE: openPanel command is handled by the main handler above.
     // Do NOT add duplicate handler here - it causes panel to open twice
 
-
-
     return false;
 });
-
-// NOTE: MessagingBus class is defined in mv3_messaging_bus.js (imported via importScripts)
-/* global FocusGuard, FOCUS_GUARD_ALARM, chrome */
-
-// =============================================================================
-// Focus Guard Integration
-// =============================================================================
-if (typeof FocusGuard !== 'undefined' && typeof FocusGuard.getState === 'function' && typeof FocusGuard.ensureForeground === 'function') {
-    const focusGuardAlarmName = (typeof FOCUS_GUARD_ALARM !== 'undefined') ? FOCUS_GUARD_ALARM : null;
-    const getEnabledFocusState = () => {
-        const state = FocusGuard.getState();
-        return (state && state.enabled) ? state : null;
-    };
-
-    chrome.tabs.onActivated.addListener((info) => {
-        const state = getEnabledFocusState();
-        if (!state) return;
-
-        if (info.tabId !== state.tabId) {
-            FocusGuard.ensureForeground('tabs.onActivated').catch((err) => {
-                console.warn('[iMacros SW] FocusGuard ensureForeground failed (tabs.onActivated):', err);
-            });
-        }
-    });
-
-    chrome.windows.onFocusChanged.addListener((winId) => {
-        const state = getEnabledFocusState();
-        if (!state) return;
-        if (winId === chrome.windows.WINDOW_ID_NONE) return;
-        if (winId !== state.winId) {
-            FocusGuard.ensureForeground('windows.onFocusChanged').catch((err) => {
-                console.warn('[iMacros SW] FocusGuard ensureForeground failed (windows.onFocusChanged):', err);
-            });
-        }
-    });
-
-  chrome.alarms.onAlarm.addListener((alarm) => {
-    const state = getEnabledFocusState();
-    if (!state) return;
-
-    if (alarm && focusGuardAlarmName && alarm.name === focusGuardAlarmName) {
-        FocusGuard.ensureForeground('alarm').catch((err) => {
-            console.warn('[iMacros SW] FocusGuard ensureForeground failed (alarm):', err);
-        });
-    }
-});
-
