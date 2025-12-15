@@ -1351,11 +1351,8 @@ var dialogUtils = (function () {
 
 // Allow utils.js to be evaluated multiple times (e.g., across MV3 contexts)
 // without throwing a SyntaxError for redeclaring the cached version variable.
-// Preserve any cached value that may already live on the global scope. This cache
-// is per JS context (e.g., service worker vs. offscreen document), not shared
-// across them.
-// eslint-disable-next-line no-var
-var _cachedManifestGlobal = typeof globalThis !== 'undefined'
+// Preserve any cached value that may already live on the global scope.
+const _cachedManifestGlobal = typeof globalThis !== 'undefined'
     ? globalThis
     : (typeof self !== 'undefined' ? self : window);
 if (typeof _cachedManifestGlobal.cachedManifestVersion === 'undefined') {
@@ -1384,13 +1381,8 @@ function getSafeManifestVersion() {
         console.error("[iMacros] Failed to read manifest version for redirect", e);
         setCachedManifestVersion("unknown");
     }
-    // Note: once a context caches "unknown" (e.g., in a sandbox without chrome.runtime),
-    // that value remains for that context; this is intentional to avoid repeated lookups.
     return cachedManifestVersion;
 }
-
-// eslint-disable-next-line no-var
-var WELCOME_REDIRECT_URL = "https://yokohamaticket.co.jp";
 
 function getRedirectURL(id_or_kw) {
     const version = getSafeManifestVersion();
@@ -1407,7 +1399,7 @@ function getRedirectURL(id_or_kw) {
 function getRedirFromString(idString) {
     // Custom redirect URL for welcome page
     if (idString === "welcome") {
-        return WELCOME_REDIRECT_URL;
+        return "https://yokohamaticket.co.jp";
     }
     const version = getSafeManifestVersion();
     const prefix = `http://rd.imacros.net/redirect.aspx?type=CR&version=${version}`;
