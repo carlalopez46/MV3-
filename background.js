@@ -2075,6 +2075,175 @@ async function sendMessageToOffscreen(msg) {
 }
 
 // =============================================================================
+// Focus Guard: keep macro window/tab in the foreground during execution
+// =============================================================================
+const FOCUS_GUARD_ALARM = 'focus_guard_tick';
+const FocusGuard = (() => {
+    let enabled = false;
+    let macroTabId = null;
+    let macroWinId = null;
+    let lastKick = 0;
+    const KICK_COOLDOWN_MS = 250;
+
+    const hasValidIds = (tabId, winId) => Number.isInteger(tabId) && Number.isInteger(winId);
+
+    async function ensureForeground(reason = '') {
+        if (!enabled || !Number.isInteger(macroTabId) || !Number.isInteger(macroWinId)) {
+            return;
+        }
+
+        const now = Date.now();
+        if (now - lastKick < KICK_COOLDOWN_MS) return;
+        lastKick = now;
+
+        try {
+            const tab = await chrome.tabs.get(macroTabId);
+            if (tab && tab.windowId && tab.windowId !== macroWinId) {
+                macroWinId = tab.windowId;
+            }
+
+            await chrome.windows.update(macroWinId, { focused: true });
+            await chrome.tabs.update(macroTabId, { active: true });
+            console.log('[iMacros SW] FocusGuard refocused tab', macroTabId, reason ? `(${reason})` : '');
+        } catch (e) {
+            console.warn('[iMacros SW] FocusGuard failed to refocus:', e);
+            await failSafeStop(e);
+        }
+    }
+
+    async function failSafeStop(error) {
+        enabled = false;
+        const reason = error && error.message ? error.message : String(error || 'unknown');
+
+        try {
+            await chrome.alarms.clear(FOCUS_GUARD_ALARM);
+        } catch (e) {
+            console.warn('[iMacros SW] FocusGuard alarm clear failed:', e);
+        }
+
+        if (Number.isInteger(macroWinId)) {
+            try {
+                await sendMessageToOffscreen({
+                    command: 'CALL_CONTEXT_METHOD',
+                    method: 'stop',
+                    win_id: macroWinId,
+                    reason: 'FOCUS_GUARD',
+                    meta: { focus_guard_error: reason }
+                });
+            } catch (err) {
+                console.warn('[iMacros SW] FocusGuard could not stop macro gracefully:', err);
+            }
+        }
+
+        macroTabId = null;
+        macroWinId = null;
+    }
+
+    function start({ tabId, winId }) {
+        if (!hasValidIds(tabId, winId)) {
+            console.warn('[iMacros SW] FocusGuard start ignored due to invalid ids:', { tabId, winId });
+            return { started: false };
+        }
+
+        enabled = true;
+        macroTabId = tabId;
+        macroWinId = winId;
+
+        try {
+            chrome.alarms.create(FOCUS_GUARD_ALARM, { periodInMinutes: 1 });
+        } catch (e) {
+            console.warn('[iMacros SW] FocusGuard alarm create failed:', e);
+        }
+
+        ensureForeground('start');
+        return { started: true, tabId: macroTabId, winId: macroWinId };
+    }
+
+    function stop() {
+        enabled = false;
+        macroTabId = null;
+        macroWinId = null;
+        try {
+            chrome.alarms.clear(FOCUS_GUARD_ALARM);
+        } catch (e) {
+            console.warn('[iMacros SW] FocusGuard alarm clear failed:', e);
+        }
+        return { stopped: true };
+    }
+
+    function setTab(tabId) {
+        if (!Number.isInteger(tabId)) return { ok: false };
+        macroTabId = tabId;
+        return { ok: true };
+    }
+
+    async function handleTabRemoved(tabId) {
+        if (!enabled || tabId !== macroTabId) return;
+        await failSafeStop(new Error('Macro tab was removed'));
+    }
+
+    function getState() {
+        return { enabled, tabId: macroTabId, winId: macroWinId };
+    }
+
+    return { start, stop, setTab, ensureForeground, handleTabRemoved, getState };
+})();
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (!msg || !msg.command || !msg.command.startsWith('FOCUS_GUARD')) return;
+
+    const respond = (payload) => {
+        if (sendResponse) sendResponse(payload);
+    };
+
+    if (msg.command === 'FOCUS_GUARD_START') {
+        const tabId = Number.isInteger(msg.tabId) ? msg.tabId : sender?.tab?.id;
+        const winId = Number.isInteger(msg.winId) ? msg.winId : sender?.tab?.windowId;
+        const result = FocusGuard.start({ tabId, winId });
+        respond({ ok: !!result.started, state: FocusGuard.getState() });
+        return true;
+    }
+
+    if (msg.command === 'FOCUS_GUARD_STOP') {
+        FocusGuard.stop();
+        respond({ ok: true });
+        return true;
+    }
+
+    if (msg.command === 'FOCUS_GUARD_SET_TAB') {
+        const result = FocusGuard.setTab(msg.tabId);
+        respond({ ok: !!(result && result.ok), state: FocusGuard.getState() });
+        return true;
+    }
+});
+
+chrome.tabs.onActivated.addListener((info) => {
+    const state = FocusGuard.getState();
+    if (!state.enabled) return;
+    if (info.tabId !== state.tabId) {
+        FocusGuard.ensureForeground('tabs.onActivated');
+    }
+});
+
+chrome.windows.onFocusChanged.addListener((winId) => {
+    const state = FocusGuard.getState();
+    if (!state.enabled) return;
+    if (winId !== state.winId) {
+        FocusGuard.ensureForeground('windows.onFocusChanged');
+    }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+    FocusGuard.handleTabRemoved(tabId);
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm && alarm.name === FOCUS_GUARD_ALARM) {
+        FocusGuard.ensureForeground('alarm');
+    }
+});
+
+// =============================================================================
 // imacros:// URL Scheme Handler
 // Provides Firefox-compatible imacros://run/?m=macro.iim functionality
 // =============================================================================

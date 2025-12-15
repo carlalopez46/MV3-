@@ -128,6 +128,21 @@ function MacroPlayer(win_id) {
     }
 }
 
+MacroPlayer.prototype._updateFocusGuardTab = function (tabId) {
+    if (!Number.isInteger(tabId) || !chrome.runtime || !chrome.runtime.sendMessage) {
+        return;
+    }
+    try {
+        chrome.runtime.sendMessage({
+            command: 'FOCUS_GUARD_SET_TAB',
+            tabId: tabId,
+            winId: this.win_id
+        });
+    } catch (e) {
+        console.warn('[MacroPlayer] Failed to notify focus guard:', e);
+    }
+};
+
 /**
  * Build list of candidate macro paths to try when resolving a macro name.
  * Tries with .iim extension first, then raw name (if not already has extension).
@@ -3807,6 +3822,7 @@ MacroPlayer.prototype.ActionTable["tab"] = function (cmd) {
                         // Immediately update tab_id to ensure subsequent commands use the correct tab
                         // even if the onTabActivated event hasn't arrived yet.
                         this.tab_id = tabs[tab_num].id;
+                        this._updateFocusGuardTab(this.tab_id);
                         this.next("TAB T=")
                     }
                 ))
@@ -4006,6 +4022,8 @@ MacroPlayer.prototype.reset = function () {
                 this.currentURL = "";
                 this.tab_id = null;
             }
+
+            this._updateFocusGuardTab(this.tab_id);
 
             // test for afio
             afio.isInstalled().then(installed => {
