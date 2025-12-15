@@ -507,7 +507,7 @@ chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
     forwardToOffscreen({
         type: 'TAB_DETACHED',
         tabId: tabId,
-        detachInfo: detachInfo
+        attachInfo: detachInfo
     }).catch((error) => logForwardingError('TAB_DETACHED', error));
 });
 
@@ -2441,6 +2441,9 @@ if (typeof FocusGuard !== 'undefined' && typeof FocusGuard.getState === 'functio
     });
 
     chrome.alarms.onAlarm.addListener((alarm) => {
+        const state = getEnabledFocusState();
+        if (!state) return;
+
         if (alarm && focusGuardAlarmName && alarm.name === focusGuardAlarmName) {
             FocusGuard.ensureForeground('alarm').catch((err) => {
                 console.warn('[iMacros SW] FocusGuard ensureForeground failed (alarm):', err);
