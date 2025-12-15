@@ -22,11 +22,12 @@ window.updatePanels = function () {
         for (var x in context) {
             var panel = context[x].panelWindow;
             if (panel && !panel.closed) {
-                // Ensure we access the iframe correctly. 
-                // Note: panelWindow is the window object of panel.html
-                var treeFrame = panel.frames["tree-iframe"];
-                if (treeFrame && treeFrame.contentDocument) {
-                    treeFrame.contentDocument.defaultView.location.reload();
+                // Locate the tree iframe by id (name is not set in panel.html)
+                var iframeEl = panel.document && panel.document.getElementById('tree-iframe');
+                var treeFrame = iframeEl ? iframeEl.contentWindow : null;
+
+                if (treeFrame && treeFrame.document) {
+                    treeFrame.location.reload();
                 }
             }
         }
