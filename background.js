@@ -2139,10 +2139,18 @@ const FocusGuard = (() => {
         macroWinId = null;
     }
 
-    function start({ tabId, winId }) {
+    async function start({ tabId, winId }) {
         if (!hasValidIds(tabId, winId)) {
             console.warn('[iMacros SW] FocusGuard start ignored due to invalid ids:', { tabId, winId });
             return { started: false };
+        }
+
+        if (enabled) {
+            // If we're already protecting the same target, keep running; otherwise reset cleanly
+            if (macroTabId === tabId && macroWinId === winId) {
+                return { started: true, tabId: macroTabId, winId: macroWinId };
+            }
+            stop();
         }
 
         enabled = true;
@@ -2150,7 +2158,14 @@ const FocusGuard = (() => {
         macroWinId = winId;
 
         try {
-            chrome.alarms.create(FOCUS_GUARD_ALARM, { periodInMinutes: 1 });
+            await chrome.alarms.clear(FOCUS_GUARD_ALARM);
+        } catch (e) {
+            console.warn('[iMacros SW] FocusGuard alarm clear failed:', e);
+        }
+
+        try {
+            // Use a ~1 second interval for faster recovery; Chrome may clamp to its minimum internally
+            chrome.alarms.create(FOCUS_GUARD_ALARM, { periodInMinutes: 0.016667 });
         } catch (e) {
             console.warn('[iMacros SW] FocusGuard alarm create failed:', e);
         }
@@ -2171,10 +2186,26 @@ const FocusGuard = (() => {
         return { stopped: true };
     }
 
-    function setTab(tabId) {
-        if (!Number.isInteger(tabId)) return { ok: false };
-        macroTabId = tabId;
-        return { ok: true };
+    async function setTab(tabId) {
+        if (tabId == null) {
+            macroTabId = null;
+            macroWinId = null;
+            return { ok: true, cleared: true };
+        }
+
+        if (!enabled || !Number.isInteger(tabId)) return { ok: false };
+
+        try {
+            const tab = await chrome.tabs.get(tabId);
+            macroTabId = tabId;
+            if (tab && Number.isInteger(tab.windowId)) {
+                macroWinId = tab.windowId;
+            }
+            return { ok: true, tabId: macroTabId, winId: macroWinId };
+        } catch (e) {
+            console.warn('[iMacros SW] FocusGuard setTab failed:', e);
+            return { ok: false, error: e };
+        }
     }
 
     async function handleTabRemoved(tabId) {
@@ -2190,7 +2221,7 @@ const FocusGuard = (() => {
 })();
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (!msg || !msg.command || !msg.command.startsWith('FOCUS_GUARD')) return;
+    if (!msg || !msg.command || !msg.command.startsWith('FOCUS_GUARD')) return false;
 
     const respond = (payload) => {
         if (sendResponse) sendResponse(payload);
@@ -2199,8 +2230,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.command === 'FOCUS_GUARD_START') {
         const tabId = Number.isInteger(msg.tabId) ? msg.tabId : sender?.tab?.id;
         const winId = Number.isInteger(msg.winId) ? msg.winId : sender?.tab?.windowId;
-        const result = FocusGuard.start({ tabId, winId });
-        respond({ ok: !!result.started, state: FocusGuard.getState() });
+        FocusGuard.start({ tabId, winId }).then((result) => {
+            respond({ ok: !!result.started, state: FocusGuard.getState() });
+        }).catch((err) => {
+            console.warn('[iMacros SW] FocusGuard start failed:', err);
+            respond({ ok: false, error: String(err) });
+        });
         return true;
     }
 
@@ -2211,8 +2246,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     if (msg.command === 'FOCUS_GUARD_SET_TAB') {
-        const result = FocusGuard.setTab(msg.tabId);
-        respond({ ok: !!(result && result.ok), state: FocusGuard.getState() });
+        FocusGuard.setTab(msg.tabId).then((result) => {
+            respond({ ok: !!(result && result.ok), state: FocusGuard.getState() });
+        }).catch((err) => {
+            console.warn('[iMacros SW] FocusGuard setTab failed:', err);
+            respond({ ok: false, error: String(err) });
+        });
         return true;
     }
 });
@@ -2228,6 +2267,7 @@ chrome.tabs.onActivated.addListener((info) => {
 chrome.windows.onFocusChanged.addListener((winId) => {
     const state = FocusGuard.getState();
     if (!state.enabled) return;
+    if (winId === chrome.windows.WINDOW_ID_NONE) return;
     if (winId !== state.winId) {
         FocusGuard.ensureForeground('windows.onFocusChanged');
     }

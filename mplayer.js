@@ -129,13 +129,17 @@ function MacroPlayer(win_id) {
 }
 
 MacroPlayer.prototype._updateFocusGuardTab = function (tabId) {
-    if (!Number.isInteger(tabId) || !chrome.runtime || !chrome.runtime.sendMessage) {
+    if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
         return;
     }
+
+    // Allow null/undefined to clear the guard's tracked tab after reset
+    const safeTabId = Number.isInteger(tabId) ? tabId : null;
+
     try {
         chrome.runtime.sendMessage({
             command: 'FOCUS_GUARD_SET_TAB',
-            tabId: tabId,
+            tabId: safeTabId,
             winId: this.win_id
         });
     } catch (e) {
