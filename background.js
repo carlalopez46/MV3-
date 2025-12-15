@@ -145,6 +145,23 @@ try {
     throw e;
 }
 
+function loadBackgroundModules() {
+    try {
+        // These modules rely on hydrated localStorage and register critical globals
+        // required by offscreen_bg.js (context, communicator, nm_connector, etc.).
+        importScripts(
+            'context.js',
+            'communicator.js',
+            'nm_connector.js',
+            'bg.js'
+        );
+        console.log('[iMacros SW] Background modules loaded successfully after localStorage init');
+    } catch (e) {
+        console.error('[iMacros SW] Failed to load deferred background modules:', e);
+        throw e;
+    }
+}
+
 localStorageInitPromise
     .then(() => {
         loadBackgroundModules();
