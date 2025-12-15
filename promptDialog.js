@@ -5,7 +5,10 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // Custom prompt function
 // as alternative for JavaScript prompt()
 
-const MAX_RETRY_ATTEMPTS = 15;
+// Give the background/offscreen worker enough time to register dialog args
+// before abandoning the prompt. The offscreen handler retries for ~6 seconds,
+// so mirror that window here to avoid closing the dialog prematurely.
+const MAX_RETRY_ATTEMPTS = 30;
 const RETRY_DELAY_MS = 200;
 
 let promptInput = null;
