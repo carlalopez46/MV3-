@@ -39,7 +39,7 @@ function sendResponse(response) {
     });
 }
 
-function getArguments(windowId, callback) {
+function getArguments(windowId, callback, attemptsLeft = 15) {
     // MV3 compatible: Use chrome.runtime.sendMessage instead of getBackgroundPage
     chrome.runtime.sendMessage({
         type: 'GET_DIALOG_ARGS',
@@ -47,12 +47,21 @@ function getArguments(windowId, callback) {
     }, function (result) {
         if (chrome.runtime.lastError) {
             console.error("[iMacros] Failed to get dialog args:", chrome.runtime.lastError.message);
-            callback(null);
+            // Retry to handle race where dialog args are not yet registered
+            if (attemptsLeft > 0) {
+                setTimeout(() => getArguments(windowId, callback, attemptsLeft - 1), 200);
+            } else {
+                callback(null);
+            }
             return;
         }
         if (!result || !result.success) {
             console.error("[iMacros] Background failed to get dialog args:", result?.error);
-            callback(null);
+            if (attemptsLeft > 0) {
+                setTimeout(() => getArguments(windowId, callback, attemptsLeft - 1), 200);
+            } else {
+                callback(null);
+            }
             return;
         }
         callback(result.args);
