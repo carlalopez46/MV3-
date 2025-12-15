@@ -136,16 +136,20 @@ MacroPlayer.prototype._updateFocusGuardTab = function (tabId) {
     // Allow null/undefined to clear the guard's tracked tab after reset
     const safeTabId = Number.isInteger(tabId) ? tabId : null;
 
-    chrome.runtime.sendMessage({
-        command: 'FOCUS_GUARD_SET_TAB',
-        tabId: safeTabId,
-        winId: this.win_id
-    }, () => {
-        if (chrome.runtime.lastError) {
-            console.warn('[MacroPlayer] Failed to notify focus guard:', chrome.runtime.lastError.message);
-        }
-    });
-};
+    try {
+        chrome.runtime.sendMessage({
+            command: 'FOCUS_GUARD_SET_TAB',
+            tabId: safeTabId,
+            winId: this.win_id
+        }, () => {
+            if (chrome.runtime.lastError) {
+                console.warn('[MacroPlayer] Failed to notify focus guard:', chrome.runtime.lastError.message);
+            }
+        });
+    } catch (err) {
+        console.warn('[MacroPlayer] Focus guard notification threw synchronously:', err);
+    }
+  };
 
 /**
  * Build list of candidate macro paths to try when resolving a macro name.

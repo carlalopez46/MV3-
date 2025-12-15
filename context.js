@@ -68,27 +68,35 @@ const context = {
     updateState: function (win_id, state) {
         const startFocusGuard = (tabId) => {
             if (!Number.isInteger(tabId) || typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) return;
-            chrome.runtime.sendMessage({
-                command: 'FOCUS_GUARD_START',
-                tabId: tabId,
-                winId: win_id
-            }, () => {
-                if (chrome.runtime.lastError) {
-                    console.warn('[iMacros] Failed to start focus guard:', chrome.runtime.lastError.message);
-                }
-            });
+            try {
+                chrome.runtime.sendMessage({
+                    command: 'FOCUS_GUARD_START',
+                    tabId: tabId,
+                    winId: win_id
+                }, () => {
+                    if (chrome.runtime.lastError) {
+                        console.warn('[iMacros] Failed to start focus guard:', chrome.runtime.lastError.message);
+                    }
+                });
+            } catch (err) {
+                console.warn('[iMacros] Focus guard start threw synchronously:', err);
+            }
         };
 
         const stopFocusGuard = () => {
             if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) return;
-            chrome.runtime.sendMessage({
-                command: 'FOCUS_GUARD_STOP',
-                winId: win_id
-            }, () => {
-                if (chrome.runtime.lastError) {
-                    console.warn('[iMacros] Failed to stop focus guard:', chrome.runtime.lastError.message);
-                }
-            });
+            try {
+                chrome.runtime.sendMessage({
+                    command: 'FOCUS_GUARD_STOP',
+                    winId: win_id
+                }, () => {
+                    if (chrome.runtime.lastError) {
+                        console.warn('[iMacros] Failed to stop focus guard:', chrome.runtime.lastError.message);
+                    }
+                });
+            } catch (err) {
+                console.warn('[iMacros] Focus guard stop threw synchronously:', err);
+            }
         };
 
         // set browser action icon
