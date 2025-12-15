@@ -116,12 +116,20 @@ async function initializeLocalStoragePolyfill() {
     }
 }
 
+// NOTE: MV3 background scripts run as classic service workers, so top-level
+// await is forbidden. Expose the initialization promise instead; any module
+// that needs hydrated storage on startup should await
+// globalThis.localStorageInitPromise within its own async flow.
 const localStorageInitPromise = initializeLocalStoragePolyfill();
 globalThis.localStorageInitPromise = localStorageInitPromise;
 localStorageInitPromise.catch((err) => {
     console.warn('[iMacros SW] localStorage init failed:', err);
 });
 
+// NOTE: These imports must remain synchronous because code below instantiates
+// globals such as MessagingBus/ExecutionStateMachine at top level. Deferring
+// imports would trigger ReferenceError before the service worker finishes
+// evaluating.
 try {
     importScripts(
         'utils.js',
@@ -136,7 +144,7 @@ try {
         'mv3_state_machine.js'
     );
 } catch (e) {
-    console.error('Failed to import scripts:', e);
+    console.error('[iMacros SW] Failed to import background modules:', e);
     throw e;
 }
 
@@ -2135,8 +2143,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
 
-// NOTE: openPanel command is handled by the main handler above (lines 221-302)
-// Do NOT add duplicate handler here - it causes panel to open twice
+    // NOTE: openPanel command is handled by the main handler above.
+    // Do NOT add duplicate handler here - it causes panel to open twice
 
 
 
