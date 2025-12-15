@@ -47,11 +47,26 @@
     "no-eval": "error",
     "no-new-func": "warn",
     "no-implied-eval": "error",
-    "no-unused-vars": "off",
-    "no-undef": "off",
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "no-undef": "warn",
     "no-prototype-builtins": "warn"
   },
   "overrides": [
+    {
+      "files": ["promptDialog.js"],
+      "rules": {
+        "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+        "no-undef": "warn"
+      }
+    },
+    {
+      "files": ["**/*"],
+      "excludedFiles": ["promptDialog.js"],
+      "rules": {
+        "no-unused-vars": "off",
+        "no-undef": "off"
+      }
+    },
     {
       "files": ["background.js"],
       "parserOptions": {
