@@ -150,6 +150,9 @@ function loadBackgroundModules() {
         // These modules rely on hydrated localStorage and register critical globals
         // required by offscreen_bg.js (context, communicator, nm_connector, etc.).
         importScripts(
+            'rijndael.js',
+            'mplayer.js',
+            'mrecorder.js',
             'context.js',
             'communicator.js',
             'nm_connector.js',
