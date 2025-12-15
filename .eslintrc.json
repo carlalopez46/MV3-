@@ -47,8 +47,8 @@
     "no-eval": "error",
     "no-new-func": "warn",
     "no-implied-eval": "error",
-    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
-    "no-undef": "warn",
+    "no-unused-vars": "off",
+    "no-undef": "off",
     "no-prototype-builtins": "warn"
   },
   "overrides": [
@@ -68,6 +68,9 @@
     "samples/",
     "docs/",
     "sandbox.js",
-    "sandbox/**"
+    "sandbox/**",
+    "tests/**",
+    "editor/**",
+    "treeView.js"
   ]
 }

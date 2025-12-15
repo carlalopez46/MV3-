@@ -170,7 +170,7 @@ class WindowsPathMappingService {
         }
 
         try {
-            const db = await this._initDB();
+            await this._initDB();
 
             // 保存されたすべてのマッピングを読み込み
             const mappings = await this._loadAllMappings();
