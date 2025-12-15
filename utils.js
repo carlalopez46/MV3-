@@ -1369,6 +1369,7 @@ function setCachedManifestVersion(version) {
 
 function getSafeManifestVersion() {
     if (cachedManifestVersion) return cachedManifestVersion;
+    const globalScope = _cachedManifestGlobal;
     try {
         if (chrome && chrome.runtime && typeof chrome.runtime.getManifest === "function") {
             setCachedManifestVersion(chrome.runtime.getManifest().version || "unknown");
