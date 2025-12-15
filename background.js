@@ -2150,7 +2150,7 @@ const FocusGuard = (() => {
             if (macroTabId === tabId && macroWinId === winId) {
                 return { started: true, tabId: macroTabId, winId: macroWinId };
             }
-            stop();
+            await stop();
         }
 
         enabled = true;
@@ -2164,8 +2164,8 @@ const FocusGuard = (() => {
         }
 
         try {
-            // Use a ~1 second interval for faster recovery; Chrome may clamp to its minimum internally
-            chrome.alarms.create(FOCUS_GUARD_ALARM, { periodInMinutes: 0.016667 });
+            // Chrome MV3 minimum interval is ~30s (0.5 minutes); alarm is a keepalive safety net
+            chrome.alarms.create(FOCUS_GUARD_ALARM, { periodInMinutes: 0.5 });
         } catch (e) {
             console.warn('[iMacros SW] FocusGuard alarm create failed:', e);
         }
@@ -2174,12 +2174,12 @@ const FocusGuard = (() => {
         return { started: true, tabId: macroTabId, winId: macroWinId };
     }
 
-    function stop() {
+    async function stop() {
         enabled = false;
         macroTabId = null;
         macroWinId = null;
         try {
-            chrome.alarms.clear(FOCUS_GUARD_ALARM);
+            await chrome.alarms.clear(FOCUS_GUARD_ALARM);
         } catch (e) {
             console.warn('[iMacros SW] FocusGuard alarm clear failed:', e);
         }
@@ -2188,6 +2188,9 @@ const FocusGuard = (() => {
 
     async function setTab(tabId) {
         if (tabId == null) {
+            if (enabled) {
+                return await stop();
+            }
             macroTabId = null;
             macroWinId = null;
             return { ok: true, cleared: true };
@@ -2240,8 +2243,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     if (msg.command === 'FOCUS_GUARD_STOP') {
-        FocusGuard.stop();
-        respond({ ok: true });
+        FocusGuard.stop().then((result) => {
+            respond({ ok: true, state: FocusGuard.getState(), result });
+        }).catch((err) => {
+            console.warn('[iMacros SW] FocusGuard stop failed:', err);
+            respond({ ok: false, error: String(err) });
+        });
         return true;
     }
 
