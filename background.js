@@ -1,7 +1,7 @@
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
-const _LOCALSTORAGE_PREFIX = '__imacros_ls__:';
+const LOCALSTORAGE_PREFIX = '__imacros_ls__:';
 
 function createLocalStoragePolyfill(cache, prefix) {
     return {
@@ -93,8 +93,8 @@ async function initializeLocalStoragePolyfill() {
 
             let hydratedCount = 0;
             Object.keys(items).forEach((storageKey) => {
-                if (storageKey.indexOf(_LOCALSTORAGE_PREFIX) !== 0) return;
-                const key = storageKey.slice(_LOCALSTORAGE_PREFIX.length);
+                if (storageKey.indexOf(LOCALSTORAGE_PREFIX) !== 0) return;
+                const key = storageKey.slice(LOCALSTORAGE_PREFIX.length);
                 cache[key] = String(items[storageKey]);
                 hydratedCount++;
             });
@@ -106,13 +106,13 @@ async function initializeLocalStoragePolyfill() {
         }
     }
 
-    const polyfill = createLocalStoragePolyfill(cache, _LOCALSTORAGE_PREFIX);
+    const polyfill = createLocalStoragePolyfill(cache, LOCALSTORAGE_PREFIX);
     polyfill.__isHydratedPolyfill = true;
 
     if (typeof globalThis !== 'undefined') {
         globalThis.localStorage = polyfill;
         globalThis._localStorageData = cache;
-        globalThis._LOCALSTORAGE_PREFIX = _LOCALSTORAGE_PREFIX;
+        globalThis._LOCALSTORAGE_PREFIX = LOCALSTORAGE_PREFIX;
     }
 }
 
