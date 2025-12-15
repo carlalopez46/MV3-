@@ -49,6 +49,7 @@ function getArguments(windowId, callback, attemptsLeft = 15) {
             console.error("[iMacros] Failed to get dialog args:", chrome.runtime.lastError.message);
             // Retry to handle race where dialog args are not yet registered
             if (attemptsLeft > 0) {
+                console.log(`[iMacros] Retrying getArguments (${16 - attemptsLeft}/15)...`);
                 setTimeout(() => getArguments(windowId, callback, attemptsLeft - 1), 200);
             } else {
                 callback(null);
@@ -58,6 +59,7 @@ function getArguments(windowId, callback, attemptsLeft = 15) {
         if (!result || !result.success) {
             console.error("[iMacros] Background failed to get dialog args:", result?.error);
             if (attemptsLeft > 0) {
+                console.log(`[iMacros] Retrying getArguments (${16 - attemptsLeft}/15)...`);
                 setTimeout(() => getArguments(windowId, callback, attemptsLeft - 1), 200);
             } else {
                 callback(null);
