@@ -2178,11 +2178,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // NOTE: MessagingBus class is defined in mv3_messaging_bus.js (imported via importScripts)
+/* global FocusGuard, FOCUS_GUARD_ALARM, chrome */
 
 // =============================================================================
 // Focus Guard Integration
 // =============================================================================
 if (typeof FocusGuard !== 'undefined' && typeof FocusGuard.getState === 'function' && typeof FocusGuard.ensureForeground === 'function') {
+    const focusGuardAlarmName = (typeof FOCUS_GUARD_ALARM !== 'undefined') ? FOCUS_GUARD_ALARM : null;
+
     chrome.tabs.onActivated.addListener((info) => {
         const state = FocusGuard.getState();
         if (!state || !state.enabled) return;
@@ -2205,8 +2208,7 @@ if (typeof FocusGuard !== 'undefined' && typeof FocusGuard.getState === 'functio
     });
 
     chrome.alarms.onAlarm.addListener((alarm) => {
-        const alarmName = (typeof FOCUS_GUARD_ALARM !== 'undefined') ? FOCUS_GUARD_ALARM : null;
-        if (alarm && alarmName && alarm.name === alarmName) {
+        if (alarm && focusGuardAlarmName && alarm.name === focusGuardAlarmName) {
             FocusGuard.ensureForeground('alarm').catch((err) => {
                 console.warn('[iMacros SW] FocusGuard ensureForeground failed (alarm):', err);
             });
