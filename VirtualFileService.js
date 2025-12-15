@@ -346,6 +346,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
                     if (parts.length > 0) {
                         parts.pop();
                     }
+                    // Ignore attempts to traverse beyond the root directory
                     return;
                 }
                 parts.push(part);
@@ -354,7 +355,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             if (normalized.length > 1 && normalized.endsWith('/')) {
                 return normalized.slice(0, -1);
             }
-            return normalized === '//' ? '/' : normalized;
+            return normalized;
         }
 
         _ensureDirPath(path) {
