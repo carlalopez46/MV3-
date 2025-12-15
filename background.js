@@ -2076,6 +2076,8 @@ async function sendMessageToOffscreen(msg) {
 // Focus Guard: keep macro window/tab in the foreground during execution
 // =============================================================================
 const FOCUS_GUARD_ALARM = 'focus_guard_tick';
+const focusGuardAlarmName = (typeof FOCUS_GUARD_ALARM === 'string' && FOCUS_GUARD_ALARM.trim()) ? FOCUS_GUARD_ALARM : null;
+let focusGuardAlarmNameWarningLogged = false;
 const FocusGuard = (() => {
     let enabled = false;
     let macroTabId = null;
@@ -2307,7 +2309,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm && alarm.name === FOCUS_GUARD_ALARM) {
+    if (!focusGuardAlarmName) {
+        if (!focusGuardAlarmNameWarningLogged) {
+            console.warn('[iMacros SW] FocusGuard alarm handler is disabled because the alarm name is not configured');
+            focusGuardAlarmNameWarningLogged = true;
+        }
+        return;
+    }
+
+    if (alarm && alarm.name === focusGuardAlarmName) {
         FocusGuard.ensureForeground('alarm').catch((err) => {
             console.warn('[iMacros SW] FocusGuard ensureForeground failed (alarm):', err);
         });
