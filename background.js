@@ -116,29 +116,41 @@ async function initializeLocalStoragePolyfill() {
     }
 }
 
+// NOTE: MV3 background scripts run as classic service workers, so top-level
+// await is forbidden. Expose the initialization promise instead; any module
+// that needs hydrated storage on startup should await
+// globalThis.localStorageInitPromise within its own async flow.
 const localStorageInitPromise = initializeLocalStoragePolyfill();
 globalThis.localStorageInitPromise = localStorageInitPromise;
-localStorageInitPromise.catch((err) => {
-    console.warn('[iMacros SW] localStorage init failed:', err);
-});
 
-try {
-    importScripts(
-        'utils.js',
-        'bg_common.js',
-        'badge.js',
-        'promise-utils.js',
-        'errorLogger.js',
-        'VirtualFileService.js',
-        'variable-manager.js',
-        'AsyncFileIO.js',
-        'mv3_messaging_bus.js',
-        'mv3_state_machine.js'
-    );
-} catch (e) {
-    console.error('Failed to import scripts:', e);
-    throw e;
+function loadBackgroundModules() {
+    try {
+        importScripts(
+            'utils.js',
+            'bg_common.js',
+            'badge.js',
+            'promise-utils.js',
+            'errorLogger.js',
+            'VirtualFileService.js',
+            'variable-manager.js',
+            'AsyncFileIO.js',
+            'mv3_messaging_bus.js',
+            'mv3_state_machine.js'
+        );
+    } catch (e) {
+        console.error('Failed to import scripts:', e);
+        throw e;
+    }
 }
+
+localStorageInitPromise
+    .then(() => {
+        loadBackgroundModules();
+    })
+    .catch((err) => {
+        console.warn('[iMacros SW] localStorage init failed; loading modules with empty cache:', err);
+        loadBackgroundModules();
+    });
 
 // Background Service Worker for iMacros MV3
 // Handles Offscreen Document lifecycle and event forwarding
@@ -2135,8 +2147,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
 
-// NOTE: openPanel command is handled by the main handler above (lines 221-302)
-// Do NOT add duplicate handler here - it causes panel to open twice
+    // NOTE: openPanel command is handled by the main handler above (lines 221-302)
+    // Do NOT add duplicate handler here - it causes panel to open twice
 
 
 
