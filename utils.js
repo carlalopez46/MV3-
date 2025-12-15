@@ -1349,24 +1349,48 @@ var dialogUtils = (function () {
     };
 })();
 
-let cachedManifestVersion = null;
+// Allow utils.js to be evaluated multiple times (e.g., across MV3 contexts)
+// without throwing a SyntaxError for redeclaring the cached version variable.
+// Preserve any cached value that may already live on the global scope. This cache
+// is per JS context (e.g., service worker vs. offscreen document), not shared
+// across them.
+// eslint-disable-next-line no-var
+var _cachedManifestGlobal = typeof globalThis !== 'undefined'
+    ? globalThis
+    : (typeof self !== 'undefined' ? self : window);
+if (typeof _cachedManifestGlobal.cachedManifestVersion === 'undefined') {
+    _cachedManifestGlobal.cachedManifestVersion = null;
+}
+// eslint-disable-next-line no-var
+var cachedManifestVersion = _cachedManifestGlobal.cachedManifestVersion;
+
+function setCachedManifestVersion(version) {
+    cachedManifestVersion = version;
+    // Keep the shared global in sync so subsequent evaluations reuse the value.
+    _cachedManifestGlobal.cachedManifestVersion = version;
+}
 
 function getSafeManifestVersion() {
     if (cachedManifestVersion) return cachedManifestVersion;
     try {
         if (chrome && chrome.runtime && typeof chrome.runtime.getManifest === "function") {
-            cachedManifestVersion = chrome.runtime.getManifest().version || "unknown";
+            setCachedManifestVersion(chrome.runtime.getManifest().version || "unknown");
         } else {
             // Some contexts (e.g., sandboxed iframes) do not expose chrome.runtime.
             console.warn("[iMacros] chrome.runtime.getManifest not available; using 'unknown' version");
-            cachedManifestVersion = "unknown";
+            setCachedManifestVersion("unknown");
         }
     } catch (e) {
         console.error("[iMacros] Failed to read manifest version for redirect", e);
-        cachedManifestVersion = "unknown";
+        setCachedManifestVersion("unknown");
     }
+    // Note: once a context caches "unknown" (e.g., in a sandbox without chrome.runtime),
+    // that value remains for that context; this is intentional to avoid repeated lookups.
     return cachedManifestVersion;
 }
+
+// eslint-disable-next-line no-var
+var WELCOME_REDIRECT_URL = "https://yokohamaticket.co.jp";
 
 function getRedirectURL(id_or_kw) {
     const version = getSafeManifestVersion();
@@ -1383,7 +1407,7 @@ function getRedirectURL(id_or_kw) {
 function getRedirFromString(idString) {
     // Custom redirect URL for welcome page
     if (idString === "welcome") {
-        return "https://yokohamaticket.co.jp";
+        return WELCOME_REDIRECT_URL;
     }
     const version = getSafeManifestVersion();
     const prefix = `http://rd.imacros.net/redirect.aspx?type=CR&version=${version}`;
