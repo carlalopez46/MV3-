@@ -2178,3 +2178,48 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // NOTE: MessagingBus class is defined in mv3_messaging_bus.js (imported via importScripts)
+/* global FocusGuard, FOCUS_GUARD_ALARM, chrome */
+
+// =============================================================================
+// Focus Guard Integration
+// =============================================================================
+if (typeof FocusGuard !== 'undefined' && typeof FocusGuard.getState === 'function' && typeof FocusGuard.ensureForeground === 'function') {
+    const focusGuardAlarmName = (typeof FOCUS_GUARD_ALARM !== 'undefined') ? FOCUS_GUARD_ALARM : null;
+    const getEnabledFocusState = () => {
+        const state = FocusGuard.getState();
+        return (state && state.enabled) ? state : null;
+    };
+
+    chrome.tabs.onActivated.addListener((info) => {
+        const state = getEnabledFocusState();
+        if (!state) return;
+
+        if (info.tabId !== state.tabId) {
+            FocusGuard.ensureForeground('tabs.onActivated').catch((err) => {
+                console.warn('[iMacros SW] FocusGuard ensureForeground failed (tabs.onActivated):', err);
+            });
+        }
+    });
+
+    chrome.windows.onFocusChanged.addListener((winId) => {
+        const state = getEnabledFocusState();
+        if (!state) return;
+        if (winId === chrome.windows.WINDOW_ID_NONE) return;
+        if (winId !== state.winId) {
+            FocusGuard.ensureForeground('windows.onFocusChanged').catch((err) => {
+                console.warn('[iMacros SW] FocusGuard ensureForeground failed (windows.onFocusChanged):', err);
+            });
+        }
+    });
+
+    chrome.alarms.onAlarm.addListener((alarm) => {
+        const state = getEnabledFocusState();
+        if (!state) return;
+
+        if (alarm && focusGuardAlarmName && alarm.name === focusGuardAlarmName) {
+            FocusGuard.ensureForeground('alarm').catch((err) => {
+                console.warn('[iMacros SW] FocusGuard ensureForeground failed (alarm):', err);
+            });
+        }
+    });
+}
