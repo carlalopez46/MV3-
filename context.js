@@ -66,6 +66,39 @@ const context = {
     },
 
     updateState: function (win_id, state) {
+        const startFocusGuard = (tabId) => {
+            if (!Number.isInteger(tabId) || typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) return;
+            try {
+                chrome.runtime.sendMessage({
+                    command: 'FOCUS_GUARD_START',
+                    tabId: tabId,
+                    winId: win_id
+                }, () => {
+                    if (chrome.runtime.lastError) {
+                        console.warn('[iMacros] Failed to start focus guard:', chrome.runtime.lastError.message);
+                    }
+                });
+            } catch (err) {
+                console.warn('[iMacros] Focus guard start threw synchronously:', err);
+            }
+        };
+
+        const stopFocusGuard = () => {
+            if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) return;
+            try {
+                chrome.runtime.sendMessage({
+                    command: 'FOCUS_GUARD_STOP',
+                    winId: win_id
+                }, () => {
+                    if (chrome.runtime.lastError) {
+                        console.warn('[iMacros] Failed to stop focus guard:', chrome.runtime.lastError.message);
+                    }
+                });
+            } catch (err) {
+                console.warn('[iMacros] Focus guard stop threw synchronously:', err);
+            }
+        };
+
         // set browser action icon
         switch (state) {
             case "playing": case "recording":
@@ -80,6 +113,7 @@ const context = {
                         // Check context still exists (window may have closed during query)
                         if (context[win_id] && tabs && tabs.length > 0) {
                             context[win_id].pausedTabId = tabs[0].id;
+                            startFocusGuard(tabs[0].id);
                         }
                     });
                 }
@@ -99,6 +133,7 @@ const context = {
                         }
                     });
                 }
+                stopFocusGuard();
                 break;
             case "idle":
                 badge.setIcon(win_id, "skin/logo19.png");
@@ -111,6 +146,7 @@ const context = {
                 if (context[win_id]) {
                     delete context[win_id].pausedTabId;
                 }
+                stopFocusGuard();
                 break;
         }
         // update panel
