@@ -1449,7 +1449,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             tabs.forEach((tab) => {
                 chrome.tabs.sendMessage(tab.id, message, () => {
                     // Ignore errors for individual tabs (may not have content script)
-                    return;
                 });
             });
 

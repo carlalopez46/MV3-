@@ -43,8 +43,8 @@ function installVirtualRunHook() {
 
     const originalLoader = proto.loadMacroFile;
     proto.loadMacroFile = async function (resolvedPath) {
-        await ensureVirtualFileService();
         try {
+            await ensureVirtualFileService();
             const content = await virtualFileService.readTextFile(resolvedPath);
             const name = resolvedPath ? resolvedPath.split(/[\\/]/).pop() : "";
             return {
