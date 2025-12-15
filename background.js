@@ -123,24 +123,26 @@ async function initializeLocalStoragePolyfill() {
 const localStorageInitPromise = initializeLocalStoragePolyfill();
 globalThis.localStorageInitPromise = localStorageInitPromise;
 
-function loadBackgroundModules() {
-    try {
-        importScripts(
-            'utils.js',
-            'bg_common.js',
-            'badge.js',
-            'promise-utils.js',
-            'errorLogger.js',
-            'VirtualFileService.js',
-            'variable-manager.js',
-            'AsyncFileIO.js',
-            'mv3_messaging_bus.js',
-            'mv3_state_machine.js'
-        );
-    } catch (e) {
-        console.error('Failed to import scripts:', e);
-        throw e;
-    }
+// NOTE: These imports must remain synchronous because code below instantiates
+// globals such as MessagingBus/ExecutionStateMachine at top level. Deferring
+// imports would trigger ReferenceError before the service worker finishes
+// evaluating.
+try {
+    importScripts(
+        'utils.js',
+        'bg_common.js',
+        'badge.js',
+        'promise-utils.js',
+        'errorLogger.js',
+        'VirtualFileService.js',
+        'variable-manager.js',
+        'AsyncFileIO.js',
+        'mv3_messaging_bus.js',
+        'mv3_state_machine.js'
+    );
+} catch (e) {
+    console.error('[iMacros SW] Failed to import background modules:', e);
+    throw e;
 }
 
 localStorageInitPromise
@@ -2147,7 +2149,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
 
-    // NOTE: openPanel command is handled by the main handler above (lines 221-302)
+    // NOTE: openPanel command is handled by the main handler above.
     // Do NOT add duplicate handler here - it causes panel to open twice
 
 
