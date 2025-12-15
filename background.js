@@ -78,7 +78,20 @@ async function initializeLocalStoragePolyfill() {
         return;
     }
 
+    // Install an in-memory shim immediately so modules imported synchronously
+    // below can rely on localStorage being defined. The backing cache will be
+    // hydrated asynchronously from chrome.storage once available.
     const cache = Object.create(null);
+    const polyfill = createLocalStoragePolyfill(cache, LOCALSTORAGE_PREFIX);
+    polyfill.__isInMemoryShim = true;
+    polyfill.__isMinimalLocalStorageShim = true;
+
+    if (typeof globalThis !== 'undefined') {
+        globalThis.localStorage = polyfill;
+        globalThis._localStorageData = cache;
+        globalThis._LOCALSTORAGE_PREFIX = LOCALSTORAGE_PREFIX;
+    }
+
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
         try {
             const items = await new Promise((resolve, reject) => {
@@ -106,7 +119,6 @@ async function initializeLocalStoragePolyfill() {
         }
     }
 
-    const polyfill = createLocalStoragePolyfill(cache, LOCALSTORAGE_PREFIX);
     polyfill.__isHydratedPolyfill = true;
 
     if (typeof globalThis !== 'undefined') {
@@ -144,35 +156,6 @@ try {
     console.error('[iMacros SW] Failed to import background modules:', e);
     throw e;
 }
-
-function loadBackgroundModules() {
-    try {
-        // These modules rely on hydrated localStorage and register critical globals
-        // required by offscreen_bg.js (context, communicator, nm_connector, etc.).
-        importScripts(
-            'rijndael.js',
-            'mplayer.js',
-            'mrecorder.js',
-            'context.js',
-            'communicator.js',
-            'nm_connector.js',
-            'bg.js'
-        );
-        console.log('[iMacros SW] Background modules loaded successfully after localStorage init');
-    } catch (e) {
-        console.error('[iMacros SW] Failed to load deferred background modules:', e);
-        throw e;
-    }
-}
-
-localStorageInitPromise
-    .then(() => {
-        loadBackgroundModules();
-    })
-    .catch((err) => {
-        console.warn('[iMacros SW] localStorage init failed; loading modules with empty cache:', err);
-        loadBackgroundModules();
-    });
 
 // Background Service Worker for iMacros MV3
 // Handles Offscreen Document lifecycle and event forwarding
@@ -325,21 +308,36 @@ async function createOffscreen() {
 
     creatingOffscreen = (async () => {
 
-        // Check if offscreen document already exists using clients API (Service Worker)
-        if (self.clients) {
+        // Check if offscreen document already exists using runtime contexts (preferred)
+        if (chrome.runtime && typeof chrome.runtime.getContexts === 'function') {
+            const contextTypes = chrome.runtime.ContextType
+                ? [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT]
+                : ['OFFSCREEN_DOCUMENT'];
+
+            const contexts = await chrome.runtime.getContexts({ contextTypes });
+            const exists = Array.isArray(contexts) && contexts.some((ctx) => ctx.documentUrl && ctx.documentUrl.endsWith('offscreen.html'));
+            if (exists) return;
+        } else if (self.clients) {
+            // Fallback for older runtimes: inspect window clients
             const clients = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
             const exists = clients.some(c => c.url.endsWith('offscreen.html'));
-            if (exists) {
-                return;
-            }
+            if (exists) return;
         }
+
+        const reasons = (chrome.offscreen && chrome.offscreen.Reason)
+            ? [
+                chrome.offscreen.Reason.DOM_PARSER,
+                chrome.offscreen.Reason.IFRAME_SCRIPTING,
+                chrome.offscreen.Reason.CLIPBOARD
+            ].filter(Boolean)
+            : ['DOM_PARSER', 'IFRAME_SCRIPTING', 'CLIPBOARD'];
 
         try {
             console.log('[iMacros SW] Creating offscreen document...');
             await chrome.offscreen.createDocument({
                 url: 'offscreen.html',
-                reasons: ['DOM_PARSER', 'BLOBS'],
-                justification: 'To run iMacros playback engine and keep state.',
+                reasons,
+                justification: 'To run iMacros playback engine, manage sandboxed iframes, and proxy clipboard.',
             });
             console.log('[iMacros SW] Offscreen document created successfully');
         } catch (e) {
@@ -380,6 +378,9 @@ function persistEditorLaunchData(editorData) {
     }
     return setInSessionOrLocal(editorData);
 }
+
+// Track dialog lifecycles for MV3 dialogs to reduce dependency on offscreen dialogUtils
+const dialogCache = new Map(); // windowId -> { args, result }
 
 // Forward action click to Offscreen
 chrome.action.onClicked.addListener(async (tab) => {
@@ -898,6 +899,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 sendResponse({ error: chrome.runtime.lastError.message });
             } else {
                 console.log('[iMacros SW] Dialog created:', win.id);
+                // Cache args locally so GET_DIALOG_ARGS can succeed even if offscreen dialogUtils is unavailable
+                if (msg.args) {
+                    dialogCache.set(win.id, { args: msg.args });
+                }
                 // We return the window object structure expected by utils.js
                 sendResponse({ result: win });
             }
@@ -2015,6 +2020,7 @@ chrome.notifications.onClicked.addListener(function (n_id) {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'SET_DIALOG_RESULT') {
         console.log('[iMacros SW] Forwarding SET_DIALOG_RESULT for window:', msg.windowId);
+        dialogCache.set(msg.windowId, Object.assign({}, dialogCache.get(msg.windowId), { result: msg.response }));
         sendMessageToOffscreen({
             type: 'SET_DIALOG_RESULT',
             windowId: msg.windowId,
@@ -2031,10 +2037,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // Handle GET_DIALOG_ARGS - forward to offscreen
     if (msg.type === 'GET_DIALOG_ARGS') {
         console.log('[iMacros SW] Forwarding GET_DIALOG_ARGS for window:', msg.windowId);
+        const cached = dialogCache.get(msg.windowId);
+        if (cached && cached.args) {
+            sendResponse({ success: true, args: cached.args });
+            return true;
+        }
+
         sendMessageToOffscreen({
             type: 'GET_DIALOG_ARGS',
             windowId: msg.windowId
         }).then(result => {
+            if (result && result.success && result.args) {
+                dialogCache.set(msg.windowId, Object.assign({}, dialogCache.get(msg.windowId), { args: result.args }));
+            }
             sendResponse(result || { success: false, error: 'No response from offscreen' });
         }).catch(err => {
             console.error('[iMacros SW] GET_DIALOG_ARGS error:', err);
