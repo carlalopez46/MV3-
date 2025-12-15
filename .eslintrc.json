@@ -53,15 +53,13 @@
   },
   "overrides": [
     {
-      "files": ["promptDialog.js"],
-      "rules": {
-        "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
-        "no-undef": "warn"
-      }
-    },
-    {
       "files": ["**/*"],
-      "excludedFiles": ["promptDialog.js"],
+      "excludedFiles": [
+        "AsyncFileIO.js",
+        "VirtualFileService.js",
+        "WindowsPathMappingService.js",
+        "promptDialog.js"
+      ],
       "rules": {
         "no-unused-vars": "off",
         "no-undef": "off"
