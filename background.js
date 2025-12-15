@@ -2102,7 +2102,7 @@ const FocusGuard = (() => {
                 macroWinId = tab.windowId;
             }
 
-            await chrome.windows.update(macroWinId, { focused: true });
+            await chrome.windows.update(macroWinId, { focused: true, state: 'normal' });
             await chrome.tabs.update(macroTabId, { active: true });
             console.log('[iMacros SW] FocusGuard refocused tab', macroTabId, reason ? `(${reason})` : '');
         } catch (e) {
@@ -2170,7 +2170,7 @@ const FocusGuard = (() => {
             console.warn('[iMacros SW] FocusGuard alarm create failed:', e);
         }
 
-        ensureForeground('start');
+        await ensureForeground('start');
         return { started: true, tabId: macroTabId, winId: macroWinId };
     }
 
