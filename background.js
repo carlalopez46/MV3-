@@ -2185,10 +2185,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // =============================================================================
 if (typeof FocusGuard !== 'undefined' && typeof FocusGuard.getState === 'function' && typeof FocusGuard.ensureForeground === 'function') {
     const focusGuardAlarmName = (typeof FOCUS_GUARD_ALARM !== 'undefined') ? FOCUS_GUARD_ALARM : null;
+    const shouldHandleFocusChange = () => {
+        const state = FocusGuard.getState();
+        return state && state.enabled;
+    };
 
     chrome.tabs.onActivated.addListener((info) => {
+        if (!shouldHandleFocusChange()) return;
+
         const state = FocusGuard.getState();
-        if (!state || !state.enabled) return;
         if (info.tabId !== state.tabId) {
             FocusGuard.ensureForeground('tabs.onActivated').catch((err) => {
                 console.warn('[iMacros SW] FocusGuard ensureForeground failed (tabs.onActivated):', err);
@@ -2197,9 +2202,10 @@ if (typeof FocusGuard !== 'undefined' && typeof FocusGuard.getState === 'functio
     });
 
     chrome.windows.onFocusChanged.addListener((winId) => {
-        const state = FocusGuard.getState();
-        if (!state || !state.enabled) return;
+        if (!shouldHandleFocusChange()) return;
         if (winId === chrome.windows.WINDOW_ID_NONE) return;
+
+        const state = FocusGuard.getState();
         if (winId !== state.winId) {
             FocusGuard.ensureForeground('windows.onFocusChanged').catch((err) => {
                 console.warn('[iMacros SW] FocusGuard ensureForeground failed (windows.onFocusChanged):', err);
