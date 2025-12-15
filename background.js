@@ -2178,3 +2178,38 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // NOTE: MessagingBus class is defined in mv3_messaging_bus.js (imported via importScripts)
+
+// =============================================================================
+// Focus Guard Integration
+// =============================================================================
+if (typeof FocusGuard !== 'undefined' && typeof FocusGuard.getState === 'function' && typeof FocusGuard.ensureForeground === 'function') {
+    chrome.tabs.onActivated.addListener((info) => {
+        const state = FocusGuard.getState();
+        if (!state || !state.enabled) return;
+        if (info.tabId !== state.tabId) {
+            FocusGuard.ensureForeground('tabs.onActivated').catch((err) => {
+                console.warn('[iMacros SW] FocusGuard ensureForeground failed (tabs.onActivated):', err);
+            });
+        }
+    });
+
+    chrome.windows.onFocusChanged.addListener((winId) => {
+        const state = FocusGuard.getState();
+        if (!state || !state.enabled) return;
+        if (winId === chrome.windows.WINDOW_ID_NONE) return;
+        if (winId !== state.winId) {
+            FocusGuard.ensureForeground('windows.onFocusChanged').catch((err) => {
+                console.warn('[iMacros SW] FocusGuard ensureForeground failed (windows.onFocusChanged):', err);
+            });
+        }
+    });
+
+    chrome.alarms.onAlarm.addListener((alarm) => {
+        const alarmName = (typeof FOCUS_GUARD_ALARM !== 'undefined') ? FOCUS_GUARD_ALARM : null;
+        if (alarm && alarmName && alarm.name === alarmName) {
+            FocusGuard.ensureForeground('alarm').catch((err) => {
+                console.warn('[iMacros SW] FocusGuard ensureForeground alarm failed:', err);
+            });
+        }
+    });
+}
