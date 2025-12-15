@@ -2208,7 +2208,7 @@ if (typeof FocusGuard !== 'undefined' && typeof FocusGuard.getState === 'functio
         const alarmName = (typeof FOCUS_GUARD_ALARM !== 'undefined') ? FOCUS_GUARD_ALARM : null;
         if (alarm && alarmName && alarm.name === alarmName) {
             FocusGuard.ensureForeground('alarm').catch((err) => {
-                console.warn('[iMacros SW] FocusGuard ensureForeground alarm failed:', err);
+                console.warn('[iMacros SW] FocusGuard ensureForeground failed (alarm):', err);
             });
         }
     });
