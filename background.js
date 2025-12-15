@@ -78,7 +78,20 @@ async function initializeLocalStoragePolyfill() {
         return;
     }
 
+    // Install an in-memory shim immediately so modules imported synchronously
+    // below can rely on localStorage being defined. The backing cache will be
+    // hydrated asynchronously from chrome.storage once available.
     const cache = Object.create(null);
+    const polyfill = createLocalStoragePolyfill(cache, LOCALSTORAGE_PREFIX);
+    polyfill.__isInMemoryShim = true;
+    polyfill.__isMinimalLocalStorageShim = true;
+
+    if (typeof globalThis !== 'undefined') {
+        globalThis.localStorage = polyfill;
+        globalThis._localStorageData = cache;
+        globalThis._LOCALSTORAGE_PREFIX = LOCALSTORAGE_PREFIX;
+    }
+
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
         try {
             const items = await new Promise((resolve, reject) => {
@@ -106,7 +119,6 @@ async function initializeLocalStoragePolyfill() {
         }
     }
 
-    const polyfill = createLocalStoragePolyfill(cache, LOCALSTORAGE_PREFIX);
     polyfill.__isHydratedPolyfill = true;
 
     if (typeof globalThis !== 'undefined') {
@@ -325,21 +337,32 @@ async function createOffscreen() {
 
     creatingOffscreen = (async () => {
 
-        // Check if offscreen document already exists using clients API (Service Worker)
-        if (self.clients) {
+        // Check if offscreen document already exists using runtime contexts (preferred)
+        if (chrome.runtime && typeof chrome.runtime.getContexts === 'function') {
+            const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+            const exists = Array.isArray(contexts) && contexts.some((ctx) => ctx.documentUrl && ctx.documentUrl.endsWith('offscreen.html'));
+            if (exists) return;
+        } else if (self.clients) {
+            // Fallback for older runtimes: inspect window clients
             const clients = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
             const exists = clients.some(c => c.url.endsWith('offscreen.html'));
-            if (exists) {
-                return;
-            }
+            if (exists) return;
         }
+
+        const reasons = (chrome.offscreen && chrome.offscreen.Reason)
+            ? [
+                chrome.offscreen.Reason.DOM_PARSER,
+                chrome.offscreen.Reason.IFRAME_SCRIPTING,
+                chrome.offscreen.Reason.CLIPBOARD
+            ].filter(Boolean)
+            : ['DOM_PARSER', 'IFRAME_SCRIPTING', 'CLIPBOARD'];
 
         try {
             console.log('[iMacros SW] Creating offscreen document...');
             await chrome.offscreen.createDocument({
                 url: 'offscreen.html',
-                reasons: ['DOM_PARSER', 'BLOBS'],
-                justification: 'To run iMacros playback engine and keep state.',
+                reasons,
+                justification: 'To run iMacros playback engine, manage sandboxed iframes, and proxy clipboard.',
             });
             console.log('[iMacros SW] Offscreen document created successfully');
         } catch (e) {

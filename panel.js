@@ -1,4 +1,5 @@
 /* panel.js - MV3対応版 */
+/* global getRedirectURL, getRedirFromString */
 
 // 選択中のマクロ情報を保持する変数
 let selectedMacro = null;
@@ -251,6 +252,26 @@ function openSettings() {
     }
 }
 
+function openRedirectLink(resolverFn, label, fallbackMessage) {
+    const statusEl = ensureStatusLineElement();
+    try {
+        if (typeof resolverFn !== 'function') {
+            throw new Error(`${label} resolver is unavailable`);
+        }
+        const url = resolverFn();
+        if (!url) {
+            throw new Error(`${label} URL is empty`);
+        }
+        window.open(url);
+    } catch (e) {
+        console.error(`[Panel] Failed to open ${label}`, e);
+        if (statusEl) {
+            statusEl.textContent = fallbackMessage;
+            statusEl.style.color = "#b00020";
+        }
+    }
+}
+
 function edit() {
     if (!selectedMacro) return;
     const { filePath, macroName } = getMacroPathAndName(selectedMacro);
@@ -267,25 +288,11 @@ function edit() {
 
 function openHelp() {
     // 旧版と同様にリダイレクトURLを利用
-    try {
-        window.open(getRedirectURL('iMacros_for_Chrome'));
-    } catch (e) {
-        console.error('[Panel] Failed to open help link', e);
-        const el = ensureStatusLineElement();
-        el.textContent = "Unable to open help page.";
-        el.style.color = "#b00020";
-    }
+    openRedirectLink(() => getRedirectURL('iMacros_for_Chrome'), 'help link', "Unable to open help page.");
 }
 
 function openErrorHelp() {
-    try {
-        window.open(getRedirFromString("error"));
-    } catch (e) {
-        console.error('[Panel] Failed to open error help', e);
-        const el = ensureStatusLineElement();
-        el.textContent = "Unable to open error help page.";
-        el.style.color = "#b00020";
-    }
+    openRedirectLink(() => getRedirFromString("error"), 'error help', "Unable to open error help page.");
 }
 
 function openInfoEdit() {
