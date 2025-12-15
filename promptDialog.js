@@ -5,6 +5,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // Custom prompt function
 // as alternative for JavaScript prompt()
 
+const MAX_RETRY_ATTEMPTS = 15;
+const RETRY_DELAY_MS = 200;
+
 let promptInput = null;
 let okButton = null;
 
@@ -39,7 +42,7 @@ function sendResponse(response) {
     });
 }
 
-function getArguments(windowId, callback, attemptsLeft = 15) {
+function getArguments(windowId, callback, attemptsLeft = MAX_RETRY_ATTEMPTS) {
     // MV3 compatible: Use chrome.runtime.sendMessage instead of getBackgroundPage
     chrome.runtime.sendMessage({
         type: 'GET_DIALOG_ARGS',
@@ -49,8 +52,9 @@ function getArguments(windowId, callback, attemptsLeft = 15) {
             console.error("[iMacros] Failed to get dialog args:", chrome.runtime.lastError.message);
             // Retry to handle race where dialog args are not yet registered
             if (attemptsLeft > 0) {
-                console.log(`[iMacros] Retrying getArguments (${16 - attemptsLeft}/15)...`);
-                setTimeout(() => getArguments(windowId, callback, attemptsLeft - 1), 200);
+                const attemptNumber = MAX_RETRY_ATTEMPTS - attemptsLeft + 1;
+                console.log(`[iMacros] Retrying getArguments (${attemptNumber}/${MAX_RETRY_ATTEMPTS})...`);
+                setTimeout(() => getArguments(windowId, callback, attemptsLeft - 1), RETRY_DELAY_MS);
             } else {
                 callback(null);
             }
@@ -59,8 +63,9 @@ function getArguments(windowId, callback, attemptsLeft = 15) {
         if (!result || !result.success) {
             console.error("[iMacros] Background failed to get dialog args:", result?.error);
             if (attemptsLeft > 0) {
-                console.log(`[iMacros] Retrying getArguments (${16 - attemptsLeft}/15)...`);
-                setTimeout(() => getArguments(windowId, callback, attemptsLeft - 1), 200);
+                const attemptNumber = MAX_RETRY_ATTEMPTS - attemptsLeft + 1;
+                console.log(`[iMacros] Retrying getArguments (${attemptNumber}/${MAX_RETRY_ATTEMPTS})...`);
+                setTimeout(() => getArguments(windowId, callback, attemptsLeft - 1), RETRY_DELAY_MS);
             } else {
                 callback(null);
             }
