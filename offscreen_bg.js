@@ -53,6 +53,7 @@ function installVirtualRunHook() {
                 file_id: resolvedPath
             };
         } catch (err) {
+            console.warn("[iMacros Offscreen] Virtual RUN hook failed; falling back to native loader:", err);
             // Fall back to the previous loader or signal failure by returning null
             if (typeof originalLoader === "function") {
                 return originalLoader.call(this, resolvedPath);
