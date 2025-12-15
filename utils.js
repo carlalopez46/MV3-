@@ -1349,21 +1349,35 @@ var dialogUtils = (function () {
     };
 })();
 
-let cachedManifestVersion = null;
+// Allow utils.js to be evaluated multiple times (e.g., across MV3 contexts)
+// without throwing a SyntaxError for redeclaring the cached version variable.
+// Preserve any cached value that may already live on the global scope.
+const _cachedManifestGlobal = typeof globalThis !== 'undefined'
+    ? globalThis
+    : (typeof self !== 'undefined' ? self : window);
+if (typeof _cachedManifestGlobal.cachedManifestVersion === 'undefined') {
+    _cachedManifestGlobal.cachedManifestVersion = null;
+}
+// eslint-disable-next-line no-var
+var cachedManifestVersion = _cachedManifestGlobal.cachedManifestVersion;
 
 function getSafeManifestVersion() {
     if (cachedManifestVersion) return cachedManifestVersion;
+    const globalScope = _cachedManifestGlobal;
     try {
         if (chrome && chrome.runtime && typeof chrome.runtime.getManifest === "function") {
             cachedManifestVersion = chrome.runtime.getManifest().version || "unknown";
+            globalScope.cachedManifestVersion = cachedManifestVersion;
         } else {
             // Some contexts (e.g., sandboxed iframes) do not expose chrome.runtime.
             console.warn("[iMacros] chrome.runtime.getManifest not available; using 'unknown' version");
             cachedManifestVersion = "unknown";
+            globalScope.cachedManifestVersion = cachedManifestVersion;
         }
     } catch (e) {
         console.error("[iMacros] Failed to read manifest version for redirect", e);
         cachedManifestVersion = "unknown";
+        globalScope.cachedManifestVersion = cachedManifestVersion;
     }
     return cachedManifestVersion;
 }
