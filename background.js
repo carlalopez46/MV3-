@@ -122,9 +122,6 @@ async function initializeLocalStoragePolyfill() {
 // globalThis.localStorageInitPromise within its own async flow.
 const localStorageInitPromise = initializeLocalStoragePolyfill();
 globalThis.localStorageInitPromise = localStorageInitPromise;
-localStorageInitPromise.catch((err) => {
-    console.warn('[iMacros SW] localStorage init failed:', err);
-});
 
 // NOTE: These imports must remain synchronous because code below instantiates
 // globals such as MessagingBus/ExecutionStateMachine at top level. Deferring
@@ -147,6 +144,15 @@ try {
     console.error('[iMacros SW] Failed to import background modules:', e);
     throw e;
 }
+
+localStorageInitPromise
+    .then(() => {
+        loadBackgroundModules();
+    })
+    .catch((err) => {
+        console.warn('[iMacros SW] localStorage init failed; loading modules with empty cache:', err);
+        loadBackgroundModules();
+    });
 
 // Background Service Worker for iMacros MV3
 // Handles Offscreen Document lifecycle and event forwarding
