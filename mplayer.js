@@ -4192,6 +4192,13 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
 // @loopnum - positive integer
 // which should be used to specify cycled replaying
 MacroPlayer.prototype.play = function (macro, limits, callback) {
+    // Guard against double execution - ignore if already playing
+    if (this.playing) {
+        console.warn("[MacroPlayer] Ignoring play request - already playing");
+        if (callback) callback({ success: false, error: "Already playing" });
+        return;
+    }
+
     // console.info("Playing macro %O, limits %O", macro, limits);
     const comment = new RegExp("^\\s*(?:'.*)?$");
     this.source = macro.source;

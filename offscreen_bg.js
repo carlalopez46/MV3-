@@ -410,117 +410,20 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     }
 
     // --- Handlers for panel.js commands ---
-
-    if (request.command === 'startRecording') {
-        const win_id = request.win_id;
-        console.log('[Offscreen] Received startRecording for window:', win_id);
-
-        const start = () => executeContextMethod(win_id, 'recorder.start', sendResponse, []);
-
-        if (!context[win_id]) {
-            context.init(win_id).then(start).catch(err => {
-                sendResponse({ success: false, error: err.message || String(err) });
-            });
-        } else {
-            start();
-        }
-        return true;
-    }
+    // NOTE: The following commands are now handled exclusively by Service Worker (background.js)
+    // which transforms them to CALL_CONTEXT_METHOD. This prevents double execution when
+    // messages are broadcast to both SW and Offscreen Document:
+    // - startRecording -> CALL_CONTEXT_METHOD with method 'recorder.start'
+    // - playMacro -> CALL_CONTEXT_METHOD with method 'playFile'
+    // - stop -> CALL_CONTEXT_METHOD with method 'stop'
+    // - pause -> CALL_CONTEXT_METHOD with method 'pause'
 
     // NOTE: playMacro command is now handled exclusively by Service Worker (background.js)
     // which transforms it to CALL_CONTEXT_METHOD with method 'playFile'.
     // This prevents double execution when messages are broadcast to both SW and Offscreen.
     // If direct playMacro handling is needed in the future, add a guard to check sender origin.
     // See: https://github.com/user/iMacrosMV3-/issues/XXX for details.
-
-    if (request.command === 'stop') {
-        const win_id = request.win_id;
-        console.log('[Offscreen] Received stop command for window:', win_id);
-
-        // Function to stop a specific context (even if state flags got out of sync)
-        const stopContext = (ctx, id) => {
-            let stoppedPlayer = false;
-            let stoppedRecorder = false;
-
-            if (ctx.mplayer) {
-                console.log(`[Offscreen] Stopping mplayer for window ${id}`);
-                try {
-                    if (typeof ctx.mplayer.stop === 'function') {
-                        ctx.mplayer.stop();
-                        stoppedPlayer = true;
-                    }
-                } catch (err) {
-                    console.error(`[Offscreen] Failed to stop mplayer for window ${id}:`, err);
-                }
-            }
-            if (ctx.recorder) {
-                console.log(`[Offscreen] Stopping recorder for window ${id}`);
-                try {
-                    if (typeof ctx.recorder.stop === 'function') {
-                        ctx.recorder.stop();
-                        stoppedRecorder = true;
-                    }
-                } catch (err) {
-                    console.error(`[Offscreen] Failed to stop recorder for window ${id}:`, err);
-                }
-            }
-            return { stoppedPlayer, stoppedRecorder };
-        };
-
-        if (context[win_id]) {
-            // Try to stop specific window
-            executeContextMethod(win_id, 'stop', sendResponse, []);
-        } else {
-            // Fallback: Check ALL contexts for any active player/recorder and stop them
-            // This handles cases where window IDs might be mismatched
-            console.warn('[Offscreen] Stop target window not found. Scanning all contexts...');
-            const stoppedDetails = [];
-            for (let id in context) {
-                if (Object.hasOwn(context, id) && context[id]) {
-                    const { stoppedPlayer, stoppedRecorder } = stopContext(context[id], id);
-                    if (stoppedPlayer || stoppedRecorder) {
-                        stoppedDetails.push({ id, stoppedPlayer, stoppedRecorder });
-                    }
-                }
-            }
-            if (stoppedDetails.length > 0) {
-                sendResponse({ success: true, message: "Stopped active processes in other windows", details: stoppedDetails });
-            } else {
-                sendResponse({ success: false, message: "No active processes found to stop" });
-            }
-        }
-        return true;
-    }
-
-    if (request.command === 'pause') {
-        const win_id = request.win_id;
-        console.log('[Offscreen] Received pause command');
-        const runPause = () => executeContextMethod(win_id, 'pause', sendResponse, []);
-
-        if (!context[win_id]) {
-            context.init(win_id).then(runPause).catch(err => {
-                sendResponse({ success: false, error: err.message || String(err) });
-            });
-        } else {
-            runPause();
-        }
-        return true;
-    }
-
-    if (request.command === 'unpause') {
-        const win_id = request.win_id;
-        console.log('[Offscreen] Received unpause command');
-        const runUnpause = () => executeContextMethod(win_id, 'unpause', sendResponse, []);
-
-        if (!context[win_id]) {
-            context.init(win_id).then(runUnpause).catch(err => {
-                sendResponse({ success: false, error: err.message || String(err) });
-            });
-        } else {
-            runUnpause();
-        }
-        return true;
-    }
+    // NOTE: stop, pause, unpause commands are now handled via CALL_CONTEXT_METHOD from Service Worker
 
     if (request.command === 'editMacro') {
         const win_id = request.win_id;
@@ -662,32 +565,58 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 }
             } else if (method === "stop") {
                 console.log("[Offscreen] Stopping...");
-                let stoppedPlayer = false;
-                let stoppedRecorder = false;
 
-                if (context[win_id].mplayer) {
-                    try {
-                        if (typeof context[win_id].mplayer.stop === 'function') {
-                            context[win_id].mplayer.stop();
-                            stoppedPlayer = true;
+                // Helper function to stop a specific context
+                const stopContext = (ctx, id) => {
+                    let stoppedPlayer = false;
+                    let stoppedRecorder = false;
+
+                    if (ctx.mplayer) {
+                        try {
+                            if (typeof ctx.mplayer.stop === 'function') {
+                                ctx.mplayer.stop();
+                                stoppedPlayer = true;
+                            }
+                        } catch (e) {
+                            console.error(`[Offscreen] Error stopping mplayer for window ${id}:`, e);
                         }
-                    } catch (e) {
-                        console.error('[Offscreen] Error stopping mplayer:', e);
+                    }
+
+                    if (ctx.recorder) {
+                        try {
+                            if (typeof ctx.recorder.stop === 'function') {
+                                ctx.recorder.stop();
+                                stoppedRecorder = true;
+                            }
+                        } catch (e) {
+                            console.error(`[Offscreen] Error stopping recorder for window ${id}:`, e);
+                        }
+                    }
+                    return { stoppedPlayer, stoppedRecorder };
+                };
+
+                // Try to stop specific window first
+                if (context[win_id]) {
+                    const result = stopContext(context[win_id], win_id);
+                    sendResponse({ success: true, ...result });
+                } else {
+                    // Fallback: Check ALL contexts for any active player/recorder and stop them
+                    console.warn('[Offscreen] Stop target window not found. Scanning all contexts...');
+                    const stoppedDetails = [];
+                    for (let id in context) {
+                        if (Object.hasOwn(context, id) && context[id] && typeof context[id] === 'object') {
+                            const result = stopContext(context[id], id);
+                            if (result.stoppedPlayer || result.stoppedRecorder) {
+                                stoppedDetails.push({ id, ...result });
+                            }
+                        }
+                    }
+                    if (stoppedDetails.length > 0) {
+                        sendResponse({ success: true, message: "Stopped active processes in other windows", details: stoppedDetails });
+                    } else {
+                        sendResponse({ success: false, message: "No active processes found to stop" });
                     }
                 }
-
-                if (context[win_id].recorder) {
-                    try {
-                        if (typeof context[win_id].recorder.stop === 'function') {
-                            context[win_id].recorder.stop();
-                            stoppedRecorder = true;
-                        }
-                    } catch (e) {
-                        console.error('[Offscreen] Error stopping recorder:', e);
-                    }
-                }
-
-                sendResponse({ success: true, stoppedPlayer, stoppedRecorder });
             } else if (method === "pause") {
                 console.log("[Offscreen] Pausing/Unpausing player...");
                 const mplayer = context[win_id].mplayer;

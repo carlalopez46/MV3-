@@ -181,6 +181,17 @@ function play() {
 
 function record() {
     console.log("[Panel] Record button clicked");
+
+    // Guard against double execution - ignore if already recording or playing
+    if (panelState.isRecording) {
+        console.log("[Panel] Ignoring record request - already recording");
+        return;
+    }
+    if (panelState.isPlaying) {
+        console.log("[Panel] Ignoring record request - currently playing");
+        return;
+    }
+
     if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
         return;
@@ -209,6 +220,17 @@ function pause() {
 
 function playLoop() {
     console.log("[Panel] Loop button clicked");
+
+    // Guard against double execution - ignore if already playing or recording
+    if (panelState.isPlaying) {
+        console.log("[Panel] Ignoring playLoop request - already playing");
+        return;
+    }
+    if (panelState.isRecording) {
+        console.log("[Panel] Ignoring playLoop request - currently recording");
+        return;
+    }
+
     if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
         return;

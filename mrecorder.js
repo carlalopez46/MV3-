@@ -86,6 +86,12 @@ Recorder.prototype.checkForFrameChange = function (frame) {
 
 
 Recorder.prototype.start = function () {
+    // Guard against double execution - ignore if already recording
+    if (this.recording) {
+        console.warn("[Recorder] Ignoring start request - already recording");
+        return;
+    }
+
     // console.info("start recording");
     this.writeEncryptionType = true;
     this.password = null;
