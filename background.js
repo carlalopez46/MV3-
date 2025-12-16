@@ -2032,6 +2032,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             windowId: msg.windowId,
             response: msg.response
         }).then(result => {
+            dialogCache.delete(msg.windowId);
             sendResponse(result || { success: true });
         }).catch(err => {
             console.error('[iMacros SW] SET_DIALOG_RESULT error:', err);
