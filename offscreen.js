@@ -232,6 +232,13 @@ if (chrome && chrome.runtime && chrome.runtime.onMessage) {
             }
 
             // Ensure callers always receive a response to avoid runtime.lastError noise.
+            const backgroundHandledTypes = new Set(['UPDATE_PANEL_VIEWS', 'SET_DIALOG_RESULT', 'GET_DIALOG_ARGS']);
+            if (message && backgroundHandledTypes.has(message.type)) {
+                // These message types are processed by the Service Worker; avoid responding here so the
+                // background listener can supply the authoritative result.
+                return false;
+            }
+
             safeSendResponse(sendResponse, {
                 success: false,
                 error: 'Unhandled offscreen message type: ' + (message && message.type ? message.type : 'unknown')
