@@ -16,6 +16,8 @@ worker via explicit messaging.
 // MacroPlayer pull sources from the chunked VirtualFileService storage.
 const virtualFileService = typeof VirtualFileService === "function" ? new VirtualFileService() : null;
 let vfsReadyPromise = null;
+// Track in-flight play requests per window to avoid duplicate execution.
+const playInFlight = new Set();
 
 async function ensureVirtualFileService() {
     if (!virtualFileService) {
@@ -701,6 +703,16 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     return;
                 }
 
+                if (playInFlight.has(win_id)) {
+                    console.warn(`[Offscreen] Ignoring playFile - a play request is already pending for window ${win_id}`);
+                    if (sendResponse) {
+                        sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
+                    }
+                    return;
+                }
+
+                playInFlight.add(win_id);
+
                 // ★パスクリーニング: "iMacrosMV3-main-main/Macros/" -> "Macros/"
                 filePath = filePath.replace(/^[^\/]+\/Macros\//, 'Macros/');
                 console.log("[Offscreen] Cleaned path:", filePath);
@@ -763,6 +775,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     }).catch(err => {
                         console.error("[Offscreen] File read/play error:", err);
                         sendResponse({ success: false, error: err.message || String(err) });
+                    }).finally(() => {
+                        playInFlight.delete(win_id);
                     });
                 }
             } else if (method === "openEditor") {
