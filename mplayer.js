@@ -4202,7 +4202,6 @@ MacroPlayer.prototype.play = function (macro, limits, callback) {
 
     try {
         // console.info("Playing macro %O, limits %O", macro, limits);
-        const comment = new RegExp("^\\s*(?:'.*)?$");
         this.source = macro.source;
         this.currentMacro = macro.name;
 
@@ -4230,7 +4229,13 @@ MacroPlayer.prototype.play = function (macro, limits, callback) {
         this.reset().then(() => {
             // Pre-fetch clipboard value for {{!CLIPBOARD}} variable expansion
             // This ensures the cache is up-to-date before macro execution starts
-            return imns.Clipboard.refreshCache ? imns.Clipboard.refreshCache() : Promise.resolve();
+            // Failures are non-fatal - macro can still run without clipboard cache
+            if (imns.Clipboard && typeof imns.Clipboard.refreshCache === 'function') {
+                return imns.Clipboard.refreshCache().catch((err) => {
+                    console.warn('[iMacros] Clipboard refresh failed (non-fatal):', err && err.message ? err.message : err);
+                });
+            }
+            return Promise.resolve();
         }).then(() => {
             this.checkFreewareLimits("loops", this.times)
             this.checkFreewareLimits("loops", this.currentLoop)
