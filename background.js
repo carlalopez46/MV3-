@@ -324,7 +324,7 @@ async function createOffscreen() {
             try {
                 // Fallback for older runtimes: inspect window clients
                 const clients = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
-                const exists = clients.some(c => c.url && c.url.endsWith('offscreen.html'));
+                const exists = Array.isArray(clients) && clients.some((c) => c.url && c.url.endsWith('offscreen.html'));
                 if (exists) return;
             } catch (clientError) {
                 console.warn('[iMacros SW] clients.matchAll failed while checking for offscreen:', clientError);
