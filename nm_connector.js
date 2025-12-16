@@ -17,7 +17,7 @@ function canUseNativeMessaging() {
         typeof chrome.runtime.sendNativeMessage === 'function';
 }
 
-const nm_connector = {
+var nm_connector = {
     // Native module connection status
     isConnected: false,
     port: null,

@@ -233,4 +233,4 @@ Communicator.prototype.broadcastMessage = function (topic, data, win_id) {
     }
 };
 
-const communicator = new Communicator();
+var communicator = new Communicator();

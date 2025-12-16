@@ -25,7 +25,7 @@ const _globalContextListeners = {
     }
 };
 
-const context = {
+var context = {
     _initialized: false,
     _listenersAttached: false,
     _initPromises: {}, // Track ongoing initializations
