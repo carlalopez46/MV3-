@@ -599,6 +599,23 @@ async function executeClipboardWrite(tab, text, sendResponse) {
     }
 }
 
+function handleUpdatePanelViews(sendResponse) {
+    try {
+        // Broadcast a refresh event to all open panel pages
+        chrome.runtime.sendMessage({ type: 'REFRESH_PANEL_TREE' }, function () {
+            if (chrome.runtime.lastError) {
+                // Expected when no panels are open; keep log noise minimal
+                console.debug('[iMacros MV3] No panels to update:', chrome.runtime.lastError.message || chrome.runtime.lastError);
+            }
+        });
+
+        sendResponse({ success: true });
+    } catch (error) {
+        console.error('[iMacros MV3] Error in UPDATE_PANEL_VIEWS:', error);
+        sendResponse({ success: false, error: error.message });
+    }
+}
+
 
 // Keep-alive logic (optional, but good for stability)
 // If Offscreen sends a keep-alive message, we can respond to keep SW alive
@@ -629,20 +646,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // Handle panel tree refresh request from options or other extension pages
     if (msg.type === 'UPDATE_PANEL_VIEWS') {
-        try {
-            // Broadcast a refresh event to all open panel pages
-            chrome.runtime.sendMessage({ type: 'REFRESH_PANEL_TREE' }, function () {
-                if (chrome.runtime.lastError) {
-                    // Expected when no panels are open; keep log noise minimal
-                    console.debug('[iMacros MV3] No panels to update:', chrome.runtime.lastError.message || chrome.runtime.lastError);
-                }
-            });
-
-            sendResponse({ success: true });
-        } catch (error) {
-            console.error('[iMacros MV3] Error in UPDATE_PANEL_VIEWS:', error);
-            sendResponse({ success: false, error: error.message });
-        }
+        handleUpdatePanelViews(sendResponse);
         return true;
     }
 
