@@ -686,7 +686,7 @@ async function executeClipboardRead(tab, sendResponse) {
                 // Prefer modern clipboard API but fall back to execCommand when focus is an issue
                 return navigator.clipboard.readText()
                     .then((text) => ({ success: true, text: text }))
-                    .catch((err) => readUsingExecCommand());
+                    .catch(() => readUsingExecCommand());
             },
             args: []
         });

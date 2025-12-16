@@ -4200,55 +4200,63 @@ MacroPlayer.prototype.play = function (macro, limits, callback) {
     // subsequent play() calls are properly blocked
     this.playing = true;
 
-    // console.info("Playing macro %O, limits %O", macro, limits);
-    const comment = new RegExp("^\\s*(?:'.*)?$");
-    this.source = macro.source;
-    this.currentMacro = macro.name;
+    try {
+        // console.info("Playing macro %O, limits %O", macro, limits);
+        const comment = new RegExp("^\\s*(?:'.*)?$");
+        this.source = macro.source;
+        this.currentMacro = macro.name;
 
-    // save macro id for "Edit" on error dialog
-    this.file_id = macro.file_id;
-    this.client_id = macro.client_id;
-    this.bookmark_id = macro.bookmark_id;
-    // save reference to callback
-    this.callback = callback;
-    this.limits = this.convertLimits(limits)
-    // count lines
-    var line_re = /\r?\n/g, count = 0;
-    while (line_re.exec(this.source))
-        count++;
-    // TODO: check macro length
+        // save macro id for "Edit" on error dialog
+        this.file_id = macro.file_id;
+        this.client_id = macro.client_id;
+        this.bookmark_id = macro.bookmark_id;
+        // save reference to callback
+        this.callback = callback;
+        this.limits = this.convertLimits(limits)
+        // count lines
+        var line_re = /\r?\n/g, count = 0;
+        while (line_re.exec(this.source))
+            count++;
+        // TODO: check macro length
 
-    // check number of loops
-    this.times = macro.times || 1;
-    this.currentLoop = macro.startLoop || 1;
-    this.cycledReplay = this.times - this.currentLoop > 0;
-    // debugger should be attached at least once for every page if there is an
-    // event command
-    this.debuggerAttached = false;
+        // check number of loops
+        this.times = macro.times || 1;
+        this.currentLoop = macro.startLoop || 1;
+        this.cycledReplay = this.times - this.currentLoop > 0;
+        // debugger should be attached at least once for every page if there is an
+        // event command
+        this.debuggerAttached = false;
 
-    this.reset().then(() => {
-        // Pre-fetch clipboard value for {{!CLIPBOARD}} variable expansion
-        // This ensures the cache is up-to-date before macro execution starts
-        return imns.Clipboard.refreshCache ? imns.Clipboard.refreshCache() : Promise.resolve();
-    }).then(() => {
-        this.checkFreewareLimits("loops", this.times)
-        this.checkFreewareLimits("loops", this.currentLoop)
-        this.beforeEachRun();
-        this.addListeners();
-        // NOTE: this.playing is already set at the start of play() to prevent race conditions
-        this.parseMacro();
-    }).then(() => {
-        // prepare stack of actions
-        this.action_stack = this.actions.slice();
-        this.action_stack.reverse();
-        context.updateState(this.win_id, "playing");
-        notifyPanelShowLines(this.win_id, this.source, this.currentMacro);
-        notifyPanelStatLine(this.win_id, "Replaying " + this.currentMacro, "info");
-        // start replaying
-        this.globalTimer.start();
-        this.playNextAction("start");
-    }).catch(e => this.handleError(e));
-
+        this.reset().then(() => {
+            // Pre-fetch clipboard value for {{!CLIPBOARD}} variable expansion
+            // This ensures the cache is up-to-date before macro execution starts
+            return imns.Clipboard.refreshCache ? imns.Clipboard.refreshCache() : Promise.resolve();
+        }).then(() => {
+            this.checkFreewareLimits("loops", this.times)
+            this.checkFreewareLimits("loops", this.currentLoop)
+            this.beforeEachRun();
+            this.addListeners();
+            // NOTE: this.playing is already set at the start of play() to prevent race conditions
+            this.parseMacro();
+        }).then(() => {
+            // prepare stack of actions
+            this.action_stack = this.actions.slice();
+            this.action_stack.reverse();
+            context.updateState(this.win_id, "playing");
+            notifyPanelShowLines(this.win_id, this.source, this.currentMacro);
+            notifyPanelStatLine(this.win_id, "Replaying " + this.currentMacro, "info");
+            // start replaying
+            this.globalTimer.start();
+            this.playNextAction("start");
+        }).catch(e => this.handleError(e));
+    } catch (e) {
+        // Roll back playing flag on synchronous setup failures to prevent stuck state
+        this.playing = false;
+        if (callback) {
+            callback({ success: false, error: e && e.message ? e.message : String(e) });
+        }
+        this.handleError(e);
+    }
 };
 
 
