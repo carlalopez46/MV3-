@@ -1,7 +1,7 @@
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
-/* global getRequiredElement, safeResizeDialog */
+/* global getRequiredElement, safeResizeDialog, getDialogArgs */
 
 // Global args variable populated from dialog arguments
 let args = null;
@@ -10,26 +10,6 @@ let passwordInput = null;
 let okButton = null;
 let cancelButton = null;
 let messageElement = null;
-
-function getArguments(windowId, callback) {
-    // MV3 compatible: Use chrome.runtime.sendMessage instead of getBackgroundPage
-    chrome.runtime.sendMessage({
-        type: 'GET_DIALOG_ARGS',
-        windowId: windowId
-    }, function(result) {
-        if (chrome.runtime.lastError) {
-            console.error("[iMacros] Failed to get dialog args:", chrome.runtime.lastError.message);
-            callback(null);
-            return;
-        }
-        if (!result || !result.success) {
-            console.error("[iMacros] Background failed to get dialog args:", result?.error);
-            callback(null);
-            return;
-        }
-        callback(result.args);
-    });
-}
 
 function sendResponse(response) {
     chrome.windows.getCurrent(null, function(w) {
@@ -127,7 +107,7 @@ window.addEventListener("load", function(evt) {
             return;
         }
 
-        getArguments(w.id, function(myArgs) {
+        getDialogArgs(w.id, function(myArgs) {
             if (!myArgs) {
                 console.error("[iMacros] Failed to get dialog arguments");
                 window.close();

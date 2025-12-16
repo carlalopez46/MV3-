@@ -16,10 +16,17 @@
     "audit:mv3": "node scripts/audit-mv3.js",
     "check:conflicts": "git grep -n '^<<<<<<<' -- ."
   },
-  "keywords": ["imacros", "chrome-extension", "automation"],
+  "keywords": [
+    "imacros",
+    "chrome-extension",
+    "automation"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "eslint": "^8.57.0"
+  },
+  "dependencies": {
+    "mcp": "^1.4.2"
   }
 }
