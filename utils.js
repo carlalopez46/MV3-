@@ -595,6 +595,17 @@ var imns = {
         },
 
         /**
+         * Check if we're in an Offscreen Document context
+         * In this context, clipboard operations need to be proxied through content scripts
+         */
+        _isOffscreenContext: function () {
+            return (typeof document !== 'undefined' &&
+                document.location &&
+                (document.location.pathname.includes('offscreen') ||
+                 document.location.href.includes('offscreen')));
+        },
+
+        /**
          * Helper to ensure offscreen document exists (for Service Worker context)
          */
         _ensureOffscreenDocument: function () {
@@ -655,16 +666,9 @@ var imns = {
         _writeClipboardFallback: function (str) {
             var self = this;
 
-            // Check if we're in an Offscreen Document context (no focus, clipboard fails)
-            // Also check for offscreen_bg.js context where mplayer.js runs
-            var isOffscreenContext = (typeof document !== 'undefined' &&
-                document.location &&
-                (document.location.pathname.includes('offscreen') ||
-                 document.location.href.includes('offscreen')));
-
             // If in Offscreen Document, proxy through Service Worker -> Content Script
             // This is necessary because Offscreen Documents don't have focus and clipboard operations fail
-            if (isOffscreenContext) {
+            if (self._isOffscreenContext()) {
                 console.log("[iMacros] Clipboard write: proxying through content script (offscreen context detected)");
                 return new Promise(function (resolve, reject) {
                     try {
@@ -726,14 +730,8 @@ var imns = {
         _readClipboardFallback: function () {
             var self = this;
 
-            // Check if we're in an Offscreen Document context (no focus, clipboard fails)
-            var isOffscreenContext = (typeof document !== 'undefined' &&
-                document.location &&
-                (document.location.pathname.includes('offscreen') ||
-                 document.location.href.includes('offscreen')));
-
             // If in Offscreen Document, proxy through Service Worker -> Content Script
-            if (isOffscreenContext) {
+            if (self._isOffscreenContext()) {
                 console.log("[iMacros] Clipboard read: proxying through content script (offscreen context detected)");
                 return new Promise(function (resolve, reject) {
                     try {
@@ -860,19 +858,13 @@ var imns = {
         getStringSync: function () {
             var self = this;
 
-            // Check if we're in an Offscreen Document context
-            var isOffscreenContext = (typeof document !== 'undefined' &&
-                document.location &&
-                (document.location.pathname.includes('offscreen') ||
-                 document.location.href.includes('offscreen')));
-
             // Check if cache is still valid
             if (Date.now() - self._cacheTimestamp < self._CACHE_TTL_MS) {
                 return self._cachedValue;
             }
 
             // In Offscreen Document, we can't read synchronously - trigger async update and return cache
-            if (isOffscreenContext) {
+            if (self._isOffscreenContext()) {
                 // Trigger async cache update for future reads (fire and forget)
                 self._readClipboardFallback().then(function(value) {
                     self._cachedValue = value || "";

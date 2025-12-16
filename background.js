@@ -561,6 +561,21 @@ if (chrome.downloads && chrome.downloads.onChanged) {
 }
 
 // Helper function to execute clipboard write in a tab
+// Helper to check if a tab is usable for clipboard operations (shared by CLIPBOARD_READ/WRITE)
+function isUsableTabForClipboard(tab) {
+    return tab && tab.url &&
+        !tab.url.startsWith('chrome://') &&
+        !tab.url.startsWith('chrome-extension://') &&
+        !tab.url.startsWith('about:') &&
+        !tab.url.startsWith('devtools://');
+}
+
+// Helper to find a usable tab from a list (shared by CLIPBOARD_READ/WRITE)
+function findUsableTabForClipboard(tabs) {
+    if (!tabs || tabs.length === 0) return null;
+    return tabs.find(isUsableTabForClipboard) || null;
+}
+
 async function executeClipboardWrite(tab, text, sendResponse) {
     // Skip restricted URLs - return success since clipboard is non-critical
     if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:')) {
@@ -1062,21 +1077,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.command === "CLIPBOARD_WRITE") {
         const textToWrite = msg.text;
 
-        // Helper to check if a tab is usable for clipboard operations
-        const isUsableTab = (tab) => {
-            return tab && tab.url &&
-                !tab.url.startsWith('chrome://') &&
-                !tab.url.startsWith('chrome-extension://') &&
-                !tab.url.startsWith('about:') &&
-                !tab.url.startsWith('devtools://');
-        };
-
-        // Helper to find a usable tab from a list
-        const findUsableTab = (tabs) => {
-            if (!tabs || tabs.length === 0) return null;
-            return tabs.find(isUsableTab) || null;
-        };
-
         // First, try to find an active web page tab in any window
         chrome.tabs.query({ active: true }, (activeTabs) => {
             if (chrome.runtime.lastError) {
@@ -1085,7 +1085,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 return;
             }
 
-            const usableActiveTab = findUsableTab(activeTabs);
+            const usableActiveTab = findUsableTabForClipboard(activeTabs);
             if (usableActiveTab) {
                 executeClipboardWrite(usableActiveTab, textToWrite, sendResponse);
                 return;
@@ -1099,7 +1099,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     return;
                 }
 
-                const usableTab = findUsableTab(allTabs);
+                const usableTab = findUsableTabForClipboard(allTabs);
                 if (usableTab) {
                     console.log('[iMacros SW] Using fallback tab for clipboard:', usableTab.url);
                     executeClipboardWrite(usableTab, textToWrite, sendResponse);
@@ -1116,21 +1116,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // Handle clipboard read request from Offscreen Document
     // Offscreen Document cannot access clipboard, so we proxy through the active tab
     if (msg.command === "CLIPBOARD_READ") {
-        // Helper to check if a tab is usable for clipboard operations
-        const isUsableTab = (tab) => {
-            return tab && tab.url &&
-                !tab.url.startsWith('chrome://') &&
-                !tab.url.startsWith('chrome-extension://') &&
-                !tab.url.startsWith('about:') &&
-                !tab.url.startsWith('devtools://');
-        };
-
-        // Helper to find a usable tab from a list
-        const findUsableTab = (tabs) => {
-            if (!tabs || tabs.length === 0) return null;
-            return tabs.find(isUsableTab) || null;
-        };
-
         // First, try to find an active web page tab in any window
         chrome.tabs.query({ active: true }, (activeTabs) => {
             if (chrome.runtime.lastError) {
@@ -1139,7 +1124,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 return;
             }
 
-            const usableActiveTab = findUsableTab(activeTabs);
+            const usableActiveTab = findUsableTabForClipboard(activeTabs);
             if (usableActiveTab) {
                 executeClipboardRead(usableActiveTab, sendResponse);
                 return;
@@ -1153,7 +1138,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     return;
                 }
 
-                const usableTab = findUsableTab(allTabs);
+                const usableTab = findUsableTabForClipboard(allTabs);
                 if (usableTab) {
                     console.log('[iMacros SW] Using fallback tab for clipboard read:', usableTab.url);
                     executeClipboardRead(usableTab, sendResponse);
