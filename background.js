@@ -2124,17 +2124,21 @@ const FocusGuard = (() => {
                 macroWinId = tab.windowId;
             }
 
-            const updateOptions = { focused: true };
+            let restoreWindow = false;
             try {
                 const win = await chrome.windows.get(macroWinId);
                 if (win && win.state === 'minimized') {
-                    updateOptions.state = 'normal';
+                    restoreWindow = true;
                 }
             } catch (err) {
                 console.warn('[iMacros SW] FocusGuard window lookup failed:', err);
             }
 
-            await chrome.windows.update(macroWinId, updateOptions);
+            if (restoreWindow) {
+                await chrome.windows.update(macroWinId, { state: 'normal', focused: true });
+            } else {
+                await chrome.windows.update(macroWinId, { focused: true });
+            }
             await chrome.tabs.update(macroTabId, { active: true });
             console.log('[iMacros SW] FocusGuard refocused tab', macroTabId, reason ? `(${reason})` : '');
         } catch (e) {
