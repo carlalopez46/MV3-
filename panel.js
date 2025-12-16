@@ -482,8 +482,14 @@ function updatePanelState(state) {
 function toggleInfoVisibility(showInfo) {
     const logo = document.getElementById("logo-and-links");
     const infoDiv = document.getElementById("info-div");
-    if (logo) logo.hidden = !!showInfo;
-    if (infoDiv) infoDiv.hidden = !showInfo;
+    if (logo) {
+        logo.hidden = !!showInfo;
+        logo.setAttribute("aria-hidden", showInfo ? "true" : "false");
+    }
+    if (infoDiv) {
+        infoDiv.hidden = !showInfo;
+        infoDiv.setAttribute("aria-hidden", showInfo ? "false" : "true");
+    }
 }
 
 function handlePanelShowInfo(args) {
@@ -514,6 +520,11 @@ function handlePanelShowInfo(args) {
 
 function closeInfoPanel() {
     lastInfoArgs = null;
+    const infoArea = document.getElementById("info-area");
+    if (infoArea) {
+        infoArea.value = "";
+        infoArea.removeAttribute("type");
+    }
     toggleInfoVisibility(false);
 }
 
