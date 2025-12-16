@@ -147,7 +147,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             }
             if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
                 // Properly handle chrome.runtime.lastError in callback
-                chrome.runtime.sendMessage(message, (response) => {
+                chrome.runtime.sendMessage(message, (_response) => {
                     if (chrome.runtime.lastError) {
                         console.warn('FileSyncBridge runtime message failed', chrome.runtime.lastError);
                     }

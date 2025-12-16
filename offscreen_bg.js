@@ -11,6 +11,58 @@ worker via explicit messaging.
 /* global FileSyncBridge, afio, communicator, dialogUtils */
 "use strict";
 
+// Virtual filesystem fallback for RUN and related file lookups when the native
+// connector is unavailable. This keeps nested macros working in MV3 by letting
+// MacroPlayer pull sources from the chunked VirtualFileService storage.
+const virtualFileService = typeof VirtualFileService === "function" ? new VirtualFileService() : null;
+let vfsReadyPromise = null;
+
+async function ensureVirtualFileService() {
+    if (!virtualFileService) {
+        return null;
+    }
+    if (!vfsReadyPromise) {
+        vfsReadyPromise = typeof virtualFileService.init === "function" ? virtualFileService.init() : Promise.resolve();
+    }
+    return vfsReadyPromise;
+}
+
+function installVirtualRunHook() {
+    if (!virtualFileService || typeof MacroPlayer === "undefined") {
+        return;
+    }
+
+    const proto = MacroPlayer.prototype;
+    if (proto.loadMacroFile && proto.loadMacroFile.__virtualHookInstalled) {
+        return;
+    }
+
+    const originalLoader = proto.loadMacroFile;
+    proto.loadMacroFile = async function (resolvedPath) {
+        await ensureVirtualFileService();
+        try {
+            const content = await virtualFileService.readTextFile(resolvedPath);
+            const name = resolvedPath ? resolvedPath.split(/[\\/]/).pop() : "";
+            return {
+                name: name || resolvedPath,
+                source: content,
+                file_id: resolvedPath
+            };
+        } catch (err) {
+            // Fall back to the previous loader or signal failure by returning null
+            if (typeof originalLoader === "function") {
+                return originalLoader.call(this, resolvedPath);
+            }
+            return null;
+        }
+    };
+    proto.loadMacroFile.__virtualHookInstalled = true;
+}
+
+// Initialize the virtual RUN hook immediately so MacroPlayer can resolve
+// nested macros from the virtual filesystem without relying on the native host.
+installVirtualRunHook();
+
 //
 // Common logic moved to bg_common.js
 // Ensure handler registration only runs when the helper is available.
@@ -443,7 +495,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             console.warn('[Offscreen] Stop target window not found. Scanning all contexts...');
             const stoppedDetails = [];
             for (let id in context) {
-                if (context.hasOwnProperty(id) && context[id]) {
+                if (Object.hasOwn(context, id) && context[id]) {
                     const { stoppedPlayer, stoppedRecorder } = stopContext(context[id], id);
                     if (stoppedPlayer || stoppedRecorder) {
                         stoppedDetails.push({ id, stoppedPlayer, stoppedRecorder });

@@ -58,7 +58,6 @@
         "webNavigation",
         "notifications",
         "webRequest",
-        "webRequestBlocking",
         "nativeMessaging",
         "downloads",
         "contextMenus",

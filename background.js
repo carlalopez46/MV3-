@@ -378,6 +378,12 @@ function persistEditorLaunchData(editorData) {
 // Track dialog lifecycles for MV3 dialogs to reduce dependency on offscreen dialogUtils
 const dialogCache = new Map(); // windowId -> { args, result }
 
+chrome.windows.onRemoved.addListener((windowId) => {
+    if (dialogCache.has(windowId)) {
+        dialogCache.delete(windowId);
+    }
+});
+
 // Forward action click to Offscreen
 chrome.action.onClicked.addListener(async (tab) => {
     try {
@@ -977,7 +983,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // Handle notification display request from Offscreen Document
     if (msg.command === "showNotification") {
-        chrome.notifications.create(msg.notificationId, msg.options, (notificationId) => {
+        chrome.notifications.create(msg.notificationId, msg.options, () => {
             if (chrome.runtime.lastError) {
                 console.error('[iMacros SW] Failed to create notification:', chrome.runtime.lastError);
             }
@@ -1079,7 +1085,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
                     // Retrieve the result or error
                     var error, value;
-                    if (window.hasOwnProperty(resultProp + '_error')) {
+                    if (Object.hasOwn(window, resultProp + '_error')) {
                         error = window[resultProp + '_error'];
                         delete window[resultProp + '_error'];
                     } else {
@@ -1435,11 +1441,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
 
             // Send to all tabs
-            let sentCount = 0;
             tabs.forEach((tab) => {
                 chrome.tabs.sendMessage(tab.id, message, () => {
                     // Ignore errors for individual tabs (may not have content script)
-                    sentCount++;
+                    return;
                 });
             });
 

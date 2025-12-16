@@ -97,6 +97,7 @@ function sendCommand(command, payload = {}) {
         const message = {
             ...payload,
             command: command,
+            target: 'offscreen',
             win_id: payload.win_id || currentWindowId
         };
         console.log(`[Panel] Sending command: ${command}`, message);

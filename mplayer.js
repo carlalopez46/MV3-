@@ -3694,7 +3694,7 @@ MacroPlayer.prototype.ActionTable["url"] = function (cmd) {
 
                         // Retrieve the result or error
                         var error, value;
-                        if (window.hasOwnProperty(resultProp + '_error')) {
+                        if (Object.hasOwn(window, resultProp + '_error')) {
                             error = window[resultProp + '_error'];
                             delete window[resultProp + '_error'];
                         } else {
