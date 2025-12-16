@@ -3104,10 +3104,6 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
             if (isNaN(x) || x < 0)
                 throw new BadParameter("!TIMEOUT_TAG must be non-negative integer");
             this.timeout_tag = x;
-            // User convenience: if STEP timeout is 0 (no wait), also reduce page timeout to avoid perceived hang
-            if (x === 0 && this.timeout > 1) {
-                this.timeout = 1;
-            }
             break;
         case "!timeout_download":
             var x = imns.s2i(param);
