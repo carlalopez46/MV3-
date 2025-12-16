@@ -427,30 +427,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         return true;
     }
 
-    if (request.command === 'playMacro') {
-        const win_id = request.win_id;
-        const filePath = request.file_path;
-        const loop = request.loop || 1;
-        console.log('[Offscreen] Received playMacro:', filePath, 'loop:', loop);
-
-        if (!context[win_id]) {
-            context.init(win_id).then(() => {
-                // Clean path and resolve absolute path logic required
-                // Re-use logic from CALL_CONTEXT_METHOD "playFile"
-                const req = { command: 'CALL_CONTEXT_METHOD', method: 'playFile', args: [filePath, loop], win_id: win_id };
-                // Dispatch to existing handler logic (refactoring would be better but this is safe)
-                // Or better, just call executeContextMethod directly if scope allows
-                // Since executeContextMethod is defined inside onMessage scope in previous blocks, 
-                // we need to access it. Ah, executeContextMethod is defined below in the same scope.
-                executeContextMethod(win_id, 'playFile', sendResponse, [filePath, loop]);
-            }).catch(err => {
-                sendResponse({ success: false, error: err.message || String(err) });
-            });
-        } else {
-            executeContextMethod(win_id, 'playFile', sendResponse, [filePath, loop]);
-        }
-        return true;
-    }
+    // NOTE: playMacro command is now handled exclusively by Service Worker (background.js)
+    // which transforms it to CALL_CONTEXT_METHOD with method 'playFile'.
+    // This prevents double execution when messages are broadcast to both SW and Offscreen.
+    // If direct playMacro handling is needed in the future, add a guard to check sender origin.
+    // See: https://github.com/user/iMacrosMV3-/issues/XXX for details.
 
     if (request.command === 'stop') {
         const win_id = request.win_id;
