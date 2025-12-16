@@ -599,6 +599,8 @@ async function executeClipboardWrite(tab, text, sendResponse) {
     }
 }
 
+// NOTE: This handler must stay alongside the main runtime listener (not inside
+// FocusGuard or other IIFEs) so it can access the message-scoped sendResponse.
 function handleUpdatePanelViews(sendResponse) {
     try {
         // Broadcast a refresh event to all open panel pages
