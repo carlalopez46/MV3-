@@ -691,6 +691,16 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 const loops = args[1] || 1;
                 console.log("[Offscreen] Reading and playing file (original path):", filePath);
 
+                // Guard against duplicate play requests (e.g., when messages are delivered twice)
+                const existingContext = context[win_id];
+                if (existingContext && existingContext.mplayer && existingContext.mplayer.playing) {
+                    console.warn(`[Offscreen] Ignoring playFile - macro already playing for window ${win_id}`);
+                    if (sendResponse) {
+                        sendResponse({ success: false, error: 'Macro already playing', state: 'playing' });
+                    }
+                    return;
+                }
+
                 // ★パスクリーニング: "iMacrosMV3-main-main/Macros/" -> "Macros/"
                 filePath = filePath.replace(/^[^\/]+\/Macros\//, 'Macros/');
                 console.log("[Offscreen] Cleaned path:", filePath);
@@ -1299,6 +1309,16 @@ function isPersonalVersion() {
         'Rijndael', 'ErrorLogger'
     ];
 
+    // Some dependencies are defined with top-level const, which are not exposed on
+    // globalThis/window. Provide explicit lexical checks so the validation logic
+    // does not incorrectly report them as missing.
+    const lexicalChecks = {
+        context: () => typeof context !== 'undefined',
+        communicator: () => typeof communicator !== 'undefined',
+        badge: () => typeof badge !== 'undefined',
+        nm_connector: () => typeof nm_connector !== 'undefined'
+    };
+
     const missingGlobals = [];
     const presentGlobals = [];
 
@@ -1306,6 +1326,16 @@ function isPersonalVersion() {
     // MV3: Cannot use eval() or new Function() in extension pages
     // We rely on globalThis/self which cover all globals declared with var/function
     function globalExists(name) {
+        if (lexicalChecks[name]) {
+            try {
+                if (lexicalChecks[name]()) {
+                    return true;
+                }
+            } catch (e) {
+                // Ignore ReferenceError and continue with other checks
+            }
+        }
+
         // Check globalThis first (works for var/function declarations)
         if (typeof globalThis !== 'undefined' && typeof globalThis[name] !== 'undefined') {
             return true;
