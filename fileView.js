@@ -401,11 +401,10 @@ var TreeView = {
 
             if (target_node && target_node.type == 'macro') {
                 playMacroDebounce = true;
-                setTimeout(function () {
-                    window.parent.postMessage({ type: "playMacro" }, "*");
-                    // Reset debounce after a short delay to allow next play
-                    setTimeout(function() { playMacroDebounce = false; }, 500);
-                }, 200);
+                // Post immediately for instant feedback
+                window.parent.postMessage({ type: "playMacro" }, "*");
+                // Reset debounce after a short delay to allow next play
+                setTimeout(function() { playMacroDebounce = false; }, 300);
             }
         });
 

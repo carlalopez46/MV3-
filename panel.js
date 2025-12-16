@@ -439,6 +439,13 @@ function updatePanelState(state) {
     if (state && typeof state === 'object') {
         panelState = state;
         stateName = state.isRecording ? 'recording' : state.isPlaying ? 'playing' : 'idle';
+    } else if (state === 'idle' || state === 'playing' || state === 'recording') {
+        // When called with a string, also update panelState to keep it in sync
+        panelState = {
+            isPlaying: state === 'playing',
+            isRecording: state === 'recording',
+            currentMacro: state === 'idle' ? null : panelState.currentMacro
+        };
     }
     const setCollapsed = (id, collapsed) => {
         const el = document.getElementById(id);
