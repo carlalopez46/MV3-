@@ -7,8 +7,15 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 let promptInput = null;
 let okButton = null;
+let hasSentResponse = false;
 
 function sendResponse(response) {
+    if (hasSentResponse) {
+        console.warn('[iMacros] Prompt dialog response already sent; ignoring duplicate');
+        return;
+    }
+    hasSentResponse = true;
+
     chrome.windows.getCurrent(null, function (w) {
         if (chrome.runtime.lastError) {
             console.error('[iMacros] Failed to get current window for prompt dialog:', chrome.runtime.lastError.message);
@@ -46,11 +53,16 @@ function ok() {
         return;
     }
     const promptValue = promptInput.value;
+    // Prevent double submissions triggered by rapid clicks/keypresses
+    okButton && (okButton.disabled = true);
+    promptInput.disabled = true;
     sendResponse({ inputValue: promptValue });
     // window.close() is now called in sendResponse callback
 }
 
 function cancel() {
+    okButton && (okButton.disabled = true);
+    promptInput && (promptInput.disabled = true);
     sendResponse({ canceled: true });
     // window.close() is now called in sendResponse callback
 }
