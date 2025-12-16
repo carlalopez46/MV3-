@@ -599,10 +599,13 @@ var imns = {
          * In this context, clipboard operations need to be proxied through content scripts
          */
         _isOffscreenContext: function () {
-            return (typeof document !== 'undefined' &&
-                document.location &&
-                (document.location.pathname.includes('offscreen') ||
-                 document.location.href.includes('offscreen')));
+            if (typeof document === 'undefined' || !document.location) {
+                return false;
+            }
+            var url = document.location.href;
+            // Match extension's offscreen document specifically
+            return url.includes('/offscreen.html') ||
+                   (url.includes('offscreen') && url.startsWith('chrome-extension://'));
         },
 
         /**

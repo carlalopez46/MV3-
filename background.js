@@ -644,10 +644,10 @@ async function executeClipboardWrite(tab, text, sendResponse) {
 
 // Execute clipboard read operation in the context of a web page tab
 async function executeClipboardRead(tab, sendResponse) {
-    // Skip restricted URLs
+    // Skip restricted URLs - return empty string since clipboard is non-critical
     if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:')) {
         console.warn('[iMacros SW] Cannot read clipboard on restricted URL:', tab.url);
-        sendResponse({ success: false, error: 'Restricted URL' });
+        sendResponse({ success: true, text: '', warning: 'Restricted URL skipped' });
         return;
     }
 
@@ -1144,7 +1144,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     executeClipboardRead(usableTab, sendResponse);
                 } else {
                     console.warn('[iMacros SW] No web page tab found for clipboard read');
-                    sendResponse({ success: false, error: 'No web page tab available' });
+                    // Return empty string - clipboard is non-critical
+                    sendResponse({ success: true, text: '', warning: 'No web page tab available' });
                 }
             });
         });
