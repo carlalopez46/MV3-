@@ -627,6 +627,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
+    // Handle panel tree refresh request from options or other extension pages
+    if (msg.type === 'UPDATE_PANEL_VIEWS') {
+        try {
+            // Broadcast a refresh event to all open panel pages
+            chrome.runtime.sendMessage({ type: 'REFRESH_PANEL_TREE' }, function () {
+                if (chrome.runtime.lastError) {
+                    // Expected when no panels are open; keep log noise minimal
+                    console.debug('[iMacros MV3] No panels to update:', chrome.runtime.lastError.message || chrome.runtime.lastError);
+                }
+            });
+
+            sendResponse({ success: true });
+        } catch (error) {
+            console.error('[iMacros MV3] Error in UPDATE_PANEL_VIEWS:', error);
+            sendResponse({ success: false, error: error.message });
+        }
+        return true;
+    }
+
     if (msg.command === 'UPDATE_EXECUTION_STATE' && typeof msg.state === 'string') {
         executionState.transition(msg.state, msg.meta || {}).then((snapshot) => {
             sendResponse({ success: true, state: snapshot });
@@ -2153,30 +2172,6 @@ const FocusGuard = (() => {
             console.warn('[iMacros SW] FocusGuard failed to refocus:', e);
             await failSafeStop(e);
         }
-    }
-
-    // Handle panel tree refresh request from options or other extension pages
-    if (msg.type === 'UPDATE_PANEL_VIEWS') {
-        try {
-            if (typeof context === 'undefined') {
-                sendResponse({ success: false, error: 'Context not available' });
-                return true;
-            }
-
-            // Broadcast a refresh event to all open panel pages
-            chrome.runtime.sendMessage({ type: 'REFRESH_PANEL_TREE' }, function () {
-                if (chrome.runtime.lastError) {
-                    // Expected when no panels are open; keep log noise minimal
-                    console.debug('[iMacros MV3] No panels to update:', chrome.runtime.lastError.message || chrome.runtime.lastError);
-                }
-            });
-
-            sendResponse({ success: true });
-        } catch (error) {
-            console.error('[iMacros MV3] Error in UPDATE_PANEL_VIEWS:', error);
-            sendResponse({ success: false, error: error.message });
-        }
-        return true;
     }
 
     async function failSafeStop(error) {
