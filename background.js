@@ -614,6 +614,8 @@ function handleUpdatePanelViews(sendResponse) {
         console.error('[iMacros MV3] Error in UPDATE_PANEL_VIEWS:', error);
         sendResponse({ success: false, error: error.message });
     }
+
+    return true;
 }
 
 
@@ -646,8 +648,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // Handle panel tree refresh request from options or other extension pages
     if (msg.type === 'UPDATE_PANEL_VIEWS') {
-        handleUpdatePanelViews(sendResponse);
-        return true;
+        return handleUpdatePanelViews(sendResponse);
     }
 
     if (msg.command === 'UPDATE_EXECUTION_STATE' && typeof msg.state === 'string') {
