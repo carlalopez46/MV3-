@@ -25,7 +25,7 @@ const _globalContextListeners = {
     }
 };
 
-var context = {
+const context = {
     _initialized: false,
     _listenersAttached: false,
     _initPromises: {}, // Track ongoing initializations
@@ -301,3 +301,6 @@ var context = {
 // This event has a weird condition that an extension can register only
 // one listener. It is registered in attachListeners() now.
 context.df_handlers = [];
+
+// Make context globally accessible for dependency verification
+globalThis.context = context;

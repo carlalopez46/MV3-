@@ -4,7 +4,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 // Handy wrapper for browser action functions
 // (badge is not really good naming for the object)
-var badge = {
+const badge = {
     // execute callback for all tabs in window
     // callback is function(tab) {...}
     forAllTabs: function (win_id, callback) {
@@ -155,3 +155,6 @@ var badge = {
         this.setText(win_id, "");
     }
 };
+
+// Make badge globally accessible for dependency verification
+globalThis.badge = badge;

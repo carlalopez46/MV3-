@@ -233,4 +233,7 @@ Communicator.prototype.broadcastMessage = function (topic, data, win_id) {
     }
 };
 
-var communicator = new Communicator();
+const communicator = new Communicator();
+
+// Make communicator globally accessible for dependency verification
+globalThis.communicator = communicator;
