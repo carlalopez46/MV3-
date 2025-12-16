@@ -56,19 +56,33 @@ async function cancel() {
 
 
 
-async function getArguments(windowId) {
+// Give the background/offscreen worker enough time to register dialog args
+// before abandoning the dialog. Mirror the timing from promptDialog.js.
+const RETRY_DELAY_MS = 200;
+const DIALOG_ARGS_RETRY_WINDOW_MS = 6000;
+const MAX_RETRY_ATTEMPTS = DIALOG_ARGS_RETRY_WINDOW_MS / RETRY_DELAY_MS;
+
+async function getArguments(windowId, attemptsLeft = MAX_RETRY_ATTEMPTS) {
     try {
         const result = await chrome.runtime.sendMessage({
-            command: 'getDialogArgs',
-            win_id: windowId
+            type: 'GET_DIALOG_ARGS',
+            windowId: windowId
         });
+        // Note: chrome.runtime.lastError is not valid in async/await context
+        // Errors are thrown as exceptions and caught by the catch block
         if (!result || !result.success) {
-            console.error("[iMacros] Failed to get dialog args:", result?.error);
-            return null;
+            throw new Error(result?.error || 'Unknown error');
         }
         return result.args;
     } catch (err) {
-        console.error("[iMacros] Failed to get dialog args:", err);
+        console.error("[iMacros] Failed to get dialog args:", err.message);
+        // Retry to handle race where dialog args are not yet registered
+        if (attemptsLeft > 0) {
+            const attemptNumber = MAX_RETRY_ATTEMPTS - attemptsLeft + 1;
+            console.log(`[iMacros] Retrying getArguments (${attemptNumber}/${MAX_RETRY_ATTEMPTS})...`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+            return getArguments(windowId, attemptsLeft - 1);
+        }
         return null;
     }
 }
