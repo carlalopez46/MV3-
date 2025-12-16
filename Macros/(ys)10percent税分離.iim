@@ -15,7 +15,7 @@ SET run_guard EVAL("(function(){var now=Date.now();var last=window._imacrosLastR
 SET !ERRORIGNORE YES
 SET check_guard {{run_guard}}
 SET !ERRORIGNORE NO
-URL GOTO=javascript:if("{{check_guard}}"==="STOP"){throw new Error('Duplicate run blocked');}
+SET guard_check EVAL("if('{{check_guard}}'==='STOP'){throw new Error('Duplicate run blocked');} 'OK';")
 
 SET result_text 税込価格:{{inprice}}円{{!NEWLINE}}税抜価格:{{price_without_tax}}円{{!NEWLINE}}消費税:{{tax_amount}}円
 PROMPT {{result_text}}
