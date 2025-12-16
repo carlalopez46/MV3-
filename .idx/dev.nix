@@ -9,7 +9,8 @@
     # pkgs.go
     # pkgs.python311
     # pkgs.python311Packages.pip
-    # pkgs.nodejs_20
+    pkgs.nodejs_20
+    pkgs.nodePackages.npm
     # pkgs.nodePackages.nodemon
   ];
 
@@ -19,6 +20,7 @@
     # Search for the extensions you want on https://open-vsx.org/ and use "publisher.id"
     extensions = [
       # "vscodevim.vim"
+      "dbaeumer.vscode-eslint"
     ];
 
     # Enable previews
@@ -43,7 +45,7 @@
       # Runs when a workspace is first created
       onCreate = {
         # Example: install JS dependencies from NPM
-        # npm-install = "npm install";
+        npm-install = "npm install";
       };
       # Runs when the workspace is (re)started
       onStart = {
