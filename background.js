@@ -570,13 +570,41 @@ async function executeClipboardWrite(tab, text, sendResponse) {
     }
 
     try {
+        // Ensure the tab and window are focused before attempting clipboard write
+        try {
+            await chrome.windows.update(tab.windowId, { focused: true });
+            await chrome.tabs.update(tab.id, { active: true });
+            // Allow time for focus to settle before clipboard operation
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        } catch (focusErr) {
+            console.warn('[iMacros SW] Focus operation failed, proceeding with clipboard write:', focusErr);
+        }
+
         // Use chrome.scripting.executeScript to write to clipboard in the tab's context
         const results = await chrome.scripting.executeScript({
             target: { tabId: tab.id },
             func: (textToWrite) => {
+                const copyUsingExecCommand = (value) => {
+                    try {
+                        const textarea = document.createElement('textarea');
+                        textarea.value = value;
+                        textarea.setAttribute('readonly', '');
+                        textarea.style.position = 'fixed';
+                        textarea.style.opacity = '0';
+                        document.body.appendChild(textarea);
+                        textarea.select();
+                        const success = document.execCommand('copy');
+                        document.body.removeChild(textarea);
+                        return success ? { success: true } : { success: false, error: 'execCommand copy failed' };
+                    } catch (e) {
+                        return { success: false, error: e.message };
+                    }
+                };
+
+                // Prefer modern clipboard API but fall back to execCommand when focus is an issue
                 return navigator.clipboard.writeText(textToWrite)
                     .then(() => ({ success: true }))
-                    .catch(err => ({ success: false, error: err.message }));
+                    .catch((err) => copyUsingExecCommand(textToWrite));
             },
             args: [text]
         });
