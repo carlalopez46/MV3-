@@ -304,16 +304,31 @@ async function createOffscreen() {
 
     creatingOffscreen = (async () => {
 
+        // Guard against runtimes that do not yet expose the Offscreen API.
+        if (!chrome.offscreen || typeof chrome.offscreen.createDocument !== 'function') {
+            throw new Error('Offscreen API unavailable in this Chrome runtime');
+        }
+
         // Check if offscreen document already exists using runtime contexts (preferred)
         if (chrome.runtime && typeof chrome.runtime.getContexts === 'function') {
-            const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
-            const exists = Array.isArray(contexts) && contexts.some((ctx) => ctx.documentUrl && ctx.documentUrl.endsWith('offscreen.html'));
-            if (exists) return;
-        } else if (self.clients) {
-            // Fallback for older runtimes: inspect window clients
-            const clients = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
-            const exists = clients.some(c => c.url.endsWith('offscreen.html'));
-            if (exists) return;
+            try {
+                const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+                const exists = Array.isArray(contexts) && contexts.some((ctx) => ctx.documentUrl && ctx.documentUrl.endsWith('offscreen.html'));
+                if (exists) return;
+            } catch (contextError) {
+                console.warn('[iMacros SW] getContexts failed, falling back to clients.matchAll:', contextError);
+            }
+        }
+
+        if (self.clients) {
+            try {
+                // Fallback for older runtimes: inspect window clients
+                const clients = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+                const exists = clients.some(c => c.url.endsWith('offscreen.html'));
+                if (exists) return;
+            } catch (clientError) {
+                console.warn('[iMacros SW] clients.matchAll failed while checking for offscreen:', clientError);
+            }
         }
 
         const reasons = (chrome.offscreen && chrome.offscreen.Reason)
@@ -2138,6 +2153,30 @@ const FocusGuard = (() => {
             console.warn('[iMacros SW] FocusGuard failed to refocus:', e);
             await failSafeStop(e);
         }
+    }
+
+    // Handle panel tree refresh request from options or other extension pages
+    if (msg.type === 'UPDATE_PANEL_VIEWS') {
+        try {
+            if (typeof context === 'undefined') {
+                sendResponse({ success: false, error: 'Context not available' });
+                return true;
+            }
+
+            // Broadcast a refresh event to all open panel pages
+            chrome.runtime.sendMessage({ type: 'REFRESH_PANEL_TREE' }, function () {
+                if (chrome.runtime.lastError) {
+                    // Expected when no panels are open; keep log noise minimal
+                    console.debug('[iMacros MV3] No panels to update:', chrome.runtime.lastError.message || chrome.runtime.lastError);
+                }
+            });
+
+            sendResponse({ success: true });
+        } catch (error) {
+            console.error('[iMacros MV3] Error in UPDATE_PANEL_VIEWS:', error);
+            sendResponse({ success: false, error: error.message });
+        }
+        return true;
     }
 
     async function failSafeStop(error) {
