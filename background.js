@@ -1,3 +1,4 @@
+/* global chrome */
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */

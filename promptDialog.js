@@ -95,7 +95,7 @@ function cancel() {
     // window.close() is now called in sendResponse callback
 }
 
-window.addEventListener("load", function (evt) {
+window.addEventListener("load", function () {
 
     if (typeof getRequiredElement !== 'function' || typeof safeResizeDialog !== 'function') {
         console.error('[iMacros] Dialog helpers are unavailable; closing prompt dialog');
