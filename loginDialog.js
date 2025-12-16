@@ -123,7 +123,7 @@ function ok() {
 }
 
 function cancel() {
-    sendResponse({cancel: true});
+    sendResponse({canceled: true});
 }
 
 window.addEventListener("load", function(evt) {

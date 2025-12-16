@@ -68,9 +68,8 @@ async function getArguments(windowId, attemptsLeft = MAX_RETRY_ATTEMPTS) {
             type: 'GET_DIALOG_ARGS',
             windowId: windowId
         });
-        if (chrome.runtime.lastError) {
-            throw new Error(chrome.runtime.lastError.message);
-        }
+        // Note: chrome.runtime.lastError is not valid in async/await context
+        // Errors are thrown as exceptions and caught by the catch block
         if (!result || !result.success) {
             throw new Error(result?.error || 'Unknown error');
         }
