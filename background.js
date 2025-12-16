@@ -89,6 +89,7 @@ async function initializeLocalStoragePolyfill() {
 
     if (typeof globalThis !== 'undefined') {
         globalThis.localStorage = polyfill;
+        // Expose the cache for legacy modules that expect synchronous access; treat as internal-only.
         globalThis._localStorageData = cache;
         globalThis._LOCALSTORAGE_PREFIX = LOCALSTORAGE_PREFIX;
     }
@@ -124,6 +125,7 @@ async function initializeLocalStoragePolyfill() {
 
     if (typeof globalThis !== 'undefined') {
         globalThis.localStorage = polyfill;
+        // Expose the cache for legacy modules that expect synchronous access; treat as internal-only.
         globalThis._localStorageData = cache;
         globalThis._LOCALSTORAGE_PREFIX = LOCALSTORAGE_PREFIX;
     }
@@ -1445,7 +1447,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             tabs.forEach((tab) => {
                 chrome.tabs.sendMessage(tab.id, message, () => {
                     // Ignore errors for individual tabs (may not have content script)
-                    return;
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        // Silently ignore
+                    }
                 });
             });
 
@@ -2028,6 +2032,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             windowId: msg.windowId,
             response: msg.response
         }).then(result => {
+            dialogCache.delete(msg.windowId);
             sendResponse(result || { success: true });
         }).catch(err => {
             console.error('[iMacros SW] SET_DIALOG_RESULT error:', err);
@@ -2119,17 +2124,21 @@ const FocusGuard = (() => {
                 macroWinId = tab.windowId;
             }
 
-            const updateOptions = { focused: true };
+            let restoreWindow = false;
             try {
                 const win = await chrome.windows.get(macroWinId);
                 if (win && win.state === 'minimized') {
-                    updateOptions.state = 'normal';
+                    restoreWindow = true;
                 }
             } catch (err) {
                 console.warn('[iMacros SW] FocusGuard window lookup failed:', err);
             }
 
-            await chrome.windows.update(macroWinId, updateOptions);
+            if (restoreWindow) {
+                await chrome.windows.update(macroWinId, { state: 'normal', focused: true });
+            } else {
+                await chrome.windows.update(macroWinId, { focused: true });
+            }
             await chrome.tabs.update(macroTabId, { active: true });
             console.log('[iMacros SW] FocusGuard refocused tab', macroTabId, reason ? `(${reason})` : '');
         } catch (e) {
