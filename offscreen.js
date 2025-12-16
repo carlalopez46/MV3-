@@ -44,6 +44,14 @@ function safeSendResponse(sendResponse, payload) {
 if (chrome && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
         try {
+            // Only handle messages that are specifically for offscreen.js (eval, clipboard)
+            // Messages with target === 'offscreen' are for offscreen_bg.js
+            // Let other handlers process them by not responding
+            if (message.target === 'offscreen') {
+                // This message is for offscreen_bg.js, not for us
+                return false;
+            }
+
             // Handle eval requests
             if (message.type === "eval_in_sandbox") {
                 // Store callback
