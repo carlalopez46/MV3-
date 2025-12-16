@@ -575,6 +575,10 @@ var imns = {
     Clipboard: {
         _offscreenInitPromise: null,
         _offscreenUnavailableError: null,
+        // Cache for synchronous clipboard reading (used by variable expansion)
+        _cachedValue: "",
+        _cacheTimestamp: 0,
+        _CACHE_TTL_MS: 100, // Cache valid for 100ms
         /**
          * Check if we're in a Service Worker environment
          */
@@ -801,7 +805,43 @@ var imns = {
         },
 
         /**
-         * Get string from clipboard
+         * Get string from clipboard (synchronous version for variable expansion)
+         * Returns cached value or attempts synchronous DOM read
+         */
+        getStringSync: function () {
+            var self = this;
+
+            // Check if cache is still valid
+            if (Date.now() - self._cacheTimestamp < self._CACHE_TTL_MS) {
+                return self._cachedValue;
+            }
+
+            // Try synchronous DOM read in non-Service Worker contexts
+            if (!self._isServiceWorker() && typeof document !== 'undefined' && document.body) {
+                try {
+                    var x = self._check_area();
+                    x.value = '';
+                    x.select();
+                    x.focus();
+                    document.execCommand("Paste");
+                    var value = x.value;
+                    // Update cache
+                    self._cachedValue = value;
+                    self._cacheTimestamp = Date.now();
+                    return value;
+                } catch (e) {
+                    console.warn("[iMacros] Synchronous clipboard read failed:", e.message);
+                    // Return cached value on error
+                    return self._cachedValue;
+                }
+            }
+
+            // Return cached value if no sync read available
+            return self._cachedValue;
+        },
+
+        /**
+         * Get string from clipboard (async version)
          * Uses offscreen document in Service Worker, Clipboard API or DOM in other contexts
          */
         getString: function () {
@@ -819,7 +859,10 @@ var imns = {
                                 reject(new Error(chrome.runtime.lastError.message));
                             } else if (response && response.success) {
                                 console.log("[iMacros] Clipboard read successful via offscreen");
-                                resolve(response.text || "");
+                                // Update cache
+                                self._cachedValue = response.text || "";
+                                self._cacheTimestamp = Date.now();
+                                resolve(self._cachedValue);
                             } else {
                                 var errorMsg = response && response.error ? response.error : "Unknown error";
                                 console.error("[iMacros] Offscreen clipboard read failed:", errorMsg);
@@ -837,7 +880,12 @@ var imns = {
                 });
             }
 
-            return self._readClipboardFallback();
+            return self._readClipboardFallback().then(function (value) {
+                // Update cache
+                self._cachedValue = value || "";
+                self._cacheTimestamp = Date.now();
+                return self._cachedValue;
+            });
         }
     }
 };

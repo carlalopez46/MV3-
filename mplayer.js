@@ -3122,8 +3122,14 @@ MacroPlayer.prototype.ActionTable["set"] = function (cmd) {
             this.globalTimer.setMacroTimeout(x);
             break;
         case "!clipboard":
-            imns.Clipboard.putString(param);
-            break;
+            imns.Clipboard.putString(param).then(() => {
+                mplayer.next("SET");
+            }).catch(err => {
+                // Clipboard write failure is non-critical, log but continue
+                console.warn("[iMacros] Clipboard write failed:", err.message || err);
+                mplayer.next("SET");
+            });
+            return;
         case "!filestopwatch":
             if (!this.afioIsInstalled)
                 throw new RuntimeError(
@@ -5120,7 +5126,7 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
         if (t) return mplayer.currentLoop;
 
         t = var_name.match(/^!clipboard$/i);
-        if (t) return imns.Clipboard.getString() || "";
+        if (t) return imns.Clipboard.getStringSync() || "";
 
         t = var_name.match(/^!extract_step$/i);
         if (t) return mplayer.currentExtractStep;

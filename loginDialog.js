@@ -3,6 +3,12 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 */
 /* global getRequiredElement, safeResizeDialog */
 
+// Give the background/offscreen worker enough time to register dialog args
+// before abandoning the dialog. Mirror the timing from promptDialog.js.
+const RETRY_DELAY_MS = 200;
+const DIALOG_ARGS_RETRY_WINDOW_MS = 6000;
+const MAX_RETRY_ATTEMPTS = DIALOG_ARGS_RETRY_WINDOW_MS / RETRY_DELAY_MS;
+
 // Global args variable populated from dialog arguments
 let args = null;
 let usernameInput = null;
@@ -11,7 +17,7 @@ let okButton = null;
 let cancelButton = null;
 let messageElement = null;
 
-function getArguments(windowId, callback) {
+function getArguments(windowId, callback, attemptsLeft = MAX_RETRY_ATTEMPTS) {
     // MV3 compatible: Use chrome.runtime.sendMessage instead of getBackgroundPage
     chrome.runtime.sendMessage({
         type: 'GET_DIALOG_ARGS',
@@ -19,12 +25,25 @@ function getArguments(windowId, callback) {
     }, function(result) {
         if (chrome.runtime.lastError) {
             console.error("[iMacros] Failed to get dialog args:", chrome.runtime.lastError.message);
-            callback(null);
+            // Retry to handle race where dialog args are not yet registered
+            if (attemptsLeft > 0) {
+                const attemptNumber = MAX_RETRY_ATTEMPTS - attemptsLeft + 1;
+                console.log(`[iMacros] Retrying getArguments (${attemptNumber}/${MAX_RETRY_ATTEMPTS})...`);
+                setTimeout(() => getArguments(windowId, callback, attemptsLeft - 1), RETRY_DELAY_MS);
+            } else {
+                callback(null);
+            }
             return;
         }
         if (!result || !result.success) {
             console.error("[iMacros] Background failed to get dialog args:", result?.error);
-            callback(null);
+            if (attemptsLeft > 0) {
+                const attemptNumber = MAX_RETRY_ATTEMPTS - attemptsLeft + 1;
+                console.log(`[iMacros] Retrying getArguments (${attemptNumber}/${MAX_RETRY_ATTEMPTS})...`);
+                setTimeout(() => getArguments(windowId, callback, attemptsLeft - 1), RETRY_DELAY_MS);
+            } else {
+                callback(null);
+            }
             return;
         }
         callback(result.args);
@@ -104,7 +123,7 @@ function ok() {
 }
 
 function cancel() {
-    sendResponse({cancel: true});
+    sendResponse({canceled: true});
 }
 
 window.addEventListener("load", function(evt) {
