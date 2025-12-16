@@ -571,9 +571,14 @@ async function executeClipboardWrite(tab, text, sendResponse) {
 
     try {
         // Ensure the tab and window are focused before attempting clipboard write
-        await chrome.windows.update(tab.windowId, { focused: true });
-        await chrome.tabs.update(tab.id, { active: true });
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        try {
+            await chrome.windows.update(tab.windowId, { focused: true });
+            await chrome.tabs.update(tab.id, { active: true });
+            // Allow time for focus to settle before clipboard operation
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        } catch (focusErr) {
+            console.warn('[iMacros SW] Focus operation failed, proceeding with clipboard write:', focusErr);
+        }
 
         // Use chrome.scripting.executeScript to write to clipboard in the tab's context
         const results = await chrome.scripting.executeScript({

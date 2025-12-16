@@ -711,74 +711,66 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     return;
                 }
 
-                playInFlight.add(win_id);
+                const resolveAbsolutePath = async (path) => {
+                    // ★パスクリーニング: "iMacrosMV3-main-main/Macros/" -> "Macros/"
+                    let cleanedPath = path.replace(/^[^\/]+\/Macros\//, 'Macros/');
+                    console.log("[Offscreen] Cleaned path:", cleanedPath);
 
-                // ★パスクリーニング: "iMacrosMV3-main-main/Macros/" -> "Macros/"
-                filePath = filePath.replace(/^[^\/]+\/Macros\//, 'Macros/');
-                console.log("[Offscreen] Cleaned path:", filePath);
-
-                // ★重要: 相対パスを絶対パスに変換
-                // File System Access APIのルートディレクトリを取得
-                if (!filePath.startsWith('/') && !filePath.match(/^[a-zA-Z]:/)) {
-                    // 相対パスの場合、File System Access APIのルートハンドルのパスを取得
-                    // FileSystemAccessService経由でルートパスを取得
-                    if (typeof FileSystemAccessService !== 'undefined' && FileSystemAccessService.getRootPath) {
-                        FileSystemAccessService.getRootPath().then(rootPath => {
-                            // ルートパス + 相対パス
-                            filePath = rootPath + '/' + filePath;
-                            console.log("[Offscreen] Resolved absolute path:", filePath);
-                            return readAndPlayFile(filePath, loops, win_id, sendResponse);
-                        }).catch(err => {
-                            console.error("[Offscreen] Failed to get root path:", err);
-                            // フォールバック: そのまま試す
-                            readAndPlayFile(filePath, loops, win_id, sendResponse);
-                        });
-                    } else {
-                        // FileSystemAccessServiceが使えない場合、そのまま試す
-                        console.warn("[Offscreen] FileSystemAccessService not available, using path as-is");
-                        readAndPlayFile(filePath, loops, win_id, sendResponse);
+                    // ★重要: 相対パスを絶対パスに変換
+                    if (!cleanedPath.startsWith('/') && !cleanedPath.match(/^[a-zA-Z]:/)) {
+                        if (typeof FileSystemAccessService !== 'undefined' && FileSystemAccessService.getRootPath) {
+                            try {
+                                const rootPath = await FileSystemAccessService.getRootPath();
+                                cleanedPath = `${rootPath}/${cleanedPath}`;
+                                console.log("[Offscreen] Resolved absolute path:", cleanedPath);
+                            } catch (err) {
+                                console.error("[Offscreen] Failed to get root path:", err);
+                                console.warn("[Offscreen] Falling back to cleaned relative path");
+                            }
+                        } else {
+                            console.warn("[Offscreen] FileSystemAccessService not available, using path as-is");
+                        }
                     }
-                } else {
-                    // 既に絶対パス
-                    readAndPlayFile(filePath, loops, win_id, sendResponse);
-                }
 
-                // ヘルパー関数: ファイル読み込みと再生
-                function readAndPlayFile(absolutePath, loops, win_id, sendResponse) {
+                    return cleanedPath;
+                };
+
+                const readAndPlayFile = async (absolutePath, loops, win_id) => {
                     const node = afio.openNode(absolutePath);
+                    const source = await afio.readTextFile(node);
+                    console.log("[Offscreen] File read success. Playing...");
 
-                    afio.readTextFile(node).then(source => {
-                        console.log("[Offscreen] File read success. Playing...");
+                    const macro = {
+                        source: source,
+                        name: node.leafName,
+                        file_id: absolutePath,
+                        times: loops
+                    };
 
-                        const macro = {
-                            source: source,
-                            name: node.leafName,
-                            file_id: absolutePath,
-                            times: loops
-                        };
+                    const ctx = context[win_id] && context[win_id]._initialized
+                        ? context[win_id]
+                        : await context.init(win_id);
 
-                        // Ensure context is initialized before playing
-                        var contextPromise = context[win_id] && context[win_id]._initialized
-                            ? Promise.resolve(context[win_id])
-                            : context.init(win_id);
+                    console.log("[Offscreen] Context initialized, calling mplayer.play");
+                    const limits = await getLimits();
+                    return ctx.mplayer.play(macro, limits);
+                };
 
-                        return contextPromise.then(function (ctx) {
-                            console.log("[Offscreen] Context initialized, calling mplayer.play");
-                            // 制限を取得して再生
-                            return getLimits().then(limits => {
-                                return ctx.mplayer.play(macro, limits);
-                            });
-                        });
-                    }).then(() => {
+                (async () => {
+                    playInFlight.add(win_id);
+                    try {
+                        const absolutePath = await resolveAbsolutePath(filePath);
+                        await readAndPlayFile(absolutePath, loops, win_id);
                         console.log("[Offscreen] Macro play completed");
                         sendResponse({ success: true });
-                    }).catch(err => {
+                    } catch (err) {
                         console.error("[Offscreen] File read/play error:", err);
                         sendResponse({ success: false, error: err.message || String(err) });
-                    }).finally(() => {
+                    } finally {
                         playInFlight.delete(win_id);
-                    });
-                }
+                    }
+                })();
+                return true;
             } else if (method === "openEditor") {
                 // ★追加: ファイルパスからエディタを開く
                 let filePath = args[0];
