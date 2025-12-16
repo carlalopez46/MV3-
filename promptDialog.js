@@ -1,16 +1,9 @@
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
-/* global getRequiredElement, safeResizeDialog */
+/* global getRequiredElement, safeResizeDialog, getDialogArgs */
 // Custom prompt function
 // as alternative for JavaScript prompt()
-
-// Give the background/offscreen worker enough time to register dialog args
-// before abandoning the prompt. The offscreen handler retries for ~6 seconds,
-// so mirror that window here to avoid closing the dialog prematurely.
-const RETRY_DELAY_MS = 200;
-const DIALOG_ARGS_RETRY_WINDOW_MS = 6000;
-const MAX_RETRY_ATTEMPTS = DIALOG_ARGS_RETRY_WINDOW_MS / RETRY_DELAY_MS;
 
 let promptInput = null;
 let okButton = null;
@@ -43,39 +36,6 @@ function sendResponse(response) {
             // Always close the window, even if there was an error
             window.close();
         });
-    });
-}
-
-function getArguments(windowId, callback, attemptsLeft = MAX_RETRY_ATTEMPTS) {
-    // MV3 compatible: Use chrome.runtime.sendMessage instead of getBackgroundPage
-    chrome.runtime.sendMessage({
-        type: 'GET_DIALOG_ARGS',
-        windowId: windowId
-    }, function (result) {
-        if (chrome.runtime.lastError) {
-            console.error("[iMacros] Failed to get dialog args:", chrome.runtime.lastError.message);
-            // Retry to handle race where dialog args are not yet registered
-            if (attemptsLeft > 0) {
-                const attemptNumber = MAX_RETRY_ATTEMPTS - attemptsLeft + 1;
-                console.log(`[iMacros] Retrying getArguments (${attemptNumber}/${MAX_RETRY_ATTEMPTS})...`);
-                setTimeout(() => getArguments(windowId, callback, attemptsLeft - 1), RETRY_DELAY_MS);
-            } else {
-                callback(null);
-            }
-            return;
-        }
-        if (!result || !result.success) {
-            console.error("[iMacros] Background failed to get dialog args:", result?.error);
-            if (attemptsLeft > 0) {
-                const attemptNumber = MAX_RETRY_ATTEMPTS - attemptsLeft + 1;
-                console.log(`[iMacros] Retrying getArguments (${attemptNumber}/${MAX_RETRY_ATTEMPTS})...`);
-                setTimeout(() => getArguments(windowId, callback, attemptsLeft - 1), RETRY_DELAY_MS);
-            } else {
-                callback(null);
-            }
-            return;
-        }
-        callback(result.args);
     });
 }
 
@@ -116,7 +76,7 @@ window.addEventListener("load", function () {
             return;
         }
 
-        getArguments(w.id, function (myArgs) {
+        getDialogArgs(w.id, function (myArgs) {
             if (!myArgs) {
                 console.error("[iMacros] Failed to get dialog arguments");
                 // Notify logic (Offscreen/Background) that we are closing to prevent hang

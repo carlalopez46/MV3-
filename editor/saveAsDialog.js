@@ -1,6 +1,7 @@
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
+/* global getDialogArgs, afio */
 
 let args;
 let dialogWindowId = null;
@@ -22,40 +23,19 @@ window.addEventListener("load", function () {
                 return;
             }
             dialogWindowId = currentWindow.id;
-            requestArgs(5);
+            getDialogArgs(dialogWindowId, function(receivedArgs) {
+                if (receivedArgs) {
+                    args = receivedArgs;
+                    initializeWithAfio();
+                } else {
+                    console.warn("[iMacros] Failed to get dialog args after retries, falling back to session storage.");
+                    fallbackToSessionStorage();
+                }
+            });
         });
     } else {
         console.warn("[iMacros] chrome.windows API not available. Falling back to storage strategy.");
         fallbackToSessionStorage();
-    }
-
-    function requestArgs(retries) {
-        chrome.runtime.sendMessage({
-            type: 'GET_DIALOG_ARGS',
-            windowId: dialogWindowId
-        }, function (result) {
-            if (chrome.runtime.lastError) {
-                console.error("[iMacros] Failed to get dialog args:", chrome.runtime.lastError.message);
-                fallbackToSessionStorage();
-                return;
-            }
-            if (!result || !result.success) {
-                // If it's a "bad dialog id" error, it likely means the background hasn't registered the ID yet (race condition)
-                // Retry a few times
-                if (retries > 0 && result && result.error && result.error.includes('bad dialog id')) {
-                    console.log("[iMacros] Args not ready yet (" + result.error + "), retrying... remaining: " + retries);
-                    setTimeout(function () { requestArgs(retries - 1); }, 200);
-                    return;
-                }
-
-                console.error("[iMacros] Background failed to get dialog args:", result && result.error);
-                fallbackToSessionStorage();
-                return;
-            }
-
-            args = result.args;
-            initializeWithAfio();
-        });
     }
 
 

@@ -1,7 +1,7 @@
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
-/* global getRequiredElement, safeResizeDialog */
+/* global getRequiredElement, safeResizeDialog, getDialogArgs */
 
 // Give the background/offscreen worker enough time to register dialog args
 // before abandoning the dialog. Mirror the timing from promptDialog.js.
@@ -146,7 +146,7 @@ window.addEventListener("load", function(evt) {
             return;
         }
 
-        getArguments(w.id, function(myArgs) {
+        getDialogArgs(w.id, function(myArgs) {
             if (!myArgs) {
                 console.error("[iMacros] Failed to get dialog arguments");
                 window.close();
