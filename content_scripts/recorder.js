@@ -1186,7 +1186,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
                         if (document.querySelectorAll(selector).length === 1) {
                             return selector;
                         }
-                    } catch (e) { }
+                    } catch (e) {
+                        console.error("[iMacros] Invalid CSS selector in unique class check:", selector, e);
+                    }
                 }
             }
         }
