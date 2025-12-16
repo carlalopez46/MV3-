@@ -311,11 +311,7 @@ async function createOffscreen() {
 
         // Check if offscreen document already exists using runtime contexts (preferred)
         if (chrome.runtime && typeof chrome.runtime.getContexts === 'function') {
-            const contextTypes = chrome.runtime.ContextType
-                ? [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT]
-                : ['OFFSCREEN_DOCUMENT'];
-
-            const contexts = await chrome.runtime.getContexts({ contextTypes });
+            const contexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
             const exists = Array.isArray(contexts) && contexts.some((ctx) => ctx.documentUrl && ctx.documentUrl.endsWith('offscreen.html'));
             if (exists) return;
         } else if (self.clients) {
@@ -1449,6 +1445,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             tabs.forEach((tab) => {
                 chrome.tabs.sendMessage(tab.id, message, () => {
                     // Ignore errors for individual tabs (may not have content script)
+                    return;
                 });
             });
 

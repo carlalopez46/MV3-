@@ -10,7 +10,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // so mirror that window here to avoid closing the dialog prematurely.
 const RETRY_DELAY_MS = 200;
 const DIALOG_ARGS_RETRY_WINDOW_MS = 6000;
-const MAX_RETRY_ATTEMPTS = Math.max(1, Math.ceil(DIALOG_ARGS_RETRY_WINDOW_MS / RETRY_DELAY_MS));
+const MAX_RETRY_ATTEMPTS = DIALOG_ARGS_RETRY_WINDOW_MS / RETRY_DELAY_MS;
 
 let promptInput = null;
 let okButton = null;

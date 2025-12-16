@@ -16,10 +16,6 @@ worker via explicit messaging.
 // MacroPlayer pull sources from the chunked VirtualFileService storage.
 const virtualFileService = typeof VirtualFileService === "function" ? new VirtualFileService() : null;
 let vfsReadyPromise = null;
-const VIRTUAL_RUN_HOOK_MAX_ATTEMPTS = 10;
-const VIRTUAL_RUN_HOOK_RETRY_MS = 250;
-let virtualRunHookAttempts = 0;
-let virtualRunHookTimer = null;
 
 async function ensureVirtualFileService() {
     if (!virtualFileService) {
@@ -33,18 +29,18 @@ async function ensureVirtualFileService() {
 
 function installVirtualRunHook() {
     if (!virtualFileService || typeof MacroPlayer === "undefined") {
-        return false;
+        return;
     }
 
     const proto = MacroPlayer.prototype;
     if (proto.loadMacroFile && proto.loadMacroFile.__virtualHookInstalled) {
-        return true;
+        return;
     }
 
     const originalLoader = proto.loadMacroFile;
     proto.loadMacroFile = async function (resolvedPath) {
+        await ensureVirtualFileService();
         try {
-            await ensureVirtualFileService();
             const content = await virtualFileService.readTextFile(resolvedPath);
             const name = resolvedPath ? resolvedPath.split(/[\\/]/).pop() : "";
             return {
@@ -53,7 +49,6 @@ function installVirtualRunHook() {
                 file_id: resolvedPath
             };
         } catch (err) {
-            console.warn("[iMacros Offscreen] Virtual RUN hook failed; falling back to native loader:", err);
             // Fall back to the previous loader or signal failure by returning null
             if (typeof originalLoader === "function") {
                 return originalLoader.call(this, resolvedPath);
@@ -62,37 +57,11 @@ function installVirtualRunHook() {
         }
     };
     proto.loadMacroFile.__virtualHookInstalled = true;
-    return true;
 }
 
-function ensureVirtualRunHookInstalled() {
-    if (installVirtualRunHook()) {
-        if (virtualRunHookTimer) {
-            clearInterval(virtualRunHookTimer);
-            virtualRunHookTimer = null;
-        }
-        return;
-    }
-
-    if (virtualRunHookAttempts >= VIRTUAL_RUN_HOOK_MAX_ATTEMPTS) {
-        return;
-    }
-
-    if (!virtualRunHookTimer) {
-        virtualRunHookTimer = setInterval(() => {
-            virtualRunHookAttempts += 1;
-            if (installVirtualRunHook() || virtualRunHookAttempts >= VIRTUAL_RUN_HOOK_MAX_ATTEMPTS) {
-                clearInterval(virtualRunHookTimer);
-                virtualRunHookTimer = null;
-            }
-        }, VIRTUAL_RUN_HOOK_RETRY_MS);
-    }
-}
-
-// Initialize the virtual RUN hook and, if MacroPlayer is not ready yet, retry a
-// few times to catch late script loads. This keeps the VFS-backed RUN support
-// active regardless of load order.
-ensureVirtualRunHookInstalled();
+// Initialize the virtual RUN hook immediately so MacroPlayer can resolve
+// nested macros from the virtual filesystem without relying on the native host.
+installVirtualRunHook();
 
 //
 // Common logic moved to bg_common.js
