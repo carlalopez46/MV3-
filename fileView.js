@@ -384,12 +384,28 @@ var TreeView = {
             }
         });
 
+        // Debounce flag to prevent double execution from event bubbling
+        var playMacroDebounce = false;
+
         jQuery('#jstree').on('dblclick.jstree', function (e, data) {
+            // Prevent event bubbling that can cause double execution
+            e.stopPropagation();
+
+            // Debounce check to prevent multiple rapid clicks
+            if (playMacroDebounce) {
+                console.log('[fileView] Ignoring duplicate dblclick (debounced)');
+                return;
+            }
 
             var target_node = jQuery('#jstree').jstree(true).get_node(e.target.parentElement.id);
 
-            if (target_node.type == 'macro') {
-                setTimeout(function () { window.parent.postMessage({ type: "playMacro" }, "*"); }, 200);
+            if (target_node && target_node.type == 'macro') {
+                playMacroDebounce = true;
+                setTimeout(function () {
+                    window.parent.postMessage({ type: "playMacro" }, "*");
+                    // Reset debounce after a short delay to allow next play
+                    setTimeout(function() { playMacroDebounce = false; }, 500);
+                }, 200);
             }
         });
 

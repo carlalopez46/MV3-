@@ -151,6 +151,13 @@ function requestStateUpdate() {
 
 function play() {
     console.log("[Panel] Play button clicked");
+
+    // Guard against double execution - ignore if already playing
+    if (panelState.isPlaying) {
+        console.log("[Panel] Ignoring play request - already playing");
+        return;
+    }
+
     if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
         return;
