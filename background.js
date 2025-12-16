@@ -122,13 +122,6 @@ async function initializeLocalStoragePolyfill() {
     }
 
     polyfill.__isHydratedPolyfill = true;
-
-    if (typeof globalThis !== 'undefined') {
-        globalThis.localStorage = polyfill;
-        // Expose the cache for legacy modules that expect synchronous access; treat as internal-only.
-        globalThis._localStorageData = cache;
-        globalThis._LOCALSTORAGE_PREFIX = LOCALSTORAGE_PREFIX;
-    }
 }
 
 // NOTE: MV3 background scripts run as classic service workers, so top-level
