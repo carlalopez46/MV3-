@@ -89,6 +89,7 @@ async function initializeLocalStoragePolyfill() {
 
     if (typeof globalThis !== 'undefined') {
         globalThis.localStorage = polyfill;
+        // Expose the cache for legacy modules that expect synchronous access; treat as internal-only.
         globalThis._localStorageData = cache;
         globalThis._LOCALSTORAGE_PREFIX = LOCALSTORAGE_PREFIX;
     }
@@ -124,6 +125,7 @@ async function initializeLocalStoragePolyfill() {
 
     if (typeof globalThis !== 'undefined') {
         globalThis.localStorage = polyfill;
+        // Expose the cache for legacy modules that expect synchronous access; treat as internal-only.
         globalThis._localStorageData = cache;
         globalThis._LOCALSTORAGE_PREFIX = LOCALSTORAGE_PREFIX;
     }
@@ -1445,7 +1447,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             tabs.forEach((tab) => {
                 chrome.tabs.sendMessage(tab.id, message, () => {
                     // Ignore errors for individual tabs (may not have content script)
-                    return;
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        // Silently ignore
+                    }
                 });
             });
 
