@@ -3970,7 +3970,7 @@ MacroPlayer.prototype.reset = function () {
 
     // reset state variables
     this.ignoreErrors = false;
-    this.playing = false;
+    // NOTE: Do NOT reset this.playing here - it's managed by play()/stop() to prevent race conditions
     this.paused = false;
     this.pauseIsPending = false;
     this.loopStack = [];
@@ -4195,6 +4195,11 @@ MacroPlayer.prototype.play = function (macro, limits, callback) {
         return;
     }
 
+    // ★CRITICAL: Set playing flag IMMEDIATELY to prevent race conditions
+    // This must be set BEFORE any async operations (like reset()) to ensure
+    // subsequent play() calls are properly blocked
+    this.playing = true;
+
     // console.info("Playing macro %O, limits %O", macro, limits);
     const comment = new RegExp("^\\s*(?:'.*)?$");
     this.source = macro.source;
@@ -4222,12 +4227,15 @@ MacroPlayer.prototype.play = function (macro, limits, callback) {
     this.debuggerAttached = false;
 
     this.reset().then(() => {
+        // Pre-fetch clipboard value for {{!CLIPBOARD}} variable expansion
+        // This ensures the cache is up-to-date before macro execution starts
+        return imns.Clipboard.refreshCache ? imns.Clipboard.refreshCache() : Promise.resolve();
+    }).then(() => {
         this.checkFreewareLimits("loops", this.times)
         this.checkFreewareLimits("loops", this.currentLoop)
         this.beforeEachRun();
         this.addListeners();
-        // we should set before parsing so parse errors can be reported
-        this.playing = true;
+        // NOTE: this.playing is already set at the start of play() to prevent race conditions
         this.parseMacro();
     }).then(() => {
         // prepare stack of actions
