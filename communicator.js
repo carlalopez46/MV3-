@@ -92,7 +92,7 @@ Communicator.prototype.handleMessage = function (msg, tab_id, sendResponse) {
 Communicator.prototype._execHandlers = function (msg, tab_id, win_id, sendResponse) {
     if (!this.handlers[msg.topic]) {
         console.warn("Communicator: no handlers for topic " + msg.topic);
-        if (sendResponse) sendResponse({ error: 'No handlers for topic' });
+        if (sendResponse) sendResponse({ error: 'No handlers for topic', state: 'idle' });
         return;
     }
     let handled = false;
