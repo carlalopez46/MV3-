@@ -155,3 +155,6 @@ const badge = {
         this.setText(win_id, "");
     }
 };
+
+// Make badge globally accessible for dependency verification
+globalThis.badge = badge;

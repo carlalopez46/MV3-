@@ -1166,7 +1166,7 @@ if (typeof chrome.tabs !== 'undefined' && chrome.tabs.get) {
                 }).catch(e => {
                     // If offscreen doesn't respond or fails, we can't do much but log it
                     // console.warn("Forwarding message to offscreen failed:", e);
-                    if (sendResponse) sendResponse({ success: false, error: e.message });
+                    if (sendResponse) sendResponse({ state: 'idle', success: false, error: e.message });
                 });
             });
         });

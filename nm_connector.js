@@ -508,3 +508,6 @@ const nm_connector = {
         }
     }
 };
+
+// Make nm_connector globally accessible for dependency verification
+globalThis.nm_connector = nm_connector;

@@ -301,3 +301,6 @@ const context = {
 // This event has a weird condition that an extension can register only
 // one listener. It is registered in attachListeners() now.
 context.df_handlers = [];
+
+// Make context globally accessible for dependency verification
+globalThis.context = context;
