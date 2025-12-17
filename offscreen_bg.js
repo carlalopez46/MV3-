@@ -940,11 +940,27 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         // ★FIX: Handle EXTRACT dialog close notification from extractDialog.js
         if (request.command === 'EXTRACT_DIALOG_CLOSED') {
             const win_id = request.win_id;
+
+            // Validate win_id
+            if (!Number.isInteger(win_id) || win_id <= 0) {
+                console.error('[Offscreen] Invalid win_id for EXTRACT_DIALOG_CLOSED:', win_id);
+                sendResponse({ success: false, error: 'Invalid win_id' });
+                return true;
+            }
+
             console.log('[Offscreen] Extract dialog closed for window:', win_id);
 
             try {
                 if (context[win_id] && context[win_id].mplayer) {
                     const mplayer = context[win_id].mplayer;
+
+                    // Verify that next is a function before calling
+                    if (typeof mplayer.next !== 'function') {
+                        console.error('[Offscreen] mplayer.next is not a function for window:', win_id);
+                        sendResponse({ success: false, error: 'mplayer.next not available' });
+                        return true;
+                    }
+
                     mplayer.waitingForExtract = false;
                     mplayer.next("extractDialog");
                     sendResponse({ success: true });

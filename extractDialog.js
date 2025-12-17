@@ -58,18 +58,8 @@ window.addEventListener("load", function(evt) {
     });
 });
 
-window.addEventListener("beforeunload", function() {
-    // 2. Offscreen に通知してマクロを再開
-    if (window._callerWinId && chrome.runtime) {
-        chrome.runtime.sendMessage({
-            target: 'offscreen',
-            command: 'EXTRACT_DIALOG_CLOSED',
-            win_id: window._callerWinId
-        }, function(response) {
-            if (chrome.runtime.lastError) {
-                console.warn("[extractDialog] Failed to notify close:", chrome.runtime.lastError);
-            }
-        });
-    }
-    return null;
-});
+// ★FIX: Removed unreliable beforeunload messaging
+// Service Worker (background.js) now tracks window closure via chrome.windows.onRemoved
+// which is more reliable than sending messages during page unload.
+// The dialog window ID is tracked in dialogCallerMap when opened, and onRemoved
+// automatically notifies the Offscreen document when the dialog closes.

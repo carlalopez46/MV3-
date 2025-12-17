@@ -388,10 +388,33 @@ function persistEditorLaunchData(editorData) {
 
 // Track dialog lifecycles for MV3 dialogs to reduce dependency on offscreen dialogUtils
 const dialogCache = new Map(); // windowId -> { args, result }
+// Track dialog-to-caller mapping for reliable close detection
+const dialogCallerMap = new Map(); // dialogWindowId -> callerWinId
 
-chrome.windows.onRemoved.addListener((windowId) => {
+chrome.windows.onRemoved.addListener(async (windowId) => {
+    // Cleanup dialog cache
     if (dialogCache.has(windowId)) {
         dialogCache.delete(windowId);
+    }
+
+    // ★FIX: Detect Extract Dialog Close via Service Worker
+    // This is more reliable than beforeunload messaging from the dialog
+    if (dialogCallerMap.has(windowId)) {
+        const callerWinId = dialogCallerMap.get(windowId);
+        dialogCallerMap.delete(windowId);
+
+        console.log(`[iMacros SW] Detected dialog closure for windowId: ${windowId}, notifying caller: ${callerWinId}`);
+
+        try {
+            await createOffscreen();
+            await sendMessageToOffscreen({
+                command: 'EXTRACT_DIALOG_CLOSED',
+                win_id: callerWinId
+            });
+            console.log(`[iMacros SW] Successfully notified offscreen about dialog closure`);
+        } catch (error) {
+            console.warn('[iMacros SW] Failed to notify Offscreen about dialog closure:', error);
+        }
     }
 });
 
@@ -1061,6 +1084,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 // Cache args locally so GET_DIALOG_ARGS can succeed even if offscreen dialogUtils is unavailable
                 if (msg.args) {
                     dialogCache.set(win.id, { args: msg.args });
+                    // ★FIX: Track dialog-to-caller mapping for reliable close detection
+                    if (msg.args.win_id) {
+                        dialogCallerMap.set(win.id, msg.args.win_id);
+                        console.log('[iMacros SW] Mapped dialog', win.id, 'to caller window', msg.args.win_id);
+                    }
                 }
                 // We return the window object structure expected by utils.js
                 sendResponse({ result: win });
