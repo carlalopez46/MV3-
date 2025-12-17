@@ -767,10 +767,36 @@ var imns = {
                 });
             };
 
-            // In Offscreen Document, clipboard API is not supported (no focus possible)
-            // Go directly to Service Worker proxy
+            // In Offscreen Document, use execCommand('paste') directly
+            // Offscreen documents created with 'CLIPBOARD' reason support this legacy API
+            // navigator.clipboard API won't work due to lack of focus
             if (self._isOffscreenContext()) {
-                console.log("[iMacros] Clipboard read: using proxy (offscreen context)");
+                console.log("[iMacros] Clipboard read: using execCommand in offscreen context");
+                var textarea = null;
+                try {
+                    textarea = document.createElement("textarea");
+                    textarea.style.position = "fixed";
+                    textarea.style.opacity = "0";
+                    document.body.appendChild(textarea);
+                    textarea.focus();
+                    var result = document.execCommand("paste");
+                    var text = textarea.value;
+                    if (result && text !== undefined) {
+                        console.log("[iMacros] Clipboard read successful via execCommand in offscreen");
+                        self._cachedValue = text;
+                        self._cacheTimestamp = Date.now();
+                        return Promise.resolve(text);
+                    } else {
+                        console.warn("[iMacros] execCommand('paste') returned false, trying proxy");
+                    }
+                } catch (e) {
+                    console.warn("[iMacros] Clipboard read error in offscreen:", e);
+                } finally {
+                    if (textarea && textarea.parentNode) {
+                        document.body.removeChild(textarea);
+                    }
+                }
+                // Fallback to proxy only if execCommand fails
                 return proxyThroughServiceWorker();
             }
 
