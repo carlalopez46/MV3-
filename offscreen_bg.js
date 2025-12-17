@@ -714,18 +714,13 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     // --- Handlers for panel.js commands ---
     // NOTE: The following commands are now handled exclusively by Service Worker (background.js)
     // which transforms them to CALL_CONTEXT_METHOD. This prevents double execution when
-    // messages are broadcast to both SW and Offscreen Document:
-    // - startRecording -> CALL_CONTEXT_METHOD with method 'recorder.start'
-    // - playMacro -> CALL_CONTEXT_METHOD with method 'playFile'
-    // - stop -> CALL_CONTEXT_METHOD with method 'stop'
-    // - pause -> CALL_CONTEXT_METHOD with method 'pause'
-
-    // NOTE: playMacro command is now handled exclusively by Service Worker (background.js)
-    // which transforms it to CALL_CONTEXT_METHOD with method 'playFile'.
-    // This prevents double execution when messages are broadcast to both SW and Offscreen.
-    // If direct playMacro handling is needed in the future, add a guard to check sender origin.
-    // See: https://github.com/user/iMacrosMV3-/issues/XXX for details.
-    // NOTE: stop, pause, unpause commands are now handled via CALL_CONTEXT_METHOD from Service Worker
+    // messages are broadcast to both SW and Offscreen Document.
+    // ★CRITICAL: Explicitly skip these commands to prevent double execution!
+    if (['playMacro', 'startRecording', 'stop', 'pause', 'unpause'].includes(request.command)) {
+        console.log(`[Offscreen] Skipping command '${request.command}' - handled by Service Worker`);
+        // Do NOT send response - let Service Worker handle it
+        return;
+    }
 
     if (request.command === 'editMacro') {
         const win_id = request.win_id;
