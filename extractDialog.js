@@ -33,7 +33,9 @@ window.addEventListener("load", function(evt) {
         }
 
         // ウィンドウIDを保持（クローズ時の通知用）
-        window._callerWinId = args.win_id;
+        if (args && typeof args.win_id !== 'undefined' && args.win_id !== null) {
+            window._callerWinId = args.win_id;
+        }
 
         // UI セットアップ
         var okButton = document.getElementById("ok-button");
@@ -41,11 +43,9 @@ window.addEventListener("load", function(evt) {
             okButton.addEventListener("click", ok);
             okButton.focus();
             okButton.addEventListener("keydown", function(e) {
-                if (e.type === "keydown") {
-                    if ((e.keyCode === 13) || (e.keyCode === 32)) {
-                        ok();
-                        e.preventDefault();
-                    }
+                if ((e.keyCode === 13) || (e.keyCode === 32)) {
+                    ok();
+                    e.preventDefault();
                 }
             });
         }
