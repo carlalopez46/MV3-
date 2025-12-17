@@ -1857,6 +1857,39 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return true;
     }
 
+    // --- 再開 (unpause) ---
+    if (msg.command === "unpause") {
+        console.log("[iMacros SW] Route: unpause -> Offscreen");
+
+        resolveTargetWindowId(msg.win_id, sender).then(win_id => {
+            if (!win_id) {
+                console.error("[iMacros SW] Cannot determine win_id for unpause");
+                sendResponse({ error: "Cannot determine window ID" });
+                return;
+            }
+
+            console.log("[iMacros SW] Resolved win_id for unpause:", win_id);
+
+            sendMessageToOffscreen({
+                command: "CALL_CONTEXT_METHOD",
+                method: "unpause",
+                win_id: win_id
+            }).then(result => {
+                console.log("[iMacros SW] unpause result:", result);
+                if (result && typeof result.success !== 'undefined') {
+                    sendResponse(result);
+                } else {
+                    sendResponse({ success: true });
+                }
+            }).catch(err => {
+                console.error("[iMacros SW] unpause error:", err);
+                sendResponse({ success: false, error: (err && err.message) || String(err) });
+            });
+        });
+
+        return true;
+    }
+
     // --- アクティブタブ取得 (GET_ACTIVE_TAB / get_active_tab) ---
     if (msg.command === "GET_ACTIVE_TAB" || msg.type === "GET_ACTIVE_TAB" || msg.command === "get_active_tab") {
         (async () => {
