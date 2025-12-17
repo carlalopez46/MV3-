@@ -716,13 +716,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     // which transforms them to CALL_CONTEXT_METHOD. This prevents double execution when
     // messages are broadcast to both SW and Offscreen Document.
     // ★CRITICAL: Explicitly skip these commands to prevent double execution!
-    if (['playMacro', 'startRecording', 'stop', 'pause', 'unpause'].includes(request.command)) {
+    if (['playMacro', 'startRecording', 'stop', 'pause', 'editMacro'].includes(request.command)) {
         console.log(`[Offscreen] Skipping command '${request.command}' - handled by Service Worker`);
         // Do NOT send response - let Service Worker handle it
         return;
     }
 
-    if (request.command === 'editMacro') {
+    // Legacy editMacro handler removed - now handled via CALL_CONTEXT_METHOD from Service Worker
+    if (request.command === 'LEGACY_editMacro_DISABLED') {
         const win_id = request.win_id;
         const filePath = request.file_path;
         console.log('[Offscreen] Received editMacro:', filePath);
