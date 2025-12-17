@@ -688,7 +688,15 @@ async function executeClipboardRead(tab, sendResponse) {
                 // Prefer modern clipboard API but fall back to execCommand when focus is an issue
                 return navigator.clipboard.readText()
                     .then((text) => ({ success: true, text: text }))
-                    .catch(() => readUsingExecCommand());
+                    .catch((err) => {
+                        console.warn('[iMacros] navigator.clipboard.readText failed:', err.message || err);
+                        // execCommand('paste') rarely works in modern browsers due to security restrictions
+                        const fallbackResult = readUsingExecCommand();
+                        if (!fallbackResult.success) {
+                            console.warn('[iMacros] Clipboard fallback also failed. Clipboard API requires user gesture or focus.');
+                        }
+                        return fallbackResult;
+                    });
             },
             args: []
         });

@@ -738,9 +738,8 @@ var imns = {
         _readClipboardFallback: function () {
             var self = this;
 
-            // If in Offscreen Document, proxy through Service Worker -> Content Script
-            if (self._isOffscreenContext()) {
-                console.log("[iMacros] Clipboard read: proxying through content script (offscreen context detected)");
+            // Helper to proxy through Service Worker -> Content Script
+            var proxyThroughServiceWorker = function() {
                 return new Promise(function (resolve, reject) {
                     try {
                         chrome.runtime.sendMessage({
@@ -748,28 +747,46 @@ var imns = {
                         }, function (response) {
                             if (chrome.runtime.lastError) {
                                 console.warn("[iMacros] Clipboard read proxy failed:", chrome.runtime.lastError.message);
-                                // Return cached value only if still within TTL, otherwise empty string
                                 resolve((Date.now() - self._cacheTimestamp) < self._CACHE_TTL_MS ? self._cachedValue : "");
                                 return;
                             }
                             if (response && response.success) {
                                 console.log("[iMacros] Clipboard read successful via content script proxy");
-                                // Update cache
                                 self._cachedValue = response.text || "";
                                 self._cacheTimestamp = Date.now();
                                 resolve(self._cachedValue);
                             } else {
                                 console.warn("[iMacros] Clipboard read failed:", response && response.error);
-                                // Return cached value only if still within TTL, otherwise empty string
                                 resolve((Date.now() - self._cacheTimestamp) < self._CACHE_TTL_MS ? self._cachedValue : "");
                             }
                         });
                     } catch (e) {
                         console.error("[iMacros] Clipboard read proxy exception:", e);
-                        // Return cached value only if still within TTL, otherwise empty string
                         resolve((Date.now() - self._cacheTimestamp) < self._CACHE_TTL_MS ? self._cachedValue : "");
                     }
                 });
+            };
+
+            // In Offscreen Document, try direct clipboard API first (with clipboardRead permission)
+            // Fall back to Service Worker proxy if direct access fails
+            if (self._isOffscreenContext()) {
+                console.log("[iMacros] Clipboard read: trying direct API in offscreen context");
+                if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.readText) {
+                    return navigator.clipboard.readText()
+                        .then(function(text) {
+                            console.log("[iMacros] Clipboard read successful via direct API in offscreen");
+                            self._cachedValue = text || "";
+                            self._cacheTimestamp = Date.now();
+                            return self._cachedValue;
+                        })
+                        .catch(function(err) {
+                            console.warn("[iMacros] Direct clipboard API failed in offscreen, trying proxy:", err.message || err);
+                            return proxyThroughServiceWorker();
+                        });
+                }
+                // Clipboard API not available, fall back to proxy
+                console.log("[iMacros] Clipboard API not available in offscreen, using proxy");
+                return proxyThroughServiceWorker();
             }
 
             // Try Clipboard API first if available (modern browsers)
