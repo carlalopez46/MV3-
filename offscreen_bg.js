@@ -386,7 +386,23 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
                 console.log("[Offscreen] Context initialized, calling mplayer.play");
                 const limits = await getLimits();
-                return ctx.mplayer.play(macro, limits);
+                // ★重要: mplayer.play はコールバックベースの関数
+                // Promise でラップして実際の完了まで待機しないと、
+                // playInFlight ガードが早期に解除され二重実行の原因になる
+                return new Promise((resolve, reject) => {
+                    try {
+                        ctx.mplayer.play(macro, limits, (result) => {
+                            console.log("[Offscreen] mplayer.play callback received:", result);
+                            if (result && result.error) {
+                                reject(new Error(result.error));
+                            } else {
+                                resolve(result);
+                            }
+                        });
+                    } catch (e) {
+                        reject(e);
+                    }
+                });
             };
 
             // ★重要: playInFlight への追加は async 関数の開始前に行う
