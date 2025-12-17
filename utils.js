@@ -674,10 +674,36 @@ var imns = {
         _writeClipboardFallback: function (str) {
             var self = this;
 
-            // If in Offscreen Document, proxy through Service Worker -> Content Script
-            // This is necessary because Offscreen Documents don't have focus and clipboard operations fail
+            // If in Offscreen Document, first try execCommand('copy') directly
+            // This avoids SW proxy which can cause focus changes and other side effects
             if (self._isOffscreenContext()) {
-                console.log("[iMacros] Clipboard write: proxying through content script (offscreen context detected)");
+                var textarea = null;
+                try {
+                    textarea = document.createElement('textarea');
+                    textarea.setAttribute('readonly', '');
+                    textarea.style.position = 'fixed';
+                    textarea.style.opacity = '0';
+                    textarea.style.left = '-9999px';
+                    document.body.appendChild(textarea);
+                    textarea.value = str;
+                    textarea.focus();
+                    textarea.select();
+                    var ok = document.execCommand('copy');
+                    if (ok) {
+                        console.log('[iMacros] Clipboard write successful via execCommand in offscreen');
+                        return Promise.resolve();
+                    }
+                    console.warn('[iMacros] offscreen execCommand(copy) returned false, falling back to SW proxy');
+                } catch (e) {
+                    console.warn('[iMacros] offscreen clipboard write error, falling back to SW proxy:', e);
+                } finally {
+                    if (textarea && textarea.parentNode) {
+                        document.body.removeChild(textarea);
+                    }
+                }
+
+                // Fallback: proxy through Service Worker -> Content Script
+                console.log("[iMacros] Clipboard write: proxying through Service Worker (offscreen fallback)");
                 return new Promise(function (resolve, reject) {
                     try {
                         chrome.runtime.sendMessage({
