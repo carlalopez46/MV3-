@@ -722,21 +722,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         return;
     }
 
-    // Legacy editMacro handler removed - now handled via CALL_CONTEXT_METHOD from Service Worker
-    if (request.command === 'LEGACY_editMacro_DISABLED') {
-        const win_id = request.win_id;
-        const filePath = request.file_path;
-        console.log('[Offscreen] Received editMacro:', filePath);
-        if (!context[win_id]) {
-            context.init(win_id).then(() => {
-                executeContextMethod(win_id, 'openEditor', sendResponse, [filePath]);
-            });
-        } else {
-            executeContextMethod(win_id, 'openEditor', sendResponse, [filePath]);
-        }
-        return true;
-    }
-
     // --- End panel.js handlers ---
 
     if (request.command === 'EVAL_REQUEST') {
