@@ -716,7 +716,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     // which transforms them to CALL_CONTEXT_METHOD. This prevents double execution when
     // messages are broadcast to both SW and Offscreen Document.
     // ★CRITICAL: Explicitly skip these commands to prevent double execution!
-    if (['playMacro', 'startRecording', 'stop', 'pause', 'editMacro'].includes(request.command)) {
+    if (['playMacro', 'startRecording', 'stop', 'pause', 'unpause', 'editMacro'].includes(request.command)) {
         console.log(`[Offscreen] Skipping command '${request.command}' - handled by Service Worker`);
         // Do NOT send response - let Service Worker handle it
         return;
