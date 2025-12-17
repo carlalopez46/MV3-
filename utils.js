@@ -767,25 +767,10 @@ var imns = {
                 });
             };
 
-            // In Offscreen Document, try direct clipboard API first (with clipboardRead permission)
-            // Fall back to Service Worker proxy if direct access fails
+            // In Offscreen Document, clipboard API is not supported (no focus possible)
+            // Go directly to Service Worker proxy
             if (self._isOffscreenContext()) {
-                console.log("[iMacros] Clipboard read: trying direct API in offscreen context");
-                if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.readText) {
-                    return navigator.clipboard.readText()
-                        .then(function(text) {
-                            console.log("[iMacros] Clipboard read successful via direct API in offscreen");
-                            self._cachedValue = text || "";
-                            self._cacheTimestamp = Date.now();
-                            return self._cachedValue;
-                        })
-                        .catch(function(err) {
-                            console.warn("[iMacros] Direct clipboard API failed in offscreen, trying proxy:", err.message || err);
-                            return proxyThroughServiceWorker();
-                        });
-                }
-                // Clipboard API not available, fall back to proxy
-                console.log("[iMacros] Clipboard API not available in offscreen, using proxy");
+                console.log("[iMacros] Clipboard read: using proxy (offscreen context)");
                 return proxyThroughServiceWorker();
             }
 
