@@ -4881,15 +4881,30 @@ MacroPlayer.prototype.showAndAddExtractData = function (str) {
     if (!this.shouldPopupExtract)
         return;
     this.waitingForExtract = true;
-    var features = "titlebar=no,menubar=no,location=no," +
-        "resizable=yes,scrollbars=yes,status=no," +
-        "width=430,height=380";
-    var win = window.open("extractDialog.html",
-        null, features);
-    win.args = {
+
+    // ★FIX: Use Service Worker to open the dialog window
+    // Offscreen から window.open は不可視またはブロックされるため
+
+    // ダイアログに渡すデータ
+    var dialogArgs = {
         data: str,
-        mplayer: this
+        win_id: this.win_id
+        // 注意: this (mplayerインスタンス) は送れないので、必要なIDだけ渡す
     };
+
+    // SW にウィンドウ作成を依頼
+    chrome.runtime.sendMessage({
+        command: "openDialog",
+        url: "extractDialog.html",
+        pos: { width: 430, height: 380 },
+        args: dialogArgs // SW側で一時的にキャッシュされる
+    }, function(response) {
+        if (chrome.runtime.lastError) {
+            console.error("Failed to open extract dialog:", chrome.runtime.lastError);
+        }
+        // 必要ならここで待機状態を解除するロジックなどを追加
+        // (現在はユーザーがダイアログを操作するまで待つ設計か確認が必要)
+    });
 };
 
 

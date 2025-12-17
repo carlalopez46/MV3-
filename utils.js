@@ -774,25 +774,30 @@ var imns = {
                 console.log("[iMacros] Clipboard read: using execCommand in offscreen context");
                 var textarea = null;
                 try {
-                    textarea = document.createElement("textarea");
-                    textarea.style.position = "fixed";
-                    textarea.style.opacity = "0";
-                    document.body.appendChild(textarea);
-                    textarea.focus();
-                    var result = document.execCommand("paste");
-                    var text = textarea.value;
-                    if (result && text !== undefined) {
-                        console.log("[iMacros] Clipboard read successful via execCommand in offscreen");
-                        self._cachedValue = text;
-                        self._cacheTimestamp = Date.now();
-                        return Promise.resolve(text);
+                    if (!document.body) {
+                        console.warn('[iMacros] document.body not available in offscreen context, using SW proxy');
+                        // Fall through to Service Worker proxy
                     } else {
-                        console.warn("[iMacros] execCommand('paste') returned false, trying proxy");
+                        textarea = document.createElement("textarea");
+                        textarea.style.position = "fixed";
+                        textarea.style.opacity = "0";
+                        document.body.appendChild(textarea);
+                        textarea.focus();
+                        var result = document.execCommand("paste");
+                        var text = textarea.value;
+                        if (result && text !== undefined) {
+                            console.log("[iMacros] Clipboard read successful via execCommand in offscreen");
+                            self._cachedValue = text;
+                            self._cacheTimestamp = Date.now();
+                            return Promise.resolve(text);
+                        } else {
+                            console.warn("[iMacros] execCommand('paste') returned false, trying proxy");
+                        }
                     }
                 } catch (e) {
                     console.warn("[iMacros] Clipboard read error in offscreen:", e);
                 } finally {
-                    if (textarea && textarea.parentNode) {
+                    if (textarea && textarea.parentNode && document.body) {
                         document.body.removeChild(textarea);
                     }
                 }
