@@ -296,11 +296,29 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         } else if (method === "mplayer.play") {
             console.log("[Offscreen] Calling mplayer.play with:", args[0].name);
             const mplayer = context[win_id].mplayer;
+            if (!mplayer) {
+                sendResponse({ success: false, error: 'mplayer not available for play' });
+                return;
+            }
             // args: [macro, limits]
-            mplayer.play(args[0], args[1]).catch(e => {
+            // mplayer.play(macro, limits, callback) is async - use callback for completion
+            try {
+                mplayer.play(args[0], args[1], function (result) {
+                    console.log("[Offscreen] mplayer.play completed:", result);
+                    // result may contain error info from macro execution
+                    if (result && result.error) {
+                        sendResponse({ success: false, error: result.error });
+                    } else {
+                        sendResponse({ success: true, result: result });
+                    }
+                });
+            } catch (e) {
+                // Catch synchronous errors during play() invocation
                 console.error("[Offscreen] Play error:", e);
-            });
-            sendResponse({ success: true });
+                sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+                return; // Don't return true since we already responded
+            }
+            return true; // Keep message channel open for async callback
         } else if (method === "playFile") {
             // ★追加: パスからファイルを読んで再生する
             let filePath = args[0];
@@ -327,7 +345,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
             const resolveAbsolutePath = async (path) => {
                 // ★パスクリーニング: "iMacrosMV3-main-main/Macros/" -> "Macros/"
-                let cleanedPath = path.replace(/^[^\/]+\/Macros\//, 'Macros/');
+                // Support both forward slashes (Unix) and backslashes (Windows)
+                let cleanedPath = path.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
                 console.log("[Offscreen] Cleaned path:", cleanedPath);
 
                 // ★重要: 相対パスを絶対パスに変換
@@ -395,8 +414,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             let filePath = args[0];
             console.log("[Offscreen] Opening editor for file:", filePath);
 
-            // パスクリーニング
-            filePath = filePath.replace(/^[^\/]+\/Macros\//, 'Macros/');
+            // パスクリーニング - Support both forward slashes (Unix) and backslashes (Windows)
+            filePath = filePath.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
             console.log("[Offscreen] Cleaned path for editor:", filePath);
 
             const node = afio.openNode(filePath);
@@ -418,6 +437,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 console.error("[Offscreen] File read for editor error:", err);
                 sendResponse({ success: false, error: err.message || String(err) });
             });
+            return true; // Keep message channel open for async response
         } else {
             sendResponse({ success: false, error: `Unknown method: ${method}` });
         }
