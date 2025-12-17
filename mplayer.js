@@ -4884,7 +4884,6 @@ MacroPlayer.prototype.showAndAddExtractData = function (str) {
 
     // ★FIX: Use Service Worker to open the dialog window
     // Offscreen から window.open は不可視またはブロックされるため
-    var self = this;
 
     // ダイアログに渡すデータ
     var dialogArgs = {
@@ -4899,25 +4898,25 @@ MacroPlayer.prototype.showAndAddExtractData = function (str) {
         url: "extractDialog.html",
         pos: { width: 430, height: 380 },
         args: dialogArgs // SW側で一時的にキャッシュされる
-    }, function(response) {
-        if (chrome.runtime.lastError) {
-            console.error("Failed to open extract dialog:", chrome.runtime.lastError);
-            // エラー時は待機状態を解除してマクロを続行
-            self.waitingForExtract = false;
-            self.handleError(new RuntimeError("Failed to open extract dialog: " + chrome.runtime.lastError.message, 999));
-            return;
-        }
+    }, (response) => { // Use arrow function to preserve 'this' context
+        // ★FIX: Check both runtime.lastError and response.error
+        if (chrome.runtime.lastError || (response && response.error)) {
+            var errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
+                           (response && response.error) ||
+                           "Unknown error opening dialog";
 
-        if (response && response.error) {
-            console.error("Service Worker reported error opening extract dialog:", response.error);
-            // エラー時は待機状態を解除してマクロを続行
-            self.waitingForExtract = false;
-            self.handleError(new RuntimeError("Failed to open extract dialog: " + response.error, 999));
+            console.error("[MacroPlayer] Failed to open extract dialog:", errorMsg);
+
+            // ★CRITICAL: Reset waiting flag to prevent hang
+            this.waitingForExtract = false;
+
+            // Terminate run cleanly with error
+            this.handleError(new RuntimeError("Failed to open extract dialog: " + errorMsg, 999));
             return;
         }
 
         // ダイアログが正常に開かれた場合は、ダイアログが閉じられるまで待機
-        console.log("Extract dialog opened successfully");
+        console.log("[MacroPlayer] Extract dialog opened successfully");
     });
 };
 
