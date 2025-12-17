@@ -1586,14 +1586,17 @@ globalScope.edit = function (macro, overwrite, line) {
         command: "openEditorWindow",
         editorData
     }, (response) => {
-        if (chrome.runtime.lastError) {
-            console.error("[iMacros Offscreen] Failed to request editor window:", chrome.runtime.lastError);
+        // ★Refactor: Consolidated error checking with robust message construction
+        if (chrome.runtime.lastError || (response && response.success === false)) {
+            const errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
+                             (response && response.error) ||
+                             "Unknown error opening editor";
+
+            console.error("[iMacros Offscreen] Failed to open editor:", errorMsg);
             return;
         }
-
-        if (response && response.success === false) {
-            console.error("[iMacros Offscreen] Service Worker reported failure to open editor:", response.error);
-        }
+        // Success - editor window opened
+        console.log("[iMacros Offscreen] Editor window requested successfully");
     });
 };
 

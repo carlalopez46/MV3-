@@ -2325,13 +2325,11 @@ function hasDownloadsAPI() {
 }
 
 MacroPlayer.prototype.saveTarget = function (url) {
-    var self = this;
-
     if (hasDownloadsAPI()) {
         // Direct access (Service Worker context)
-        chrome.downloads.download({ url: url }, function (dl_id) {
+        chrome.downloads.download({ url: url }, (dl_id) => {
             if (chrome.runtime.lastError) {
-                self.handleError(new RuntimeError(
+                this.handleError(new RuntimeError(
                     "Download failed: " + chrome.runtime.lastError.message
                 ));
                 return;
@@ -2344,19 +2342,16 @@ MacroPlayer.prototype.saveTarget = function (url) {
         chrome.runtime.sendMessage({
             command: 'DOWNLOADS_DOWNLOAD',
             options: { url: url },
-            win_id: self.win_id,
-            tab_id: self.tab_id
-        }, function (response) {
-            if (chrome.runtime.lastError) {
-                self.handleError(new RuntimeError(
-                    "Download failed: " + chrome.runtime.lastError.message
-                ));
-                return;
-            }
-            if (response && response.error) {
-                self.handleError(new RuntimeError(
-                    "Download failed: " + response.error
-                ));
+            win_id: this.win_id,
+            tab_id: this.tab_id
+        }, (response) => {
+            // ★Refactor: Consolidated error checking with robust message construction
+            if (chrome.runtime.lastError || (response && response.error)) {
+                var errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
+                               (response && response.error) ||
+                               "Unknown download error";
+
+                this.handleError(new RuntimeError("Download failed: " + errorMsg));
                 return;
             }
             // Download started, events will be forwarded
