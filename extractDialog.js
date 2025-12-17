@@ -7,8 +7,19 @@ function ok() {
 }
 
 window.addEventListener("beforeunload", function() {
-    args.mplayer.waitingForExtract = false;
-    args.mplayer.next("extractDialog");
+    // ★FIX: MV3 では mplayer インスタンスに直接アクセスできないため、
+    // メッセージングを使用して Offscreen に通知する
+    if (args && args.win_id && chrome.runtime) {
+        chrome.runtime.sendMessage({
+            target: 'offscreen',
+            command: 'EXTRACT_DIALOG_CLOSED',
+            win_id: args.win_id
+        }, function(response) {
+            if (chrome.runtime.lastError) {
+                console.warn("Failed to notify extract dialog close:", chrome.runtime.lastError);
+            }
+        });
+    }
     return null;
 });
 

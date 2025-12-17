@@ -921,6 +921,28 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             return true;
         }
 
+        // ★FIX: Handle EXTRACT dialog close notification from extractDialog.js
+        if (request.command === 'EXTRACT_DIALOG_CLOSED') {
+            const win_id = request.win_id;
+            console.log('[Offscreen] Extract dialog closed for window:', win_id);
+
+            try {
+                if (context[win_id] && context[win_id].mplayer) {
+                    const mplayer = context[win_id].mplayer;
+                    mplayer.waitingForExtract = false;
+                    mplayer.next("extractDialog");
+                    sendResponse({ success: true });
+                } else {
+                    console.warn('[Offscreen] Cannot find mplayer for window:', win_id);
+                    sendResponse({ success: false, error: 'mplayer not found' });
+                }
+            } catch (err) {
+                console.error('[Offscreen] Error handling EXTRACT_DIALOG_CLOSED:', err);
+                sendResponse({ success: false, error: err.message || String(err) });
+            }
+            return true;
+        }
+
         switch (request.command) {
             case 'actionClicked':
                 handleActionClicked(request.tab);

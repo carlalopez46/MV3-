@@ -4884,6 +4884,7 @@ MacroPlayer.prototype.showAndAddExtractData = function (str) {
 
     // ★FIX: Use Service Worker to open the dialog window
     // Offscreen から window.open は不可視またはブロックされるため
+    var self = this;
 
     // ダイアログに渡すデータ
     var dialogArgs = {
@@ -4901,9 +4902,22 @@ MacroPlayer.prototype.showAndAddExtractData = function (str) {
     }, function(response) {
         if (chrome.runtime.lastError) {
             console.error("Failed to open extract dialog:", chrome.runtime.lastError);
+            // エラー時は待機状態を解除してマクロを続行
+            self.waitingForExtract = false;
+            self.handleError(new RuntimeError("Failed to open extract dialog: " + chrome.runtime.lastError.message, 999));
+            return;
         }
-        // 必要ならここで待機状態を解除するロジックなどを追加
-        // (現在はユーザーがダイアログを操作するまで待つ設計か確認が必要)
+
+        if (response && response.error) {
+            console.error("Service Worker reported error opening extract dialog:", response.error);
+            // エラー時は待機状態を解除してマクロを続行
+            self.waitingForExtract = false;
+            self.handleError(new RuntimeError("Failed to open extract dialog: " + response.error, 999));
+            return;
+        }
+
+        // ダイアログが正常に開かれた場合は、ダイアログが閉じられるまで待機
+        console.log("Extract dialog opened successfully");
     });
 };
 
