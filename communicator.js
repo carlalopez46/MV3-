@@ -117,7 +117,11 @@ Communicator.prototype._execHandlers = function (msg, tab_id, win_id, sendRespon
             targetWinId: win_id,
             targetWinIdType: typeof win_id
         }));
-        console.warn("[Communicator] No handler matched for topic:", msg.topic, "Debug:", debugInfo);
+        // query-state is frequently sent to check recorder state, don't warn for it
+        // as it's expected that handlers from different windows won't match
+        if (msg.topic !== 'query-state') {
+            console.warn("[Communicator] No handler matched for topic:", msg.topic, "Debug:", debugInfo);
+        }
 
         sendResponse({
             state: 'idle',
