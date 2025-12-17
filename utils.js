@@ -743,7 +743,9 @@ var imns = {
                         }, function (response) {
                             if (chrome.runtime.lastError) {
                                 console.warn("[iMacros] Clipboard read proxy failed:", chrome.runtime.lastError.message);
-                                resolve(self._cachedValue || ""); // Return cached value on error
+                                // Return cached value only if still within TTL, otherwise empty string
+                                var isFresh = (Date.now() - self._cacheTimestamp) < self._CACHE_TTL_MS;
+                                resolve(isFresh ? self._cachedValue : "");
                                 return;
                             }
                             if (response && response.success) {
@@ -754,12 +756,16 @@ var imns = {
                                 resolve(self._cachedValue);
                             } else {
                                 console.warn("[iMacros] Clipboard read failed:", response && response.error);
-                                resolve(self._cachedValue || ""); // Return cached value on error
+                                // Return cached value only if still within TTL, otherwise empty string
+                                var isFresh = (Date.now() - self._cacheTimestamp) < self._CACHE_TTL_MS;
+                                resolve(isFresh ? self._cachedValue : "");
                             }
                         });
                     } catch (e) {
                         console.error("[iMacros] Clipboard read proxy exception:", e);
-                        resolve(self._cachedValue || ""); // Return cached value on error
+                        // Return cached value only if still within TTL, otherwise empty string
+                        var isFresh = (Date.now() - self._cacheTimestamp) < self._CACHE_TTL_MS;
+                        resolve(isFresh ? self._cachedValue : "");
                     }
                 });
             }
