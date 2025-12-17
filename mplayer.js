@@ -1960,10 +1960,9 @@ MacroPlayer.prototype.RegExpTable["frame"] =
 
 MacroPlayer.prototype.onFrameComplete = function (data) {
     if (!data.frame) {
-        var self = this;
-        this.retry(function () {
-            self.currentFrame = { number: 0 };
-            throw new RuntimeError("frame " + self.requestedFrameParam + " not found", 722);
+        this.retry(() => {
+            this.currentFrame = { number: 0 };
+            throw new RuntimeError("frame " + this.requestedFrameParam + " not found", 722);
         }, "Frame waiting... ", "onFrameComplete", this.timeout_tag);
     } else {
         this.clearRetryInterval();
@@ -1995,8 +1994,6 @@ MacroPlayer.prototype.ActionTable["frame"] = function (cmd) {
         frame_data.number = param;
     else if (type == "name")
         frame_data.name = param;
-
-    var self = this;
 
     communicator.postMessage("frame-command", frame_data, this.tab_id,
         this.onFrameComplete.bind(this),

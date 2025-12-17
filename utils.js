@@ -672,18 +672,16 @@ var imns = {
         },
 
         _writeClipboardFallback: function (str) {
-            var self = this;
-
             // If in Offscreen Document, proxy through Service Worker -> Content Script
             // This is necessary because Offscreen Documents don't have focus and clipboard operations fail
-            if (self._isOffscreenContext()) {
+            if (this._isOffscreenContext()) {
                 console.log("[iMacros] Clipboard write: proxying through content script (offscreen context detected)");
-                return new Promise(function (resolve, reject) {
+                return new Promise((resolve, reject) => {
                     try {
                         chrome.runtime.sendMessage({
                             command: 'CLIPBOARD_WRITE',
                             text: str
-                        }, function (response) {
+                        }, (response) => {
                             if (chrome.runtime.lastError) {
                                 console.warn("[iMacros] Clipboard write proxy failed:", chrome.runtime.lastError.message);
                                 // Don't fail the macro - clipboard is non-critical
@@ -708,7 +706,7 @@ var imns = {
 
             // Try Clipboard API first if available (modern browsers)
             if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
-                return navigator.clipboard.writeText(str).catch(function (err) {
+                return navigator.clipboard.writeText(str).catch((err) => {
                     console.error("[iMacros] Clipboard write failed:", err);
                     // Don't throw - return resolved promise (clipboard is non-critical)
                     return Promise.resolve();
@@ -718,7 +716,7 @@ var imns = {
             // Fallback to DOM method if available (content scripts, popups)
             if (typeof document !== 'undefined' && document.body) {
                 try {
-                    var x = self._check_area();
+                    var x = this._check_area();
                     x.value = str;
                     x.focus();
                     x.select();
@@ -736,33 +734,31 @@ var imns = {
         },
 
         _readClipboardFallback: function () {
-            var self = this;
-
             // Helper to proxy through Service Worker -> Content Script
-            var proxyThroughServiceWorker = function() {
-                return new Promise(function (resolve, reject) {
+            const proxyThroughServiceWorker = () => {
+                return new Promise((resolve, reject) => {
                     try {
                         chrome.runtime.sendMessage({
                             command: 'CLIPBOARD_READ'
-                        }, function (response) {
+                        }, (response) => {
                             if (chrome.runtime.lastError) {
                                 console.warn("[iMacros] Clipboard read proxy failed:", chrome.runtime.lastError.message);
-                                resolve((Date.now() - self._cacheTimestamp) < self._CACHE_TTL_MS ? self._cachedValue : "");
+                                resolve((Date.now() - this._cacheTimestamp) < this._CACHE_TTL_MS ? this._cachedValue : "");
                                 return;
                             }
                             if (response && response.success) {
                                 console.log("[iMacros] Clipboard read successful via content script proxy");
-                                self._cachedValue = response.text || "";
-                                self._cacheTimestamp = Date.now();
-                                resolve(self._cachedValue);
+                                this._cachedValue = response.text || "";
+                                this._cacheTimestamp = Date.now();
+                                resolve(this._cachedValue);
                             } else {
                                 console.warn("[iMacros] Clipboard read failed:", response && response.error);
-                                resolve((Date.now() - self._cacheTimestamp) < self._CACHE_TTL_MS ? self._cachedValue : "");
+                                resolve((Date.now() - this._cacheTimestamp) < this._CACHE_TTL_MS ? this._cachedValue : "");
                             }
                         });
                     } catch (e) {
                         console.error("[iMacros] Clipboard read proxy exception:", e);
-                        resolve((Date.now() - self._cacheTimestamp) < self._CACHE_TTL_MS ? self._cachedValue : "");
+                        resolve((Date.now() - this._cacheTimestamp) < this._CACHE_TTL_MS ? this._cachedValue : "");
                     }
                 });
             };
@@ -770,7 +766,7 @@ var imns = {
             // In Offscreen Document, use execCommand('paste') directly
             // Offscreen documents created with 'CLIPBOARD' reason support this legacy API
             // navigator.clipboard API won't work due to lack of focus
-            if (self._isOffscreenContext()) {
+            if (this._isOffscreenContext()) {
                 console.log("[iMacros] Clipboard read: using execCommand in offscreen context");
                 var textarea = null;
                 try {
@@ -787,8 +783,8 @@ var imns = {
                         var text = textarea.value;
                         if (result && text !== undefined) {
                             console.log("[iMacros] Clipboard read successful via execCommand in offscreen");
-                            self._cachedValue = text;
-                            self._cacheTimestamp = Date.now();
+                            this._cachedValue = text;
+                            this._cacheTimestamp = Date.now();
                             return Promise.resolve(text);
                         } else {
                             console.warn("[iMacros] execCommand('paste') returned false, trying proxy");
@@ -807,7 +803,7 @@ var imns = {
 
             // Try Clipboard API first if available (modern browsers)
             if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.readText) {
-                return navigator.clipboard.readText().catch(function (err) {
+                return navigator.clipboard.readText().catch((err) => {
                     console.error("[iMacros] Clipboard read failed:", err);
                     // Don't throw - return rejected promise for caller to handle
                     return Promise.reject(new Error("Clipboard read failed: " + err.message));
