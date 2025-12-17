@@ -301,14 +301,24 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 return;
             }
             // args: [macro, limits]
-            // Note: mplayer.play() is not Promise-based, use try/catch for synchronous errors
+            // mplayer.play(macro, limits, callback) is async - use callback for completion
             try {
-                mplayer.play(args[0], args[1]);
-                sendResponse({ success: true });
+                mplayer.play(args[0], args[1], function (result) {
+                    console.log("[Offscreen] mplayer.play completed:", result);
+                    // result may contain error info from macro execution
+                    if (result && result.error) {
+                        sendResponse({ success: false, error: result.error });
+                    } else {
+                        sendResponse({ success: true, result: result });
+                    }
+                });
             } catch (e) {
+                // Catch synchronous errors during play() invocation
                 console.error("[Offscreen] Play error:", e);
                 sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+                return; // Don't return true since we already responded
             }
+            return true; // Keep message channel open for async callback
         } else if (method === "playFile") {
             // ★追加: パスからファイルを読んで再生する
             let filePath = args[0];
