@@ -561,9 +561,25 @@ if (chrome.downloads && chrome.downloads.onChanged) {
 }
 
 // Helper function to execute clipboard write in a tab
+// Helper to check if a tab is usable for clipboard operations (shared by CLIPBOARD_READ/WRITE)
+function isUsableTabForClipboard(tab) {
+    return tab && tab.url &&
+        !tab.url.startsWith('chrome://') &&
+        !tab.url.startsWith('chrome-extension://') &&
+        !tab.url.startsWith('about:') &&
+        !tab.url.startsWith('devtools://');
+}
+
+// Helper to find a usable tab from a list (shared by CLIPBOARD_READ/WRITE)
+function findUsableTabForClipboard(tabs) {
+    if (!tabs || tabs.length === 0) return null;
+    return tabs.find(isUsableTabForClipboard) || null;
+}
+
 async function executeClipboardWrite(tab, text, sendResponse) {
     // Skip restricted URLs - return success since clipboard is non-critical
-    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:')) {
+    // Note: Keep this in sync with isUsableTabForClipboard() checks
+    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:') || tab.url.startsWith('devtools://')) {
         console.warn('[iMacros SW] Cannot write clipboard on restricted URL:', tab.url);
         sendResponse({ success: true, warning: 'Restricted URL skipped' });
         return;
@@ -623,6 +639,74 @@ async function executeClipboardWrite(tab, text, sendResponse) {
         }
     } catch (err) {
         console.error('[iMacros SW] executeScript failed for clipboard:', err);
+        sendResponse({ success: false, error: err.message });
+    }
+}
+
+// Execute clipboard read operation in the context of a web page tab
+async function executeClipboardRead(tab, sendResponse) {
+    // Skip restricted URLs - return empty string since clipboard is non-critical
+    // Note: Keep this in sync with isUsableTabForClipboard() checks
+    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:') || tab.url.startsWith('devtools://')) {
+        console.warn('[iMacros SW] Cannot read clipboard on restricted URL:', tab.url);
+        sendResponse({ success: true, text: '', warning: 'Restricted URL skipped' });
+        return;
+    }
+
+    try {
+        // Ensure the tab and window are focused before attempting clipboard read
+        try {
+            await chrome.windows.update(tab.windowId, { focused: true });
+            await chrome.tabs.update(tab.id, { active: true });
+            // Allow time for focus to settle before clipboard operation
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        } catch (focusErr) {
+            console.warn('[iMacros SW] Focus operation failed, proceeding with clipboard read:', focusErr);
+        }
+
+        // Use chrome.scripting.executeScript to read from clipboard in the tab's context
+        const results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => {
+                const readUsingExecCommand = () => {
+                    try {
+                        const textarea = document.createElement('textarea');
+                        textarea.setAttribute('readonly', '');
+                        textarea.style.position = 'fixed';
+                        textarea.style.opacity = '0';
+                        document.body.appendChild(textarea);
+                        textarea.focus();
+                        const success = document.execCommand('paste');
+                        const text = textarea.value;
+                        document.body.removeChild(textarea);
+                        return success ? { success: true, text: text } : { success: false, error: 'execCommand paste failed' };
+                    } catch (e) {
+                        return { success: false, error: e.message };
+                    }
+                };
+
+                // Prefer modern clipboard API but fall back to execCommand when focus is an issue
+                return navigator.clipboard.readText()
+                    .then((text) => ({ success: true, text: text }))
+                    .catch(() => readUsingExecCommand());
+            },
+            args: []
+        });
+
+        if (results && results[0] && results[0].result) {
+            const result = results[0].result;
+            if (result.success) {
+                console.log('[iMacros SW] Clipboard read successful via tab');
+                sendResponse({ success: true, text: result.text || '' });
+            } else {
+                console.warn('[iMacros SW] Clipboard read failed in tab:', result.error);
+                sendResponse({ success: false, error: result.error });
+            }
+        } else {
+            sendResponse({ success: false, error: 'No result from script' });
+        }
+    } catch (err) {
+        console.error('[iMacros SW] executeScript failed for clipboard read:', err);
         sendResponse({ success: false, error: err.message });
     }
 }
@@ -995,21 +1079,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.command === "CLIPBOARD_WRITE") {
         const textToWrite = msg.text;
 
-        // Helper to check if a tab is usable for clipboard operations
-        const isUsableTab = (tab) => {
-            return tab && tab.url &&
-                !tab.url.startsWith('chrome://') &&
-                !tab.url.startsWith('chrome-extension://') &&
-                !tab.url.startsWith('about:') &&
-                !tab.url.startsWith('devtools://');
-        };
-
-        // Helper to find a usable tab from a list
-        const findUsableTab = (tabs) => {
-            if (!tabs || tabs.length === 0) return null;
-            return tabs.find(isUsableTab) || null;
-        };
-
         // First, try to find an active web page tab in any window
         chrome.tabs.query({ active: true }, (activeTabs) => {
             if (chrome.runtime.lastError) {
@@ -1018,7 +1087,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 return;
             }
 
-            const usableActiveTab = findUsableTab(activeTabs);
+            const usableActiveTab = findUsableTabForClipboard(activeTabs);
             if (usableActiveTab) {
                 executeClipboardWrite(usableActiveTab, textToWrite, sendResponse);
                 return;
@@ -1032,7 +1101,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     return;
                 }
 
-                const usableTab = findUsableTab(allTabs);
+                const usableTab = findUsableTabForClipboard(allTabs);
                 if (usableTab) {
                     console.log('[iMacros SW] Using fallback tab for clipboard:', usableTab.url);
                     executeClipboardWrite(usableTab, textToWrite, sendResponse);
@@ -1040,6 +1109,45 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     console.warn('[iMacros SW] No web page tab found for clipboard write');
                     // Return success anyway - clipboard is non-critical
                     sendResponse({ success: true, warning: 'No web page tab available' });
+                }
+            });
+        });
+        return true;
+    }
+
+    // Handle clipboard read request from Offscreen Document
+    // Offscreen Document cannot access clipboard, so we proxy through the active tab
+    if (msg.command === "CLIPBOARD_READ") {
+        // First, try to find an active web page tab in any window
+        chrome.tabs.query({ active: true }, (activeTabs) => {
+            if (chrome.runtime.lastError) {
+                console.error('[iMacros SW] CLIPBOARD_READ query error:', chrome.runtime.lastError);
+                sendResponse({ success: false, error: chrome.runtime.lastError.message });
+                return;
+            }
+
+            const usableActiveTab = findUsableTabForClipboard(activeTabs);
+            if (usableActiveTab) {
+                executeClipboardRead(usableActiveTab, sendResponse);
+                return;
+            }
+
+            // No usable active tab found - try to find any web page tab
+            chrome.tabs.query({}, (allTabs) => {
+                if (chrome.runtime.lastError) {
+                    console.warn('[iMacros SW] CLIPBOARD_READ fallback query error:', chrome.runtime.lastError);
+                    sendResponse({ success: false, error: 'No usable tab found' });
+                    return;
+                }
+
+                const usableTab = findUsableTabForClipboard(allTabs);
+                if (usableTab) {
+                    console.log('[iMacros SW] Using fallback tab for clipboard read:', usableTab.url);
+                    executeClipboardRead(usableTab, sendResponse);
+                } else {
+                    console.warn('[iMacros SW] No web page tab found for clipboard read');
+                    // Return empty string - clipboard is non-critical
+                    sendResponse({ success: true, text: '', warning: 'No web page tab available' });
                 }
             });
         });
