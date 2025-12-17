@@ -5152,6 +5152,9 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
         t = var_name.match(/^!clipboard$/i);
         if (t) return imns.Clipboard.getStringSync() || "";
 
+        t = var_name.match(/^!newline$/i);
+        if (t) return "\n";
+
         t = var_name.match(/^!extract_step$/i);
         if (t) return mplayer.currentExtractStep;
 
