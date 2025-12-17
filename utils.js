@@ -603,7 +603,12 @@ var imns = {
                 return false;
             }
             var url = document.location.href;
-            // Match extension's offscreen document specifically
+            // Match extension's offscreen document specifically using exact URL
+            if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
+                var offscreenUrl = chrome.runtime.getURL('offscreen.html');
+                return url === offscreenUrl || url.startsWith(offscreenUrl + '?') || url.startsWith(offscreenUrl + '#');
+            }
+            // Fallback to pattern matching if chrome.runtime.getURL unavailable
             return url.includes('/offscreen.html') ||
                    (url.includes('offscreen') && url.startsWith('chrome-extension://'));
         },
@@ -875,8 +880,9 @@ var imns = {
                 self._readClipboardFallback().then(function(value) {
                     self._cachedValue = value || "";
                     self._cacheTimestamp = Date.now();
-                }).catch(function() {
-                    // Ignore errors in background update
+                }).catch(function(err) {
+                    // Ignore errors in background update, but log for debugging
+                    console.debug("[iMacros] Background clipboard cache update failed in offscreen context:", err && err.message ? err.message : err);
                 });
                 // Return cached value immediately
                 return self._cachedValue;
