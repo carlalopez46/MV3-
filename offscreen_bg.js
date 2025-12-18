@@ -939,11 +939,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
         // ★FIX: Handle EXTRACT dialog close notification from extractDialog.js
         if (request.command === 'EXTRACT_DIALOG_CLOSED') {
-            const win_id = request.win_id;
+            // Coerce to number to handle stringified IDs from messaging
+            const win_id = parseInt(request.win_id, 10);
 
             // Validate win_id
-            if (!Number.isInteger(win_id) || win_id <= 0) {
-                console.error('[Offscreen] Invalid win_id for EXTRACT_DIALOG_CLOSED:', win_id);
+            if (isNaN(win_id) || win_id <= 0) {
+                console.error('[Offscreen] Invalid win_id for EXTRACT_DIALOG_CLOSED:', request.win_id);
                 sendResponse({ success: false, error: 'Invalid win_id' });
                 return true;
             }
@@ -961,9 +962,15 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                         return true;
                     }
 
-                    mplayer.waitingForExtract = false;
-                    mplayer.next("extractDialog");
-                    sendResponse({ success: true });
+                    // Resume macro execution if waiting for extract dialog
+                    if (mplayer.waitingForExtract) {
+                        mplayer.waitingForExtract = false;
+                        mplayer.next("extractDialog");
+                        sendResponse({ success: true });
+                    } else {
+                        // Dialog closed but macro wasn't waiting (manual close)
+                        sendResponse({ success: true });
+                    }
                 } else {
                     console.warn('[Offscreen] Cannot find mplayer for window:', win_id);
                     sendResponse({ success: false, error: 'mplayer not found' });
