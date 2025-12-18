@@ -275,13 +275,12 @@ var SOAPClient = (function () {
 
             var req = new XMLHttpRequest();
             req.open('POST', this.url, true);
-            var self = this;
-            req.onreadystatechange = function() {
+            req.onreadystatechange = () => {
                 if (req.readyState == 4) {
                     if(req.status == 200) {
                         try {
                             // console.log("response="+req.responseText);
-                            var rv = self.parseRetObject(
+                            var rv = this.parseRetObject(
                                 method, req.responseXML
                             );
                             callback(rv);

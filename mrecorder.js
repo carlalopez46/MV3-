@@ -981,25 +981,24 @@ Recorder.prototype.onTabDetached = function (tab_id, obj) {
 
 
 Recorder.prototype.onDownloadCreated = function (dl) {
-    var self = this;
-    chrome.tabs.query({ active: true, windowId: this.win_id }, function (tabs) {
+    chrome.tabs.query({ active: true, windowId: this.win_id }, (tabs) => {
         if (chrome.runtime.lastError) {
-            logError("Failed to query tabs in onDownloadCreated: " + chrome.runtime.lastError.message, { win_id: self.win_id });
+            logError("Failed to query tabs in onDownloadCreated: " + chrome.runtime.lastError.message, { win_id: this.win_id });
             return;
         }
         if (!tabs || tabs.length === 0) {
-            logWarning("No active tabs in onDownloadCreated", { win_id: self.win_id });
+            logWarning("No active tabs in onDownloadCreated", { win_id: this.win_id });
             return;
         }
         if (dl.referrer != tabs[0].url)
             return;
-        var prev_rec = self.popLastAction()
+        var prev_rec = this.popLastAction()
         var rec = "ONDOWNLOAD FOLDER=*" +
             " FILE=+_{{!NOW:yyyymmdd_hhnnss}}" +
             " WAIT=YES";
-        self.recordAction(rec);
+        this.recordAction(rec);
         if (prev_rec) {
-            self.recordAction(prev_rec);
+            this.recordAction(prev_rec);
         }
     });
 };
@@ -1009,24 +1008,23 @@ Recorder.prototype.onContextMenu = function (info, tab) {
     if (!tab || this.win_id != tab.windowId)
         return;
 
-    var self = this;
     communicator.postMessage(
         "on-rclick",
         { linkUrl: info.linkUrl, frameUrl: info.frameUrl },
         tab.id,
-        function (data) {
+        (data) => {
             var fail_msg = "' Element corresponding to right click action" +
                 " was not found.";
             if (!data.found) {
-                self.recordAction(fail_msg);
+                this.recordAction(fail_msg);
                 return;
             }
-            self.checkForFrameChange(data._frame);
+            this.checkForFrameChange(data._frame);
             var rec = "ONDOWNLOAD FOLDER=*" +
                 " FILE=+_{{!NOW:yyyymmdd_hhnnss}}" +
                 " WAIT=YES";
-            self.recordAction(rec);
-            self.recordAction(data.action);
+            this.recordAction(rec);
+            this.recordAction(data.action);
         },
         { number: 0 });
 };

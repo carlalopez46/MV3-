@@ -94,11 +94,11 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             win.addEventListener("focus", this.onFocusInEvent, true)
             console.log("[DEBUG] Conventional mode listeners attached (using input event)");
         }
-        var self = this;
-        win.addEventListener("pagehide", function listener() {
-            self.removeDOMEventsListeners(win);
+        const listener = () => {
+            this.removeDOMEventsListeners(win);
             win.removeEventListener("pagehide", listener);
-        });
+        };
+        win.addEventListener("pagehide", listener);
     };
 
     CSRecorder.prototype.removeDOMEventsListeners = function (win) {
@@ -1497,12 +1497,11 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             var selector = this.getSelectorForElement(target);
             // Debounce input events to avoid excessive recording
             clearTimeout(this.inputTimeout);
-            var self = this;
-            this.inputTimeout = setTimeout(function () {
+            this.inputTimeout = setTimeout(() => {
                 // Escape double quotes in selector and value to prevent malformed macros
                 var escapedSelector = selector.replace(/"/g, '\\"');
                 var escapedValue = target.value.replace(/"/g, '\\"');
-                self.saveAction(
+                this.saveAction(
                     "EVENT TYPE=INPUT SELECTOR=\"" + escapedSelector + "\" VALUE=\"" + escapedValue + "\"",
                     { pack_type: "input", selector: selector, value: target.value }
                 );
@@ -1533,10 +1532,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
         // Debounce scroll events
         clearTimeout(this.scrollTimeout);
-        var self = this;
-        this.scrollTimeout = setTimeout(function () {
+        this.scrollTimeout = setTimeout(() => {
             var escapedSelector = selector.replace(/"/g, '\\"');
-            self.saveAction(
+            this.saveAction(
                 "EVENT TYPE=SCROLL SELECTOR=\"" + escapedSelector + "\" X=" + scrollX + " Y=" + scrollY,
                 { pack_type: "scroll", selector: selector, x: scrollX, y: scrollY }
             );
@@ -1556,18 +1554,17 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         // Clear previous hover timeout
         clearTimeout(this.hoverTimeout);
 
-        var self = this;
-        this.hoverTimeout = setTimeout(function () {
+        this.hoverTimeout = setTimeout(() => {
             // Only record hover on interactive elements
             var tagName = target.tagName.toLowerCase();
             if (['a', 'button', 'div', 'span', 'li', 'img'].includes(tagName)) {
-                var selector = self.getSelectorForElement(target);
+                var selector = this.getSelectorForElement(target);
                 var escapedSelector = selector.replace(/"/g, '\\"');
-                self.saveAction(
+                this.saveAction(
                     "EVENT TYPE=HOVER SELECTOR=\"" + escapedSelector + "\"",
                     { pack_type: "hover", selector: selector }
                 );
-                self.lastHoveredElement = target;
+                this.lastHoveredElement = target;
             }
         }, 500); // Only record hovers lasting 500ms+
     };

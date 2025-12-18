@@ -1960,10 +1960,9 @@ MacroPlayer.prototype.RegExpTable["frame"] =
 
 MacroPlayer.prototype.onFrameComplete = function (data) {
     if (!data.frame) {
-        var self = this;
-        this.retry(function () {
-            self.currentFrame = { number: 0 };
-            throw new RuntimeError("frame " + self.requestedFrameParam + " not found", 722);
+        this.retry(() => {
+            this.currentFrame = { number: 0 };
+            throw new RuntimeError("frame " + this.requestedFrameParam + " not found", 722);
         }, "Frame waiting... ", "onFrameComplete", this.timeout_tag);
     } else {
         this.clearRetryInterval();
@@ -1995,8 +1994,6 @@ MacroPlayer.prototype.ActionTable["frame"] = function (cmd) {
         frame_data.number = param;
     else if (type == "name")
         frame_data.name = param;
-
-    var self = this;
 
     communicator.postMessage("frame-command", frame_data, this.tab_id,
         this.onFrameComplete.bind(this),
@@ -2325,13 +2322,11 @@ function hasDownloadsAPI() {
 }
 
 MacroPlayer.prototype.saveTarget = function (url) {
-    var self = this;
-
     if (hasDownloadsAPI()) {
         // Direct access (Service Worker context)
-        chrome.downloads.download({ url: url }, function (dl_id) {
+        chrome.downloads.download({ url: url }, (dl_id) => {
             if (chrome.runtime.lastError) {
-                self.handleError(new RuntimeError(
+                this.handleError(new RuntimeError(
                     "Download failed: " + chrome.runtime.lastError.message
                 ));
                 return;
@@ -2344,19 +2339,16 @@ MacroPlayer.prototype.saveTarget = function (url) {
         chrome.runtime.sendMessage({
             command: 'DOWNLOADS_DOWNLOAD',
             options: { url: url },
-            win_id: self.win_id,
-            tab_id: self.tab_id
-        }, function (response) {
-            if (chrome.runtime.lastError) {
-                self.handleError(new RuntimeError(
-                    "Download failed: " + chrome.runtime.lastError.message
-                ));
-                return;
-            }
-            if (response && response.error) {
-                self.handleError(new RuntimeError(
-                    "Download failed: " + response.error
-                ));
+            win_id: this.win_id,
+            tab_id: this.tab_id
+        }, (response) => {
+            // ★Refactor: Consolidated error checking with robust message construction
+            if (chrome.runtime.lastError || (response && response.error)) {
+                var errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
+                               (response && response.error) ||
+                               "Unknown download error";
+
+                this.handleError(new RuntimeError("Download failed: " + errorMsg));
                 return;
             }
             // Download started, events will be forwarded
@@ -4881,15 +4873,43 @@ MacroPlayer.prototype.showAndAddExtractData = function (str) {
     if (!this.shouldPopupExtract)
         return;
     this.waitingForExtract = true;
-    var features = "titlebar=no,menubar=no,location=no," +
-        "resizable=yes,scrollbars=yes,status=no," +
-        "width=430,height=380";
-    var win = window.open("extractDialog.html",
-        null, features);
-    win.args = {
+
+    // ★FIX: Use Service Worker to open the dialog window
+    // Offscreen から window.open は不可視またはブロックされるため
+
+    // ダイアログに渡すデータ
+    var dialogArgs = {
         data: str,
-        mplayer: this
+        win_id: this.win_id
+        // 注意: this (mplayerインスタンス) は送れないので、必要なIDだけ渡す
     };
+
+    // SW にウィンドウ作成を依頼
+    chrome.runtime.sendMessage({
+        command: "openDialog",
+        url: "extractDialog.html",
+        pos: { width: 430, height: 380 },
+        args: dialogArgs // SW側で一時的にキャッシュされる
+    }, (response) => { // Use arrow function to preserve 'this' context
+        // ★FIX: Check both runtime.lastError and response.error
+        if (chrome.runtime.lastError || (response && response.error)) {
+            var errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
+                           (response && response.error) ||
+                           "Unknown error opening dialog";
+
+            console.error("[MacroPlayer] Failed to open extract dialog:", errorMsg);
+
+            // ★CRITICAL: Reset waiting flag to prevent hang
+            this.waitingForExtract = false;
+
+            // Terminate run cleanly with error
+            this.handleError(new RuntimeError("Failed to open extract dialog: " + errorMsg, 999));
+            return;
+        }
+
+        // ダイアログが正常に開かれた場合は、ダイアログが閉じられるまで待機
+        console.log("[MacroPlayer] Extract dialog opened successfully");
+    });
 };
 
 
