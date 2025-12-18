@@ -324,6 +324,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             let filePath = args[0];
             const loops = args[1] || 1;
             console.log("[Offscreen] Reading and playing file (original path):", filePath);
+            console.log("[Offscreen] Loop count:", loops, "(should be 1 for normal play, >1 for Play Loop)");
 
             // Guard against duplicate play requests (e.g., when messages are delivered twice)
             const existingContext = context[win_id];
@@ -379,6 +380,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     file_id: absolutePath,
                     times: loops
                 };
+
+                console.log("[Offscreen] Created macro object with times:", macro.times);
 
                 const ctx = context[win_id] && context[win_id]._initialized
                     ? context[win_id]

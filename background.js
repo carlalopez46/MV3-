@@ -2111,6 +2111,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
 
             console.log("[iMacros SW] Resolved win_id:", win_id);
+            console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", msg.loop || 1, ")");
 
             // Offscreenにファイル読み込みと再生を依頼
             sendMessageToOffscreen({
