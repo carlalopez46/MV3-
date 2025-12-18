@@ -131,6 +131,7 @@ async function initializeLocalStoragePolyfill() {
 const localStorageInitPromise = initializeLocalStoragePolyfill();
 globalThis.localStorageInitPromise = localStorageInitPromise;
 
+localStorageInitPromise.then(() => {
 // NOTE: These imports must remain synchronous because code below instantiates
 // globals such as MessagingBus/ExecutionStateMachine at top level. Deferring
 // imports would trigger ReferenceError before the service worker finishes
@@ -2682,8 +2683,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return false;
     }
 
-    // NOTE: openPanel command is handled by the main handler above.
-    // Do NOT add duplicate handler here - it causes panel to open twice
+// NOTE: openPanel command is handled by the main handler above.
+// Do NOT add duplicate handler here - it causes panel to open twice
 
     return false;
+});
+}).catch((err) => {
+    console.error('[iMacros SW] Failed to bootstrap background after localStorage hydration:', err);
 });
