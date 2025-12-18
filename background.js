@@ -2111,14 +2111,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
 
             console.log("[iMacros SW] Resolved win_id:", win_id);
-            console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", msg.loop || 1, ")");
+            console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", msg.loop ?? 1, ")");
 
             // Offscreenにファイル読み込みと再生を依頼
             sendMessageToOffscreen({
                 command: "CALL_CONTEXT_METHOD",
                 method: "playFile",
                 win_id: win_id,
-                args: [msg.file_path, msg.loop || 1]
+                args: [msg.file_path, msg.loop ?? 1]
             }).then(result => {
                 console.log("[iMacros SW] playFile result:", result);
                 // ACK応答 (ack: true, started: true) または従来の成功応答に対応

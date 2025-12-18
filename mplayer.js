@@ -4214,7 +4214,8 @@ MacroPlayer.prototype.play = function (macro, limits, callback) {
         this.times = macro.times || 1;
         this.currentLoop = macro.startLoop || 1;
         this.cycledReplay = this.times - this.currentLoop > 0;
-        console.log("[MacroPlayer] play() initialized with times:", this.times, "currentLoop:", this.currentLoop, "cycledReplay:", this.cycledReplay);
+        if (Storage.getBool("debug"))
+            console.log("[MacroPlayer] play() initialized with times:", this.times, "currentLoop:", this.currentLoop, "cycledReplay:", this.cycledReplay);
         // debugger should be attached at least once for every page if there is an
         // event command
         this.debuggerAttached = false;
@@ -4408,14 +4409,16 @@ MacroPlayer.prototype.playNextAction = function (caller_id) {
             if (this.currentLoop < this.times) {
                 this.firstLoop = false;
                 this.currentLoop++;
-                console.log("[MacroPlayer] Starting next loop:", this.currentLoop, "of", this.times);
+                if (Storage.getBool("debug"))
+                    console.log("[MacroPlayer] Starting next loop:", this.currentLoop, "of", this.times);
                 notifyPanelLoop(this.win_id, this.currentLoop);
                 this.action_stack = this.actions.slice();
                 this.action_stack.reverse();
                 this.next("new loop");
             } else {
                 // no more actions left
-                console.log("[MacroPlayer] All loops completed (", this.currentLoop, "/", this.times, "), stopping");
+                if (Storage.getBool("debug"))
+                    console.log("[MacroPlayer] All loops completed (", this.currentLoop, "/", this.times, "), stopping");
                 this.stop();
             }
         }
