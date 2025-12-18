@@ -175,7 +175,8 @@ function play() {
     // パネル側ではファイルを読まず、パスだけを送る
     sendCommand("playMacro", {
         file_path: filePath, // ファイルパスまたはID
-        macro_name: macroName
+        macro_name: macroName,
+        loop: 1  // ★修正: playボタンは常に1回のみ実行(繰り返しなし)
     });
 }
 
