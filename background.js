@@ -124,18 +124,41 @@ async function initializeLocalStoragePolyfill() {
     polyfill.__isHydratedPolyfill = true;
 }
 
-// NOTE: MV3 background scripts run as classic service workers, so top-level
-// await is forbidden. Expose the initialization promise instead; any module
-// that needs hydrated storage on startup should await
-// globalThis.localStorageInitPromise within its own async flow.
-const localStorageInitPromise = initializeLocalStoragePolyfill();
-globalThis.localStorageInitPromise = localStorageInitPromise;
+// NOTE: MV3 Service Workers REQUIRE importScripts() to be called synchronously
+// at the top level during initial script evaluation. Calling it asynchronously
+// (e.g., inside a .then() callback) will fail with a NetworkError.
 
-localStorageInitPromise.then(() => {
-// NOTE: These imports must remain synchronous because code below instantiates
-// globals such as MessagingBus/ExecutionStateMachine at top level. Deferring
-// imports would trigger ReferenceError before the service worker finishes
-// evaluating.
+// Step 1: Set up the localStorage polyfill synchronously BEFORE importing modules.
+// This ensures imported modules can access localStorage immediately.
+// The async hydration from chrome.storage happens separately afterward.
+(function setupSyncLocalStoragePolyfill() {
+    let needsPolyfill = false;
+    try {
+        needsPolyfill = (typeof localStorage === 'undefined' || localStorage === null || localStorage.__isMinimalLocalStorageShim || localStorage.__isInMemoryShim);
+    } catch (err) {
+        needsPolyfill = true;
+    }
+
+    if (!needsPolyfill) {
+        return;
+    }
+
+    // Install an in-memory shim immediately so modules imported synchronously
+    // below can rely on localStorage being defined.
+    const cache = Object.create(null);
+    const polyfill = createLocalStoragePolyfill(cache, LOCALSTORAGE_PREFIX);
+    polyfill.__isInMemoryShim = true;
+    polyfill.__isMinimalLocalStorageShim = true;
+
+    if (typeof globalThis !== 'undefined') {
+        globalThis.localStorage = polyfill;
+        globalThis._localStorageData = cache;
+        globalThis._LOCALSTORAGE_PREFIX = LOCALSTORAGE_PREFIX;
+    }
+})();
+
+// Step 2: Import all required scripts synchronously at the top level.
+// This MUST happen during initial script evaluation, not in a callback.
 try {
     importScripts(
         'utils.js',
@@ -153,6 +176,13 @@ try {
     console.error('[iMacros SW] Failed to import background modules:', e);
     throw e;
 }
+
+// Step 3: Hydrate localStorage cache asynchronously from chrome.storage.
+// This populates persisted data but modules can function with empty cache initially.
+const localStorageInitPromise = initializeLocalStoragePolyfill();
+globalThis.localStorageInitPromise = localStorageInitPromise;
+
+localStorageInitPromise.then(() => {
 
 // Background Service Worker for iMacros MV3
 // Handles Offscreen Document lifecycle and event forwarding
