@@ -410,21 +410,29 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             playInFlight.add(win_id);
             console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`);
 
+            // ★重要: ACKタイムアウト防止のため、即座にACKを返す
+            // マクロ実行には数秒かかる可能性があり、500msのACKタイムアウトを超えてしまう
+            // ACKを即座に返すことで、メッセージングバスのリトライを防ぎ、二重実行を回避する
+            if (sendResponse) {
+                sendResponse({ ack: true, started: true });
+            }
+
             (async () => {
                 try {
                     const absolutePath = await resolveAbsolutePath(filePath);
                     await readAndPlayFile(absolutePath, loops, win_id);
-                    console.log("[Offscreen] Macro play completed");
-                    sendResponse({ success: true });
+                    console.log("[Offscreen] Macro play completed successfully");
+                    // 注: sendResponseは既に呼び出し済みのため、ここでは呼び出さない
+                    // マクロ完了の通知は状態変更メッセージを通じてUIに伝達される
                 } catch (err) {
                     console.error("[Offscreen] File read/play error:", err);
-                    sendResponse({ success: false, error: err.message || String(err) });
+                    // エラーはログに記録し、UIには状態変更を通じて通知される
                 } finally {
                     playInFlight.delete(win_id);
                     console.log(`[Offscreen] playFile - Removed ${win_id} from playInFlight guard`);
                 }
             })();
-            return true;
+            // sendResponseを同期的に呼び出したので、return trueは不要
         } else if (method === "openEditor") {
             // ★追加: ファイルパスからエディタを開く
             let filePath = args[0];
