@@ -2120,7 +2120,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 args: [msg.file_path, msg.loop || 1]
             }).then(result => {
                 console.log("[iMacros SW] playFile result:", result);
-                if (result && typeof result.success !== 'undefined') {
+                // ACK応答 (ack: true, started: true) または従来の成功応答に対応
+                if (result && (result.ack === true || result.started === true)) {
+                    // マクロ開始のACK - パネルに成功を通知
+                    sendResponse({ success: true, started: true });
+                } else if (result && typeof result.success !== 'undefined') {
                     sendResponse(result);
                 } else {
                     sendResponse({ success: true });
