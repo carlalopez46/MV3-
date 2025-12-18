@@ -4,6 +4,40 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 */
 const LOCALSTORAGE_PREFIX = '__imacros_ls__:';
 
+// =============================================================================
+// LocalStorage Polyfill Helpers (shared logic to reduce duplication)
+// =============================================================================
+
+/**
+ * Check if localStorage needs to be polyfilled in this environment.
+ * Service Workers don't have native localStorage access.
+ */
+function needsLocalStoragePolyfill() {
+    try {
+        return (typeof localStorage === 'undefined' || localStorage === null ||
+                localStorage.__isMinimalLocalStorageShim || localStorage.__isInMemoryShim);
+    } catch (err) {
+        return true;
+    }
+}
+
+/**
+ * Install the localStorage polyfill on globalThis using the provided cache.
+ * Returns the created polyfill object.
+ */
+function installLocalStoragePolyfill(cache) {
+    const polyfill = createLocalStoragePolyfill(cache, LOCALSTORAGE_PREFIX);
+    polyfill.__isInMemoryShim = true;
+    polyfill.__isMinimalLocalStorageShim = true;
+
+    if (typeof globalThis !== 'undefined') {
+        globalThis.localStorage = polyfill;
+        globalThis._localStorageData = cache;
+        globalThis._LOCALSTORAGE_PREFIX = LOCALSTORAGE_PREFIX;
+    }
+    return polyfill;
+}
+
 function createLocalStoragePolyfill(cache, prefix) {
     return {
         getItem: function (key) {
@@ -67,33 +101,31 @@ function createLocalStoragePolyfill(cache, prefix) {
     };
 }
 
+/**
+ * Asynchronously hydrate the localStorage polyfill from chrome.storage.
+ * If the synchronous polyfill was already installed, reuses that cache.
+ * This prevents data loss from modules that wrote during the sync phase.
+ */
 async function initializeLocalStoragePolyfill() {
-    let needsPolyfill = false;
-    try {
-        needsPolyfill = (typeof localStorage === 'undefined' || localStorage === null || localStorage.__isMinimalLocalStorageShim || localStorage.__isInMemoryShim);
-    } catch (err) {
-        needsPolyfill = true;
-    }
+    // Check if the synchronous polyfill was already installed
+    // If so, reuse the existing cache to avoid data loss
+    let cache;
+    let polyfill;
 
-    if (!needsPolyfill) {
+    if (typeof globalThis !== 'undefined' && globalThis._localStorageData) {
+        // Reuse existing cache from synchronous setup
+        cache = globalThis._localStorageData;
+        polyfill = globalThis.localStorage;
+    } else if (needsLocalStoragePolyfill()) {
+        // Fallback: install fresh polyfill (shouldn't happen if sync setup ran)
+        cache = Object.create(null);
+        polyfill = installLocalStoragePolyfill(cache);
+    } else {
+        // Native localStorage available, nothing to do
         return;
     }
 
-    // Install an in-memory shim immediately so modules imported synchronously
-    // below can rely on localStorage being defined. The backing cache will be
-    // hydrated asynchronously from chrome.storage once available.
-    const cache = Object.create(null);
-    const polyfill = createLocalStoragePolyfill(cache, LOCALSTORAGE_PREFIX);
-    polyfill.__isInMemoryShim = true;
-    polyfill.__isMinimalLocalStorageShim = true;
-
-    if (typeof globalThis !== 'undefined') {
-        globalThis.localStorage = polyfill;
-        // Expose the cache for legacy modules that expect synchronous access; treat as internal-only.
-        globalThis._localStorageData = cache;
-        globalThis._LOCALSTORAGE_PREFIX = LOCALSTORAGE_PREFIX;
-    }
-
+    // Hydrate cache from chrome.storage.local
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
         try {
             const items = await new Promise((resolve, reject) => {
@@ -116,26 +148,31 @@ async function initializeLocalStoragePolyfill() {
             console.log(`[iMacros SW] localStorage cache loaded asynchronously: ${hydratedCount} items`);
         } catch (err) {
             console.error('[iMacros SW] Failed to hydrate localStorage cache:', err);
-            // Optional: Throwing here would prevent starting with an empty cache if that is critical
-            // throw err;
         }
     }
 
-    polyfill.__isHydratedPolyfill = true;
+    if (polyfill) {
+        polyfill.__isHydratedPolyfill = true;
+    }
 }
 
-// NOTE: MV3 background scripts run as classic service workers, so top-level
-// await is forbidden. Expose the initialization promise instead; any module
-// that needs hydrated storage on startup should await
-// globalThis.localStorageInitPromise within its own async flow.
-const localStorageInitPromise = initializeLocalStoragePolyfill();
-globalThis.localStorageInitPromise = localStorageInitPromise;
+// NOTE: MV3 Service Workers REQUIRE importScripts() to be called synchronously
+// at the top level during initial script evaluation. Calling it asynchronously
+// (e.g., inside a .then() callback) will fail with a NetworkError.
 
-localStorageInitPromise.then(() => {
-// NOTE: These imports must remain synchronous because code below instantiates
-// globals such as MessagingBus/ExecutionStateMachine at top level. Deferring
-// imports would trigger ReferenceError before the service worker finishes
-// evaluating.
+// Step 1: Set up the localStorage polyfill synchronously BEFORE importing modules.
+// This ensures imported modules can access localStorage immediately.
+// The async hydration from chrome.storage happens separately afterward.
+(function setupSyncLocalStoragePolyfill() {
+    if (!needsLocalStoragePolyfill()) {
+        return;
+    }
+    const cache = Object.create(null);
+    installLocalStoragePolyfill(cache);
+})();
+
+// Step 2: Import all required scripts synchronously at the top level.
+// This MUST happen during initial script evaluation, not in a callback.
 try {
     importScripts(
         'utils.js',
@@ -153,6 +190,18 @@ try {
     console.error('[iMacros SW] Failed to import background modules:', e);
     throw e;
 }
+
+// Step 3: Hydrate localStorage cache asynchronously from chrome.storage.
+// This populates persisted data but modules can function with empty cache initially.
+// NOTE: All code below runs synchronously at top level to comply with MV3 requirements.
+// Event listeners MUST be registered synchronously - they cannot be inside .then() callbacks.
+// Handlers that need hydrated localStorage can await globalThis.localStorageInitPromise internally.
+const localStorageInitPromise = initializeLocalStoragePolyfill();
+globalThis.localStorageInitPromise = localStorageInitPromise;
+
+localStorageInitPromise.catch((err) => {
+    console.error('[iMacros SW] Failed to hydrate localStorage:', err);
+});
 
 // Background Service Worker for iMacros MV3
 // Handles Offscreen Document lifecycle and event forwarding
@@ -2687,7 +2736,4 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // Do NOT add duplicate handler here - it causes panel to open twice
 
     return false;
-});
-}).catch((err) => {
-    console.error('[iMacros SW] Failed to bootstrap background after localStorage hydration:', err);
 });
