@@ -322,7 +322,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         } else if (method === "playFile") {
             // ★追加: パスからファイルを読んで再生する
             let filePath = args[0];
-            const loops = args[1] ?? 1;
+            const loops = Math.max(1, parseInt(args[1], 10) || 1);
             console.log("[Offscreen] Reading and playing file (original path):", filePath);
             if (Storage.getBool("debug"))
                 console.log("[Offscreen] Loop count:", loops, "(should be 1 for normal play, >1 for Play Loop)");
