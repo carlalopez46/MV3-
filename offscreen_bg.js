@@ -426,7 +426,17 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     // マクロ完了の通知は状態変更メッセージを通じてUIに伝達される
                 } catch (err) {
                     console.error("[Offscreen] File read/play error:", err);
-                    // エラーはログに記録し、UIには状態変更を通じて通知される
+                    // ★重要: ファイル読み込みエラー時にUIへ通知
+                    // mplayer.play()が呼び出される前にエラーが発生した場合、
+                    // 状態変更コールバックが発火しないため、明示的にUIへ通知する
+                    const errorMsg = err && err.message ? err.message : String(err);
+                    if (typeof notifyPanelStatLine === 'function') {
+                        notifyPanelStatLine(win_id, `Error: ${errorMsg}`, "error");
+                    }
+                    // パネルの状態をリセットしてアイドル状態に戻す
+                    if (typeof notifyPanel === 'function') {
+                        notifyPanel(win_id, "UPDATE_PANEL_VIEWS", {});
+                    }
                 } finally {
                     playInFlight.delete(win_id);
                     console.log(`[Offscreen] playFile - Removed ${win_id} from playInFlight guard`);
