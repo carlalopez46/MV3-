@@ -1365,23 +1365,54 @@ var afio = (function () {
             return;
         }
         try {
-            // Wait for localStorage polyfill to initialize in MV3 service worker environment
+            // ★FIX: Wait for localStorage polyfill to initialize in MV3 service worker environment
+            // Add timeout to prevent indefinite blocking if polyfill promise hangs
             if (globalThis.localStorageInitPromise) {
-                await globalThis.localStorageInitPromise;
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('localStorage polyfill timeout')), 10000);
+                });
+                try {
+                    await Promise.race([globalThis.localStorageInitPromise, timeoutPromise]);
+                    console.log('[AsyncFileIO] localStorage polyfill ready');
+                } catch (timeoutErr) {
+                    console.warn('[AsyncFileIO] localStorage polyfill wait timed out, proceeding with fallback:', timeoutErr);
+                }
             }
 
             let savedBackend = getSavedBackendType();
             console.log('[AsyncFileIO] savedBackend after polyfill:', savedBackend);
-            // Fallback: if polyfill didn't return a value, read directly from chrome.storage.local
+
+            // ★FIX: Fallback - if polyfill didn't return a value, read directly from chrome.storage.local
+            // Try multiple possible key formats for compatibility
             if (!savedBackend && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
                 try {
-                    const result = await new Promise(resolve => {
-                        chrome.storage.local.get(null, data => resolve(data));
+                    const result = await new Promise((resolve, reject) => {
+                        chrome.storage.local.get(null, data => {
+                            if (chrome.runtime && chrome.runtime.lastError) {
+                                reject(chrome.runtime.lastError);
+                            } else {
+                                resolve(data || {});
+                            }
+                        });
                     });
-                    const key = 'localStorage_afio-backend';
-                    if (result && result[key]) {
-                        savedBackend = result[key];
-                        console.info('[AsyncFileIO] Fallback retrieved backend from chrome.storage.local:', savedBackend);
+
+                    // Try multiple key formats (prefix used by background.js polyfill)
+                    const possibleKeys = [
+                        '__imacros_ls__:afio-backend',  // Current polyfill prefix
+                        'localStorage_afio-backend',    // Legacy format
+                        'afio-backend'                   // Direct key
+                    ];
+
+                    for (const key of possibleKeys) {
+                        if (result && result[key]) {
+                            savedBackend = result[key];
+                            console.info('[AsyncFileIO] Fallback retrieved backend from chrome.storage.local with key:', key, '=', savedBackend);
+                            break;
+                        }
+                    }
+
+                    if (!savedBackend) {
+                        console.log('[AsyncFileIO] No saved backend found in chrome.storage.local, will detect backend');
                     }
                 } catch (e) {
                     console.warn('[AsyncFileIO] Fallback retrieval of backend failed:', e);

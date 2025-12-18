@@ -131,11 +131,14 @@ async function initializeLocalStoragePolyfill() {
 const localStorageInitPromise = initializeLocalStoragePolyfill();
 globalThis.localStorageInitPromise = localStorageInitPromise;
 
-localStorageInitPromise.then(() => {
-// NOTE: These imports must remain synchronous because code below instantiates
-// globals such as MessagingBus/ExecutionStateMachine at top level. Deferring
-// imports would trigger ReferenceError before the service worker finishes
-// evaluating.
+// Bootstrap status tracking for recovery from zombie states
+let _bootstrapCompleted = false;
+let _bootstrapInProgress = false;
+let _bootstrapPromise = null;
+
+// NOTE: These imports must remain at top-level (MV3 constraint).
+// The modules define classes but don't instantiate globals themselves.
+// We defer instantiation to bootstrap() after storage is ready.
 try {
     importScripts(
         'utils.js',
@@ -154,19 +157,131 @@ try {
     throw e;
 }
 
+// Global instances - will be initialized by bootstrap()
+let messagingBus = null;
+let executionState = null;
+
+/**
+ * Bootstrap function - initializes all systems after storage is ready.
+ * Can be called multiple times safely (idempotent after first completion).
+ * @returns {Promise<boolean>} - true if bootstrap succeeded
+ */
+async function bootstrap() {
+    // Already completed - return immediately
+    if (_bootstrapCompleted) {
+        return true;
+    }
+
+    // In progress - return existing promise
+    if (_bootstrapInProgress && _bootstrapPromise) {
+        return _bootstrapPromise;
+    }
+
+    _bootstrapInProgress = true;
+    _bootstrapPromise = (async () => {
+        try {
+            // Wait for localStorage polyfill to fully hydrate
+            await globalThis.localStorageInitPromise;
+            console.log('[iMacros SW] Storage polyfill hydrated.');
+
+            // Initialize MessagingBus if not already done
+            if (!messagingBus) {
+                messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
+                    maxRetries: 3,
+                    backoffMs: 150,
+                    ackTimeoutMs: 500
+                });
+                console.log('[iMacros SW] MessagingBus initialized.');
+            }
+
+            // Initialize ExecutionStateMachine if not already done
+            if (!executionState) {
+                const sessionStorage = chrome.storage ? chrome.storage.session : null;
+                const localStorageBackend = chrome.storage ? chrome.storage.local : null;
+                const executionStateStorage = sessionStorage || localStorageBackend;
+
+                executionState = new ExecutionStateMachine({
+                    storage: executionStateStorage,
+                    alarmNamespace: chrome.alarms,
+                    heartbeatMinutes: 1
+                });
+
+                // Clear stale state and hydrate
+                if (executionStateStorage === localStorageBackend) {
+                    try {
+                        await new Promise((resolve, reject) => {
+                            executionStateStorage.remove(['executionState'], () => {
+                                if (chrome.runtime && chrome.runtime.lastError) {
+                                    reject(chrome.runtime.lastError);
+                                } else {
+                                    resolve();
+                                }
+                            });
+                        });
+                    } catch (e) {
+                        console.warn('[iMacros SW] Failed to clear persisted execution state on startup:', e);
+                    }
+                }
+
+                try {
+                    await executionState.hydrate();
+                    console.log('[iMacros SW] ExecutionStateMachine hydrated.');
+                } catch (e) {
+                    console.warn('[iMacros SW] Failed to hydrate execution state:', e);
+                }
+            }
+
+            _bootstrapCompleted = true;
+            _bootstrapInProgress = false;
+            console.log('[iMacros SW] All systems go.');
+            return true;
+        } catch (e) {
+            console.error('[iMacros SW] Bootstrap failed:', e);
+            _bootstrapInProgress = false;
+            _bootstrapPromise = null;
+            return false;
+        }
+    })();
+
+    return _bootstrapPromise;
+}
+
+/**
+ * Check if bootstrap is completed
+ * @returns {boolean}
+ */
+function isBootstrapped() {
+    return _bootstrapCompleted;
+}
+
+/**
+ * Ensure bootstrap is complete before proceeding
+ * @returns {Promise<boolean>}
+ */
+async function ensureBootstrapped() {
+    if (_bootstrapCompleted) return true;
+    return bootstrap();
+}
+
+// Expose bootstrap utilities globally for recovery scenarios
+globalThis._iMacrosBootstrap = bootstrap;
+globalThis._iMacrosIsBootstrapped = isBootstrapped;
+globalThis._iMacrosEnsureBootstrapped = ensureBootstrapped;
+
+// Start bootstrap immediately
+bootstrap();
+
+// Main initialization block - runs after bootstrap
+localStorageInitPromise.then(async () => {
+// Wait for bootstrap to complete before setting up the rest
+await ensureBootstrapped();
+
 // Background Service Worker for iMacros MV3
 // Handles Offscreen Document lifecycle and event forwarding
 
-
 // ---------------------------------------------------------
-// MV3 infrastructure (message bus + state machine)
+// MV3 infrastructure - storage utilities
 // ---------------------------------------------------------
-const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
-    maxRetries: 3,
-    backoffMs: 150,
-    ackTimeoutMs: 500
-});
-
 const sessionStorage = chrome.storage ? chrome.storage.session : null;
 const localStorageBackend = chrome.storage ? chrome.storage.local : null;
 const storageCandidates = [sessionStorage, localStorageBackend].filter(Boolean);
@@ -221,26 +336,13 @@ async function performStorageWithFallback(method, payload) {
     throw lastError || new Error(`Storage ${method} failed`);
 }
 
-const executionStateStorage = sessionStorage || localStorageBackend;
-const clearStaleExecutionState = executionStateStorage === localStorageBackend
-    ? removeFromSessionOrLocal(['executionState']).catch((error) => {
-        console.warn('[iMacros SW] Failed to clear persisted execution state on startup:', error);
-    })
-    : Promise.resolve(true);
-
-const executionState = new ExecutionStateMachine({
-    storage: executionStateStorage,
-    alarmNamespace: chrome.alarms,
-    heartbeatMinutes: 1 // Chrome MV3 periodic alarms clamp values below 1 minute up to 1 minute
-});
-
-clearStaleExecutionState.finally(() => {
-    executionState.hydrate().catch((error) => {
-        console.warn('[iMacros SW] Failed to hydrate execution state:', error);
-    });
-});
+// Note: MessagingBus and ExecutionStateMachine are initialized by bootstrap()
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+    if (!executionState) {
+        console.warn('[iMacros SW] Alarm received before executionState initialized');
+        return;
+    }
     executionState.handleAlarm(alarm).catch((error) => {
         console.warn('[iMacros SW] Heartbeat persistence failed:', error);
     });
@@ -421,6 +523,28 @@ chrome.windows.onRemoved.addListener(async (windowId) => {
 
 // Forward action click to Offscreen
 chrome.action.onClicked.addListener(async (tab) => {
+    // ★FIX: Ensure bootstrap is complete before proceeding
+    // This handles recovery from "invalid" Service Worker state
+    try {
+        const bootstrapped = await ensureBootstrapped();
+        if (!bootstrapped) {
+            console.error('[iMacros SW] action.onClicked: Bootstrap failed, attempting recovery...');
+            // Force re-bootstrap by resetting the flags
+            _bootstrapCompleted = false;
+            _bootstrapInProgress = false;
+            _bootstrapPromise = null;
+            const retryResult = await bootstrap();
+            if (!retryResult) {
+                console.error('[iMacros SW] action.onClicked: Recovery bootstrap also failed');
+                return;
+            }
+            console.log('[iMacros SW] action.onClicked: Recovery bootstrap succeeded');
+        }
+    } catch (bootstrapError) {
+        console.error('[iMacros SW] action.onClicked: Bootstrap check failed:', bootstrapError);
+        return;
+    }
+
     try {
         await createOffscreen();
     } catch (error) {
@@ -768,44 +892,62 @@ function handleUpdatePanelViews(sendResponse) {
 // Keep-alive logic (optional, but good for stability)
 // If Offscreen sends a keep-alive message, we can respond to keep SW alive
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    const isTrustedSender = sender && sender.id === chrome.runtime.id;
-    const isOffscreenSender = isTrustedSender && typeof sender.url === 'string' && sender.url.endsWith('/offscreen.html');
-    const rejectInvalidSender = () => {
-        sendResponse({ error: 'invalid sender' });
-        return true;
-    };
+    // ★FIX: Wrap entire handler in try-catch to prevent zombie state
+    // This ensures sendResponse is always called even on unexpected errors
+    try {
+        const isTrustedSender = sender && sender.id === chrome.runtime.id;
+        const isOffscreenSender = isTrustedSender && typeof sender.url === 'string' && sender.url.endsWith('/offscreen.html');
+        const rejectInvalidSender = () => {
+            sendResponse({ error: 'invalid sender' });
+            return true;
+        };
 
-    const isValidTabId = (value) => Number.isInteger(value) && value >= 0;
-    const isValidObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
+        // Safe sendResponse wrapper that won't throw if channel is closed
+        const safeSendResponse = (response) => {
+            try {
+                sendResponse(response);
+            } catch (e) {
+                console.warn('[iMacros SW] sendResponse failed (channel likely closed):', e);
+            }
+        };
 
-    // Debug: Log all messages with command or type
-    if (msg.command || msg.type) {
-        console.log('[iMacros SW] Message received:', {
-            command: msg.command,
-            type: msg.type,
-            sender: sender.url || sender.id
-        });
-    }
+        const isValidTabId = (value) => Number.isInteger(value) && value >= 0;
+        const isValidObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
 
-    if (msg.keepAlive) {
-        sendResponse({ alive: true });
-        return true;
-    }
+        // Debug: Log all messages with command or type
+        if (msg.command || msg.type) {
+            console.log('[iMacros SW] Message received:', {
+                command: msg.command,
+                type: msg.type,
+                sender: sender.url || sender.id
+            });
+        }
 
-    // Handle panel tree refresh request from options or other extension pages
-    if (msg.type === 'UPDATE_PANEL_VIEWS') {
-        return handleUpdatePanelViews(sendResponse);
-    }
+        if (msg.keepAlive) {
+            safeSendResponse({ alive: true });
+            return true;
+        }
 
-    if (msg.command === 'UPDATE_EXECUTION_STATE' && typeof msg.state === 'string') {
-        executionState.transition(msg.state, msg.meta || {}).then((snapshot) => {
-            sendResponse({ success: true, state: snapshot });
-        }).catch((error) => {
-            console.error('[iMacros SW] Failed to update execution state:', error);
-            sendResponse({ success: false, error: error && error.message ? error.message : String(error) });
-        });
-        return true;
-    }
+        // Handle panel tree refresh request from options or other extension pages
+        if (msg.type === 'UPDATE_PANEL_VIEWS') {
+            return handleUpdatePanelViews(sendResponse);
+        }
+
+        if (msg.command === 'UPDATE_EXECUTION_STATE' && typeof msg.state === 'string') {
+            // Guard against executionState not being initialized
+            if (!executionState) {
+                console.warn('[iMacros SW] UPDATE_EXECUTION_STATE received before bootstrap complete');
+                safeSendResponse({ success: false, error: 'Service Worker not yet initialized' });
+                return true;
+            }
+            executionState.transition(msg.state, msg.meta || {}).then((snapshot) => {
+                safeSendResponse({ success: true, state: snapshot });
+            }).catch((error) => {
+                console.error('[iMacros SW] Failed to update execution state:', error);
+                safeSendResponse({ success: false, error: error && error.message ? error.message : String(error) });
+            });
+            return true;
+        }
 
     // Handle tab creation request from Offscreen Document
     if (msg.command === "openTab") {
@@ -1599,32 +1741,59 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             });
         };
 
-        // First attempt to send. If there is no receiver, try injecting content scripts once.
-        chrome.tabs.sendMessage(tab_id, message, async (response) => {
-            const lastErr = chrome.runtime.lastError;
-            const lastErrMsg = lastErr && lastErr.message ? lastErr.message : '';
-            if (lastErrMsg && lastErrMsg.includes('Receiving end does not exist')) {
-                console.warn('[iMacros SW] No receiver in tab. Attempting to inject content scripts...');
-                const injectionResult = await injectContentScripts();
-                if (injectionResult.injected) {
-                    sendMessageToTab();
-                } else if (injectionResult.missingHostPermissions) {
+        // ★FIX: Pre-check for restricted schemes to fail fast and release the message loop
+        // This prevents unnecessary delays when targeting chrome:// or other restricted URLs
+        (async () => {
+            try {
+                const tab = await chrome.tabs.get(tab_id).catch(() => null);
+                if (tab && tab.url && RESTRICTED_SCHEMES.some((scheme) => tab.url.startsWith(scheme))) {
+                    console.warn('[iMacros SW] SEND_TO_TAB blocked due to restricted scheme:', tab.url);
                     sendResponse({
-                        error: 'Content scripts not injected: host permissions are not granted for this site. Enable access to all sites in the extension settings.',
-                        injected: false,
-                        missingHostPermissions: true
+                        error: `Cannot interact with restricted URL: ${tab.url}. Chrome system pages and extension pages are not accessible.`,
+                        restricted: true,
+                        injected: false
                     });
-                } else {
-                    const errorMsg = lastErrMsg || 'No receiver in tab';
-                    sendResponse({ error: `${errorMsg}; content script injection failed or not allowed`, injected: false });
+                    return;
                 }
-            } else if (lastErrMsg) {
-                console.warn('[iMacros SW] SEND_TO_TAB error:', lastErrMsg);
-                sendResponse({ error: lastErrMsg });
-            } else {
-                sendResponse(response);
+
+                // First attempt to send. If there is no receiver, try injecting content scripts once.
+                chrome.tabs.sendMessage(tab_id, message, async (response) => {
+                    const lastErr = chrome.runtime.lastError;
+                    const lastErrMsg = lastErr && lastErr.message ? lastErr.message : '';
+                    if (lastErrMsg && lastErrMsg.includes('Receiving end does not exist')) {
+                        console.warn('[iMacros SW] No receiver in tab. Attempting to inject content scripts...');
+                        const injectionResult = await injectContentScripts();
+                        if (injectionResult.injected) {
+                            sendMessageToTab();
+                        } else if (injectionResult.restricted) {
+                            // ★FIX: Return specific error for restricted schemes
+                            sendResponse({
+                                error: 'Cannot inject content scripts into restricted pages (chrome://, about:, etc.)',
+                                restricted: true,
+                                injected: false
+                            });
+                        } else if (injectionResult.missingHostPermissions) {
+                            sendResponse({
+                                error: 'Content scripts not injected: host permissions are not granted for this site. Enable access to all sites in the extension settings.',
+                                injected: false,
+                                missingHostPermissions: true
+                            });
+                        } else {
+                            const errorMsg = lastErrMsg || 'No receiver in tab';
+                            sendResponse({ error: `${errorMsg}; content script injection failed or not allowed`, injected: false });
+                        }
+                    } else if (lastErrMsg) {
+                        console.warn('[iMacros SW] SEND_TO_TAB error:', lastErrMsg);
+                        sendResponse({ error: lastErrMsg });
+                    } else {
+                        sendResponse(response);
+                    }
+                });
+            } catch (e) {
+                console.error('[iMacros SW] SEND_TO_TAB pre-check error:', e);
+                sendResponse({ error: e && e.message ? e.message : String(e) });
             }
-        });
+        })();
         return true;
     }
 
@@ -2245,6 +2414,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
         return true; // Keep channel open
     }
+    } catch (unexpectedError) {
+        // ★FIX: Catch any unexpected errors and respond to close the channel
+        console.error('[iMacros SW] Unexpected error in message handler:', unexpectedError);
+        try {
+            sendResponse({ success: false, error: 'Internal Service Worker error: ' + (unexpectedError && unexpectedError.message ? unexpectedError.message : String(unexpectedError)) });
+        } catch (e) {
+            console.warn('[iMacros SW] Failed to send error response:', e);
+        }
+        return true;
+    }
 });
 
 // Global notification click listener
@@ -2264,44 +2443,53 @@ chrome.notifications.onClicked.addListener(function (n_id) {
 
 // Handle SET_DIALOG_RESULT - forward to offscreen
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.type === 'SET_DIALOG_RESULT') {
-        console.log('[iMacros SW] Forwarding SET_DIALOG_RESULT for window:', msg.windowId);
-        dialogCache.set(msg.windowId, Object.assign({}, dialogCache.get(msg.windowId), { result: msg.response }));
-        sendMessageToOffscreen({
-            type: 'SET_DIALOG_RESULT',
-            windowId: msg.windowId,
-            response: msg.response
-        }).then(result => {
-            dialogCache.delete(msg.windowId);
-            sendResponse(result || { success: true });
-        }).catch(err => {
-            console.error('[iMacros SW] SET_DIALOG_RESULT error:', err);
-            sendResponse({ success: false, error: err.message });
-        });
-        return true;
-    }
-
-    // Handle GET_DIALOG_ARGS - forward to offscreen
-    if (msg.type === 'GET_DIALOG_ARGS') {
-        console.log('[iMacros SW] Forwarding GET_DIALOG_ARGS for window:', msg.windowId);
-        const cached = dialogCache.get(msg.windowId);
-        if (cached && cached.args) {
-            sendResponse({ success: true, args: cached.args });
+    // ★FIX: Wrap in try-catch to prevent zombie state
+    try {
+        if (msg.type === 'SET_DIALOG_RESULT') {
+            console.log('[iMacros SW] Forwarding SET_DIALOG_RESULT for window:', msg.windowId);
+            dialogCache.set(msg.windowId, Object.assign({}, dialogCache.get(msg.windowId), { result: msg.response }));
+            sendMessageToOffscreen({
+                type: 'SET_DIALOG_RESULT',
+                windowId: msg.windowId,
+                response: msg.response
+            }).then(result => {
+                dialogCache.delete(msg.windowId);
+                sendResponse(result || { success: true });
+            }).catch(err => {
+                console.error('[iMacros SW] SET_DIALOG_RESULT error:', err);
+                sendResponse({ success: false, error: err.message });
+            });
             return true;
         }
 
-        sendMessageToOffscreen({
-            type: 'GET_DIALOG_ARGS',
-            windowId: msg.windowId
-        }).then(result => {
-            if (result && result.success && result.args) {
-                dialogCache.set(msg.windowId, Object.assign({}, dialogCache.get(msg.windowId), { args: result.args }));
+        // Handle GET_DIALOG_ARGS - forward to offscreen
+        if (msg.type === 'GET_DIALOG_ARGS') {
+            console.log('[iMacros SW] Forwarding GET_DIALOG_ARGS for window:', msg.windowId);
+            const cached = dialogCache.get(msg.windowId);
+            if (cached && cached.args) {
+                sendResponse({ success: true, args: cached.args });
+                return true;
             }
-            sendResponse(result || { success: false, error: 'No response from offscreen' });
-        }).catch(err => {
-            console.error('[iMacros SW] GET_DIALOG_ARGS error:', err);
-            sendResponse({ success: false, error: err.message });
-        });
+
+            sendMessageToOffscreen({
+                type: 'GET_DIALOG_ARGS',
+                windowId: msg.windowId
+            }).then(result => {
+                if (result && result.success && result.args) {
+                    dialogCache.set(msg.windowId, Object.assign({}, dialogCache.get(msg.windowId), { args: result.args }));
+                }
+                sendResponse(result || { success: false, error: 'No response from offscreen' });
+            }).catch(err => {
+                console.error('[iMacros SW] GET_DIALOG_ARGS error:', err);
+                sendResponse({ success: false, error: err.message });
+            });
+            return true;
+        }
+    } catch (e) {
+        console.error('[iMacros SW] Dialog handler error:', e);
+        try {
+            sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+        } catch (ignored) {}
         return true;
     }
 });
@@ -2502,41 +2690,54 @@ const FocusGuard = (() => {
 })();
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (!msg || !msg.command || !msg.command.startsWith('FOCUS_GUARD')) return false;
+    // ★FIX: Wrap in try-catch to prevent zombie state
+    try {
+        if (!msg || !msg.command || !msg.command.startsWith('FOCUS_GUARD')) return false;
 
-    const respond = (payload) => {
-        if (sendResponse) sendResponse(payload);
-    };
+        const respond = (payload) => {
+            try {
+                if (sendResponse) sendResponse(payload);
+            } catch (e) {
+                console.warn('[iMacros SW] FocusGuard respond failed:', e);
+            }
+        };
 
-    if (msg.command === 'FOCUS_GUARD_START') {
-        const tabId = Number.isInteger(msg.tabId) ? msg.tabId : sender?.tab?.id;
-        const winId = Number.isInteger(msg.winId) ? msg.winId : sender?.tab?.windowId;
-        FocusGuard.start({ tabId, winId }).then((result) => {
-            respond({ ok: !!result.started, state: FocusGuard.getState() });
-        }).catch((err) => {
-            console.warn('[iMacros SW] FocusGuard start failed:', err);
-            respond({ ok: false, error: String(err) });
-        });
-        return true;
-    }
+        if (msg.command === 'FOCUS_GUARD_START') {
+            const tabId = Number.isInteger(msg.tabId) ? msg.tabId : sender?.tab?.id;
+            const winId = Number.isInteger(msg.winId) ? msg.winId : sender?.tab?.windowId;
+            FocusGuard.start({ tabId, winId }).then((result) => {
+                respond({ ok: !!result.started, state: FocusGuard.getState() });
+            }).catch((err) => {
+                console.warn('[iMacros SW] FocusGuard start failed:', err);
+                respond({ ok: false, error: String(err) });
+            });
+            return true;
+        }
 
-    if (msg.command === 'FOCUS_GUARD_STOP') {
-        FocusGuard.stop().then((result) => {
-            respond({ ok: true, state: FocusGuard.getState(), result });
-        }).catch((err) => {
-            console.warn('[iMacros SW] FocusGuard stop failed:', err);
-            respond({ ok: false, error: String(err) });
-        });
-        return true;
-    }
+        if (msg.command === 'FOCUS_GUARD_STOP') {
+            FocusGuard.stop().then((result) => {
+                respond({ ok: true, state: FocusGuard.getState(), result });
+            }).catch((err) => {
+                console.warn('[iMacros SW] FocusGuard stop failed:', err);
+                respond({ ok: false, error: String(err) });
+            });
+            return true;
+        }
 
-    if (msg.command === 'FOCUS_GUARD_SET_TAB') {
-        FocusGuard.setTab(msg.tabId).then((result) => {
-            respond({ ok: !!(result && result.ok), state: FocusGuard.getState() });
-        }).catch((err) => {
-            console.warn('[iMacros SW] FocusGuard setTab failed:', err);
-            respond({ ok: false, error: String(err) });
-        });
+        if (msg.command === 'FOCUS_GUARD_SET_TAB') {
+            FocusGuard.setTab(msg.tabId).then((result) => {
+                respond({ ok: !!(result && result.ok), state: FocusGuard.getState() });
+            }).catch((err) => {
+                console.warn('[iMacros SW] FocusGuard setTab failed:', err);
+                respond({ ok: false, error: String(err) });
+            });
+            return true;
+        }
+    } catch (e) {
+        console.error('[iMacros SW] FocusGuard handler error:', e);
+        try {
+            sendResponse({ ok: false, error: e && e.message ? e.message : String(e) });
+        } catch (ignored) {}
         return true;
     }
 });
@@ -2655,38 +2856,46 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
 
 // Handle the runMacroByUrl command in the message listener
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    // ★FIX: Wrap in try-catch to prevent zombie state
+    try {
+        if (msg.command === 'runMacroByUrl' && msg.target === 'background') {
+            // Forward to offscreen document
+            sendMessageToOffscreen({
+                command: 'runMacroByUrl',
+                macroPath: msg.macroPath,
+                windowId: msg.windowId,
+                tabId: msg.tabId
+            }).then(response => {
+                sendResponse(response);
+            }).catch(error => {
+                sendResponse({ success: false, error: error.message });
+            });
+            return true;
+        }
 
-    if (msg.command === 'runMacroByUrl' && msg.target === 'background') {
-        // Forward to offscreen document
-        sendMessageToOffscreen({
-            command: 'runMacroByUrl',
-            macroPath: msg.macroPath,
-            windowId: msg.windowId,
-            tabId: msg.tabId
-        }).then(response => {
-            sendResponse(response);
-        }).catch(error => {
-            sendResponse({ success: false, error: error.message });
-        });
+        if (msg.command === 'INSTALL_SAMPLE_BOOKMARKLETS') {
+            if (typeof globalScope !== 'undefined' && globalScope.installSampleBookmarkletMacros) {
+                console.log("[iMacros SW] Installing sample bookmarklets command received");
+                globalScope.installSampleBookmarkletMacros().catch(err => {
+                    console.warn("[iMacros SW] Failed to install sample bookmarklets:", err);
+                });
+            }
+            // Respond immediately as installation is async and not critical for response
+            sendResponse({ success: true });
+            return false;
+        }
+
+        // NOTE: openPanel command is handled by the main handler above.
+        // Do NOT add duplicate handler here - it causes panel to open twice
+
+        return false;
+    } catch (e) {
+        console.error('[iMacros SW] runMacroByUrl handler error:', e);
+        try {
+            sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+        } catch (ignored) {}
         return true;
     }
-
-    if (msg.command === 'INSTALL_SAMPLE_BOOKMARKLETS') {
-        if (typeof globalScope !== 'undefined' && globalScope.installSampleBookmarkletMacros) {
-            console.log("[iMacros SW] Installing sample bookmarklets command received");
-            globalScope.installSampleBookmarkletMacros().catch(err => {
-                console.warn("[iMacros SW] Failed to install sample bookmarklets:", err);
-            });
-        }
-        // Respond immediately as installation is async and not critical for response
-        sendResponse({ success: true });
-        return false;
-    }
-
-// NOTE: openPanel command is handled by the main handler above.
-// Do NOT add duplicate handler here - it causes panel to open twice
-
-    return false;
 });
 }).catch((err) => {
     console.error('[iMacros SW] Failed to bootstrap background after localStorage hydration:', err);
