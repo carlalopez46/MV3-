@@ -801,10 +801,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
         if (request.type === 'SAVE_MACRO') {
             const saveWinId = request.win_id || request.winId;
-            if (sendResponse) {
-                sendResponse({ success: true, ack: true, status: 'saving' });
-            }
-            // NOTE: Save completion/errors are logged asynchronously; caller should rely on UI/state updates.
+            let responded = false;
+            const respondOnce = (payload) => {
+                if (responded || !sendResponse) return;
+                responded = true;
+                sendResponse(Object.assign({ ack: true }, payload));
+            };
             try {
                 save(request.macro, request.overwrite, function (result) {
                     if (result && result.error) {
@@ -812,8 +814,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                         if (saveWinId) {
                             notifyAsyncError(saveWinId, `Error saving macro: ${result.error}`);
                         }
+                        respondOnce({ success: false, error: result.error });
                     } else {
                         console.log("[Offscreen] Save completed:", result);
+                        respondOnce({ success: true, result: result });
                     }
                 });
             } catch (err) {
@@ -822,8 +826,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 if (saveWinId) {
                     notifyAsyncError(saveWinId, `Error saving macro: ${errorMsg}`);
                 }
+                respondOnce({ success: false, error: errorMsg });
             }
-            return false;
+            // Keep channel open for async save callback response
+            return true;
         }
 
         if (request.type === 'GET_DIALOG_ARGS') {
