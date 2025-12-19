@@ -10,6 +10,7 @@ let panelState = {
     isPlaying: false,
     currentMacro: null
 };
+const isTopFrame = window.top === window;
 
 // 情報パネルに表示した内容を保持（ヘルプ/編集ボタン用）
 let lastInfoArgs = null;
@@ -627,7 +628,8 @@ function handlePanelHighlightLine(data) {
 
 // --- 初期化とイベントリスナー ---
 
-window.addEventListener("message", (event) => {
+if (isTopFrame) {
+    window.addEventListener("message", (event) => {
     // fileView.js (iframe) からの通知を受け取る
     const treeFrame = document.getElementById("tree-iframe");
     const allowedSource = treeFrame ? treeFrame.contentWindow : null;
@@ -649,7 +651,7 @@ window.addEventListener("message", (event) => {
     if (event.data.type === "playMacro") {
         play();
     }
-});
+    });
 
 // --- Extension Reload Detection ---
 // Establish a long-lived connection to detect when the extension context is invalidated (reloaded/updated)
@@ -693,9 +695,9 @@ function connectToLifecycle() {
     }
 }
 
-connectToLifecycle();
+    connectToLifecycle();
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.target === 'panel' && message.type === 'PANEL_STATE_UPDATE') {
         if (message.state) updatePanelState(message.state);
     }
@@ -740,9 +742,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse && sendResponse({ success: true });
         return true;
     }
-});
+    });
 
-document.addEventListener("DOMContentLoaded", () => {
+    document.addEventListener("DOMContentLoaded", () => {
     console.log("[Panel] DOMContentLoaded");
 
     // ウィンドウIDを初期化
@@ -814,4 +816,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // 広告などの読み込み
     if (typeof setAdDetails === "function") setAdDetails();
-});
+    });
+} else {
+    console.info("[Panel] iframe context detected; skipping panel initialization:", window.location.href);
+}
