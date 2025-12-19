@@ -476,7 +476,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             if (sendResponse) {
                 sendResponse({ success: true, status: 'opening' });
             }
-            // NOTE: Completion/errors are logged asynchronously; caller should rely on UI/state updates.
 
             (async () => {
                 try {
@@ -712,6 +711,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
         // NOTE: Completion/errors are logged asynchronously; caller should rely on macro state updates.
 
+        if (sendResponse) {
+            sendResponse({ success: true, status: 'started' });
+        }
+
         // No macro playing, start fresh execution
         // Resolve and load the macro file
         afio.getDefaultDir("savepath").then(function (dir) {
@@ -757,7 +760,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             console.error('[iMacros Offscreen] Error loading macro:', e, { requestId });
             // ★重要: エラー時もガードをクリア
             playInFlight.delete(windowId);
-            console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (error)`, { requestId });
+            console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (error)`);
         });
 
         return false;
@@ -902,7 +905,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             if (sendResponse) {
                 sendResponse({ success: true, status: 'saving' });
             }
-            // NOTE: Save completion/errors are logged asynchronously; caller should rely on UI/state updates.
             try {
                 save(request.macro, request.overwrite, function (result) {
                     if (result && result.error) {
