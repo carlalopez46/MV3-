@@ -75,11 +75,6 @@ function installVirtualRunHook() {
 // nested macros from the virtual filesystem without relying on the native host.
 installVirtualRunHook();
 
-//
-// Common logic moved to bg_common.js
-// Ensure handler registration only runs when the helper is available.
-//
-
 // Global handler for panel updates (called from bg_common.js)
 window.updatePanels = function () {
     try {
@@ -100,31 +95,18 @@ window.updatePanels = function () {
     }
 };
 
-
-
 // Attempt to register shared handlers that are already loaded via offscreen.html.
-// Avoid using importScripts here because the offscreen document runs in a window
-// context (not a worker), which caused "importScripts is not defined" and
-// duplicate script execution errors in MV3.
 (function registerSharedHandlers() {
     const registerFn = window.registerSharedBackgroundHandlers;
     if (typeof registerFn === "function") {
         registerFn(window);
         return;
     }
-
-    // If the helpers are missing, log a clear error rather than attempting to
-    // re-import scripts that are already included in offscreen.html.
     console.error("registerSharedBackgroundHandlers is not available; shared background handlers not registered");
 })();
 
 // called from panel
-// we use it to find and set win_id for that panel
-// NOTE: unfortnunately, it seems there is no more straightforward way
-// because on Windows chrome.windows.onCreated is fired too early for
-// panel's DOM window be fully constructed
 function onPanelLoaded(panel, panelWindowId) {
-    // If panelWindowId is provided, use it to find the matching win_id
     if (panelWindowId) {
         for (var win_id in context) {
             win_id = parseInt(win_id);
@@ -135,7 +117,6 @@ function onPanelLoaded(panel, panelWindowId) {
         }
     }
 
-    // Enhanced error logging with context details
     const contextPanelIds = {};
     for (var id in context) {
         const numId = parseInt(id);
@@ -147,7 +128,6 @@ function onPanelLoaded(panel, panelWindowId) {
         panel, panelWindowId, contextPanelIds);
     throw new Error("Can not find windowId for panel!");
 }
-
 
 // EVAL Sandbox handling
 const pendingEvalRequests = new Map();
@@ -163,7 +143,6 @@ window.addEventListener('message', (event) => {
 
 // Message listener for Offscreen Document
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
-    // Only handle messages targeting offscreen
     if (request.target !== 'offscreen') return;
 
     const msgLabel = request.type || request.command;
@@ -171,9 +150,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         console.log('[iMacros Offscreen] Received message:', msgLabel, request);
     }
 
-    // ★重要: executeContextMethod を try ブロックの外で定義（スコープ問題の修正）
-    // この関数は editMacro と CALL_CONTEXT_METHOD の両方から呼び出されるため、
-    // メッセージリスナーのトップレベルで定義する必要がある
     function executeContextMethod(win_id, method, sendResponse, args, requestId) {
         if (method === "recorder.start") {
             console.log("[Offscreen] Starting recorder...");
@@ -191,12 +167,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
         } else if (method === "stop") {
             console.log("[Offscreen] Stopping...");
-
-            // Helper function to stop a specific context
             const stopContext = (ctx, id) => {
                 let stoppedPlayer = false;
                 let stoppedRecorder = false;
-
                 if (ctx.mplayer) {
                     try {
                         if (typeof ctx.mplayer.stop === 'function') {
@@ -207,7 +180,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                         console.error(`[Offscreen] Error stopping mplayer for window ${id}:`, e);
                     }
                 }
-
                 if (ctx.recorder) {
                     try {
                         if (typeof ctx.recorder.stop === 'function') {
@@ -221,12 +193,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 return { stoppedPlayer, stoppedRecorder };
             };
 
-            // Try to stop specific window first
             if (context[win_id]) {
                 const result = stopContext(context[win_id], win_id);
                 sendResponse({ success: true, ...result });
             } else {
-                // Fallback: Check ALL contexts for any active player/recorder and stop them
                 console.warn('[Offscreen] Stop target window not found. Scanning all contexts...');
                 const stoppedDetails = [];
                 for (let id in context) {
@@ -250,7 +220,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 sendResponse({ success: false, error: 'mplayer not available for pause' });
                 return;
             }
-
             const pausedState = mplayer.paused;
             console.log('[Offscreen] Current paused state:', pausedState);
 
@@ -286,12 +255,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 sendResponse({ success: false, error: 'mplayer not available for unpause' });
                 return;
             }
-
             if (!mplayer.paused) {
                 sendResponse({ success: false, error: 'mplayer is not paused' });
                 return;
             }
-
             if (typeof mplayer.unpause === 'function') {
                 try {
                     mplayer.unpause();
@@ -310,12 +277,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 sendResponse({ success: false, error: 'mplayer not available for play' });
                 return;
             }
-            // args: [macro, limits]
-            // mplayer.play(macro, limits, callback) is async - use callback for completion
             try {
                 mplayer.play(args[0], args[1], function (result) {
                     console.log("[Offscreen] mplayer.play completed:", result);
-                    // result may contain error info from macro execution
                     if (result && result.error) {
                         sendResponse({ success: false, error: result.error });
                     } else {
@@ -323,12 +287,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     }
                 });
             } catch (e) {
-                // Catch synchronous errors during play() invocation
                 console.error("[Offscreen] Play error:", e);
                 sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
-                return; // Don't return true since we already responded
+                return;
             }
-            return true; // Keep message channel open for async callback
+            return true;
         } else if (method === "playFile") {
             const playRequestId = requestId || createRequestId();
             console.log("[Offscreen] playFile request", {
@@ -336,14 +299,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 windowId: win_id,
                 offscreenInstanceId: OFFSCREEN_INSTANCE_ID
             });
-            // ★追加: パスからファイルを読んで再生する
+
             let filePath = args[0];
             const loops = Math.max(1, parseInt(args[1], 10) || 1);
             console.log("[Offscreen] Reading and playing file (original path):", filePath, { requestId: playRequestId });
-            if (Storage.getBool("debug"))
-                console.log("[Offscreen] Loop count:", loops, "(should be 1 for normal play, >1 for Play Loop)");
 
-            // Guard against duplicate play requests (e.g., when messages are delivered twice)
             const existingContext = context[win_id];
             if (existingContext && existingContext.mplayer && existingContext.mplayer.playing) {
                 console.warn(`[Offscreen] Ignoring playFile - macro already playing for window ${win_id}`);
@@ -362,35 +322,25 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
 
             const resolveAbsolutePath = async (path) => {
-                // ★パスクリーニング: "iMacrosMV3-main-main/Macros/" -> "Macros/"
-                // Support both forward slashes (Unix) and backslashes (Windows)
                 let cleanedPath = path.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
-                console.log("[Offscreen] Cleaned path:", cleanedPath);
-
-                // ★重要: 相対パスを絶対パスに変換
                 if (!cleanedPath.startsWith('/') && !cleanedPath.match(/^[a-zA-Z]:/)) {
                     if (typeof FileSystemAccessService !== 'undefined' && FileSystemAccessService.getRootPath) {
                         try {
                             const rootPath = await FileSystemAccessService.getRootPath();
                             cleanedPath = `${rootPath}/${cleanedPath}`;
-                            console.log("[Offscreen] Resolved absolute path:", cleanedPath);
                         } catch (err) {
-                            console.error("[Offscreen] Failed to get root path:", err);
                             console.warn("[Offscreen] Falling back to cleaned relative path");
                         }
                     } else {
                         console.warn("[Offscreen] FileSystemAccessService not available, using path as-is");
                     }
                 }
-
                 return cleanedPath;
             };
 
             const readAndPlayFile = async (absolutePath, loops, win_id) => {
                 const node = afio.openNode(absolutePath);
                 const source = await afio.readTextFile(node);
-                console.log("[Offscreen] File read success. Playing...");
-
                 const macro = {
                     source: source,
                     name: node.leafName,
@@ -398,22 +348,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     times: loops
                 };
 
-                if (Storage.getBool("debug"))
-                    console.log("[Offscreen] Created macro object with times:", macro.times);
-
                 const ctx = context[win_id] && context[win_id]._initialized
                     ? context[win_id]
                     : await context.init(win_id);
 
-                console.log("[Offscreen] Context initialized, calling mplayer.play");
                 const limits = await getLimits();
-                // ★重要: mplayer.play はコールバックベースの関数
-                // Promise でラップして実際の完了まで待機しないと、
-                // playInFlight ガードが早期に解除され二重実行の原因になる
                 return new Promise((resolve, reject) => {
                     try {
                         ctx.mplayer.play(macro, limits, (result) => {
-                            console.log("[Offscreen] mplayer.play callback received:", result);
                             if (result && result.error) {
                                 reject(new Error(result.error));
                             } else {
@@ -426,14 +368,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 });
             };
 
-            // ★重要: playInFlight への追加は async 関数の開始前に行う
-            // これにより、同時に届いた2つのメッセージの競合状態を防ぐ
             playInFlight.add(win_id);
             console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`, { requestId: playRequestId });
 
-            // ★重要: ACKタイムアウト防止のため、即座にACKを返す
-            // マクロ実行には数秒かかる可能性があり、500msのACKタイムアウトを超えてしまう
-            // ACKを即座に返すことで、メッセージングバスのリトライを防ぎ、二重実行を回避する
             if (sendResponse) {
                 sendResponse({ ack: true, started: true });
             }
@@ -443,18 +380,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     const absolutePath = await resolveAbsolutePath(filePath);
                     await readAndPlayFile(absolutePath, loops, win_id);
                     console.log("[Offscreen] Macro play completed successfully", { requestId: playRequestId });
-                    // 注: sendResponseは既に呼び出し済みのため、ここでは呼び出さない
-                    // マクロ完了の通知は状態変更メッセージを通じてUIに伝達される
                 } catch (err) {
                     console.error("[Offscreen] File read/play error:", err, { requestId: playRequestId });
-                    // ★重要: ファイル読み込みエラー時にUIへ通知
-                    // mplayer.play()が呼び出される前にエラーが発生した場合、
-                    // 状態変更コールバックが発火しないため、明示的にUIへ通知する
                     const errorMsg = err && err.message ? err.message : String(err);
                     if (typeof notifyPanelStatLine === 'function') {
                         notifyPanelStatLine(win_id, `Error: ${errorMsg}`, "error");
                     }
                 } finally {
+                    // ★重要: パネルの状態更新とガード解除を共通化
                     if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
                         chrome.runtime.sendMessage({
                             type: "macroStopped",
@@ -468,43 +401,33 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                             arg: ''
                         });
                     }
-                    // パネルの状態をリセットしてアイドル状態に戻す
                     if (typeof notifyPanel === 'function') {
                         notifyPanel(win_id, "UPDATE_PANEL_VIEWS", {});
                     }
+
                     playInFlight.delete(win_id);
                     console.log(`[Offscreen] playFile - Removed ${win_id} from playInFlight guard`, { requestId: playRequestId });
                 }
             })();
-            // sendResponseを同期的に呼び出したので、return trueは不要
-        } else if (method === "openEditor") {
-            // ★追加: ファイルパスからエディタを開く
-            let filePath = args[0];
-            console.log("[Offscreen] Opening editor for file:", filePath);
+            return false;
 
-            // パスクリーニング - Support both forward slashes (Unix) and backslashes (Windows)
+        } else if (method === "openEditor") {
+            let filePath = args[0];
             filePath = filePath.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
-            console.log("[Offscreen] Cleaned path for editor:", filePath);
 
             if (sendResponse) {
                 sendResponse({ success: true, status: 'opening' });
             }
-            // NOTE: Completion/errors are logged asynchronously; caller should rely on UI/state updates.
 
             (async () => {
                 try {
                     const node = afio.openNode(filePath);
                     const source = await afio.readTextFile(node);
-                    console.log("[Offscreen] File read for editor success");
-
                     const macro = {
                         source: source,
                         name: node.leafName,
                         file_id: filePath
                     };
-
-                    // エディタを開く（edit関数を使用）
-                    console.log("[Offscreen] Calling edit() to open editor");
                     edit(macro, false, 0);
                 } catch (err) {
                     console.error("[Offscreen] File read for editor error:", err);
@@ -516,11 +439,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
     }
 
-    // Handle quick state query from Service Worker or panel
     if (request.type === 'QUERY_STATE') {
         const winId = request.win_id;
         const ctx = (typeof context !== 'undefined' && context) ? context[winId] : null;
-
         let state = 'idle';
         const response = { state, success: true };
 
@@ -543,21 +464,423 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 response.state = 'idle';
             }
         }
-
         if (sendResponse) {
             sendResponse(response);
         }
         return true;
     }
 
-    // Handle panel creation completion from Service Worker
     if (request.command === 'panelCreated') {
         const win_id = request.win_id;
         if (context[win_id]) {
             context[win_id].panelId = request.panelId;
-            console.log(`[iMacros Offscreen] Panel ID set: ${request.panelId} for window ${win_id}`);
         }
         if (sendResponse) sendResponse({ success: true });
+        return true;
+    }
+
+    if (request.command === 'panelClosed') {
+        const panelId = request.panelId;
+        for (let win_id in context) {
+            if (context[win_id] && context[win_id].panelId === panelId) {
+                delete context[win_id].panelId;
+                delete context[win_id].panelWindow;
+            }
+        }
+        if (sendResponse) sendResponse({ success: true });
+        return true;
+    }
+
+    // Download events
+    if (['DOWNLOAD_CREATED', 'DOWNLOAD_CHANGED'].includes(request.type)) {
+        const targetWinIds = request.win_id ? [request.win_id] : Object.keys(context);
+        for (let win_id of targetWinIds) {
+            win_id = parseInt(win_id);
+            if (context[win_id]) {
+                const mplayer = context[win_id].mplayer;
+                try {
+                    if (request.type === 'DOWNLOAD_CREATED') {
+                        if (mplayer && mplayer.onDownloadCreated) {
+                            mplayer.onDownloadCreated(request.downloadItem);
+                        }
+                    } else if (request.type === 'DOWNLOAD_CHANGED') {
+                        if (mplayer && mplayer.onDownloadChanged) {
+                            mplayer.onDownloadChanged(request.downloadDelta);
+                        }
+                    }
+                } catch (e) {
+                    console.error(`[iMacros Offscreen] Error handling ${request.type} for win_id ${win_id}:`, e);
+                }
+            }
+        }
+        if (sendResponse) sendResponse({ success: true });
+        return true;
+    }
+
+    // Tab events
+    if (['TAB_UPDATED', 'TAB_ACTIVATED', 'TAB_CREATED', 'TAB_REMOVED', 'TAB_MOVED', 'TAB_ATTACHED', 'TAB_DETACHED', 'WEB_NAVIGATION_ERROR', 'WEB_NAVIGATION_COMMITTED'].includes(request.type)) {
+        for (let win_id in context) {
+            if (context[win_id]) {
+                const mplayer = context[win_id].mplayer;
+                const recorder = context[win_id].recorder;
+                const req = request;
+                try {
+                    if (req.type === 'TAB_UPDATED') {
+                        if (mplayer && mplayer.onTabUpdated) mplayer.onTabUpdated(req.tabId, req.changeInfo, req.tab);
+                    } else if (req.type === 'TAB_ACTIVATED') {
+                        if (mplayer && mplayer.onTabActivated) mplayer.onTabActivated(req.activeInfo);
+                        if (recorder && recorder.onActivated) recorder.onActivated(req.activeInfo);
+                    } else if (req.type === 'TAB_CREATED') {
+                        if (recorder && recorder.onCreated) recorder.onCreated(req.tab);
+                    } else if (req.type === 'TAB_REMOVED') {
+                        if (recorder && recorder.onRemoved) recorder.onRemoved(req.tabId);
+                    } else if (req.type === 'TAB_MOVED') {
+                        if (recorder && recorder.onMoved) recorder.onMoved(req.tabId, req.moveInfo);
+                    } else if (req.type === 'TAB_ATTACHED') {
+                        if (recorder && recorder.onAttached) recorder.onAttached(req.tabId, req.attachInfo);
+                    } else if (req.type === 'TAB_DETACHED') {
+                        if (recorder && recorder.onDetached) recorder.onDetached(req.tabId, req.detachInfo);
+                    } else if (req.type === 'WEB_NAVIGATION_ERROR') {
+                        if (mplayer && mplayer.onNavigationErrorOccured) mplayer.onNavigationErrorOccured(req.details);
+                    } else if (req.type === 'WEB_NAVIGATION_COMMITTED') {
+                        if (recorder && recorder.onCommitted) recorder.onCommitted(req.details);
+                    }
+                } catch (e) {
+                    console.error(`[iMacros Offscreen] Error handling ${req.type} for win_id ${win_id}:`, e);
+                }
+            }
+        }
+        if (sendResponse) sendResponse({ success: true });
+        return true;
+    }
+
+    if (request.command === 'FORWARD_MESSAGE') {
+        const { topic, data, tab_id, win_id } = request;
+        if (typeof communicator !== 'undefined') {
+            const msg = { topic: topic, data: data };
+            if (communicator.handlers && communicator.handlers[topic]) {
+                communicator._execHandlers(msg, tab_id, win_id, sendResponse);
+            } else {
+                if (sendResponse) sendResponse({
+                    success: true,
+                    state: 'idle',
+                    error: 'No handler found',
+                    notHandled: true
+                });
+            }
+        } else {
+            if (sendResponse) sendResponse({
+                success: false,
+                state: 'idle',
+                error: 'Communicator not available'
+            });
+        }
+        return true;
+    }
+
+    if (request.command === 'runMacroByUrl') {
+        const macroPath = request.macroPath;
+        const windowId = request.windowId;
+        const requestId = request.requestId || createRequestId();
+
+        console.log('[iMacros Offscreen] runMacroByUrl:', macroPath, { requestId, windowId });
+
+        if (playInFlight.has(windowId)) {
+            if (sendResponse) sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
+            return true;
+        }
+
+        if (!context[windowId]) {
+            context[windowId] = {};
+        }
+
+        if (context[windowId].mplayer && context[windowId].mplayer.playing) {
+            const mplayer = context[windowId].mplayer;
+            const runCmd = [null, '"' + macroPath + '"'];
+            try {
+                mplayer._ActionTable["run"](runCmd);
+                if (sendResponse) sendResponse({ success: true, message: 'Macro queued via RUN command' });
+            } catch (e) {
+                if (sendResponse) sendResponse({ success: false, error: e.message });
+            }
+            return true;
+        }
+
+        playInFlight.add(windowId);
+        if (sendResponse) {
+            sendResponse({ success: true, status: 'started' });
+        }
+
+        afio.getDefaultDir("savepath").then(function (dir) {
+            let fullPath = macroPath;
+            if (!__is_full_path(macroPath)) {
+                dir.append(macroPath);
+                fullPath = dir.path;
+            }
+            const node = afio.openNode(fullPath);
+            return node.exists().then(function (exists) {
+                if (!exists) throw new Error('Macro file not found: ' + fullPath);
+                return afio.readTextFile(node).then(function (source) {
+                    const macro = {
+                        name: node.leafName || macroPath,
+                        source: source,
+                        file_id: fullPath,
+                        times: 1,
+                        startLoop: 1
+                    };
+                    if (!context[windowId].mplayer) {
+                        context[windowId].mplayer = new MacroPlayer(windowId);
+                    }
+                    const mplayer = context[windowId].mplayer;
+                    const limits = { maxVariables: 'unlimited', loops: 'unlimited' };
+                    mplayer.play(macro, limits, function () {
+                        playInFlight.delete(windowId);
+                    });
+                });
+            });
+        }).catch(function (e) {
+            console.error('[iMacros Offscreen] Error loading macro:', e, { requestId });
+            playInFlight.delete(windowId);
+        });
+        return false;
+    }
+
+    if (request.command === 'reinitFileSystem') {
+        if (typeof afio !== 'undefined' && afio.reinitFileSystem) {
+            afio.reinitFileSystem().then(() => {
+                sendResponse({ success: true });
+            }).catch(err => {
+                sendResponse({ success: false, error: err.message });
+            });
+        } else {
+            sendResponse({ success: false, error: 'afio or reinitFileSystem not available' });
+        }
+        return true;
+    }
+
+    // Skip commands handled by Service Worker
+    if (['playMacro', 'startRecording', 'stop', 'pause', 'unpause', 'editMacro'].includes(request.command)) {
+        return;
+    }
+
+    if (request.command === 'EVAL_REQUEST') {
+        pendingEvalRequests.set(request.requestId, sendResponse);
+        const frame = document.getElementById('eval_sandbox');
+        if (frame && frame.contentWindow) {
+            frame.contentWindow.postMessage(request, '*');
+        } else {
+            pendingEvalRequests.delete(request.requestId);
+            sendResponse({ success: false, error: "Sandbox frame not found" });
+        }
+        return true;
+    }
+
+    try {
+        if (request.type === 'CALL_BG_FUNCTION') {
+            const functionName = request.functionName;
+            const args = request.args || [];
+            try {
+                if (typeof window[functionName] === 'function') {
+                    const result = window[functionName](...args);
+                    if (result && typeof result.then === 'function') {
+                        result.then(value => {
+                            sendResponse({ success: true, result: value });
+                        }).catch(err => {
+                            sendResponse({ success: false, error: err.message || String(err) });
+                        });
+                    } else {
+                        sendResponse({ success: true, result: result });
+                    }
+                } else {
+                    sendResponse({ success: false, error: `Function ${functionName} not found` });
+                }
+            } catch (err) {
+                sendResponse({ success: false, error: err.message || String(err) });
+            }
+            return true;
+        }
+
+        if (request.type === 'CALL_CONTEXT_METHOD') {
+            const win_id = request.win_id;
+            const objectPath = request.objectPath;
+            const methodName = request.methodName;
+            const args = request.args || [];
+            try {
+                if (!context[win_id]) {
+                    sendResponse({ success: false, error: `Context not found for window ${win_id}` });
+                    return true;
+                }
+                const obj = context[win_id][objectPath];
+                if (!obj) {
+                    sendResponse({ success: false, error: `Object ${objectPath} not found in context` });
+                    return true;
+                }
+                if (typeof obj[methodName] !== 'function') {
+                    sendResponse({ success: false, error: `Method ${methodName} not found on ${objectPath}` });
+                    return true;
+                }
+                const result = obj[methodName](...args);
+                if (result && typeof result.then === 'function') {
+                    result.then(value => {
+                        sendResponse({ success: true, result: value });
+                    }).catch(err => {
+                        sendResponse({ success: false, error: err.message || String(err) });
+                    });
+                } else {
+                    sendResponse({ success: true, result: result });
+                }
+            } catch (err) {
+                sendResponse({ success: false, error: err.message || String(err) });
+            }
+            return true;
+        }
+
+        if (request.command === 'CALL_CONTEXT_METHOD') {
+            const win_id = request.win_id;
+            const method = request.method;
+            try {
+                if (!context[win_id]) {
+                    context.init(win_id).then(() => {
+                        executeContextMethod(win_id, method, sendResponse, request.args, request.requestId);
+                    }).catch(err => {
+                        sendResponse({ success: false, error: `Failed to initialize context: ${err.message || String(err)}` });
+                    });
+                    return true;
+                }
+                executeContextMethod(win_id, method, sendResponse, request.args, request.requestId);
+            } catch (err) {
+                sendResponse({ success: false, error: err.message || String(err) });
+            }
+            return true;
+        }
+
+        if (request.type === 'SAVE_MACRO') {
+            if (sendResponse) {
+                sendResponse({ success: true, status: 'saving' });
+            }
+            try {
+                save(request.macro, request.overwrite, function (result) {
+                    if (result && result.error) {
+                        console.error("[Offscreen] Save completed with error:", result.error);
+                    } else {
+                        console.log("[Offscreen] Save completed:", result);
+                    }
+                });
+            } catch (err) {
+                console.error("Error saving macro:", err);
+            }
+            return false;
+        }
+
+        if (request.type === 'GET_DIALOG_ARGS') {
+            const winId = parseInt(request.windowId, 10);
+            if (!Number.isInteger(winId) || winId <= 0) {
+                sendResponse({ success: false, error: "Invalid windowId" });
+                return true;
+            }
+            const tryGetArgs = (attemptsLeft) => {
+                if (typeof dialogUtils === 'undefined') {
+                    sendResponse({ success: false, error: "dialogUtils undefined" });
+                    return;
+                }
+                try {
+                    const args = dialogUtils.getDialogArgs(winId);
+                    sendResponse({ success: true, args: args });
+                } catch (e) {
+                    if (attemptsLeft > 0) {
+                        setTimeout(() => tryGetArgs(attemptsLeft - 1), 200);
+                    } else {
+                        sendResponse({ success: false, error: e.message });
+                    }
+                }
+            };
+            tryGetArgs(30);
+            return true;
+        }
+
+        if (request.type === 'SET_DIALOG_RESULT') {
+            try {
+                if (typeof dialogUtils === 'undefined') {
+                    sendResponse({ success: false, error: "dialogUtils undefined" });
+                    return true;
+                }
+                const winId = parseInt(request.windowId, 10);
+                if (!Number.isInteger(winId) || winId <= 0) {
+                    sendResponse({ success: false, error: "Invalid windowId" });
+                    return true;
+                }
+                dialogUtils.setDialogResult(winId, request.response);
+                sendResponse({ success: true });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message });
+            }
+            return true;
+        }
+
+        if (request.type === 'GET_RECORDER_STATE') {
+            const win_id = request.win_id;
+            try {
+                if (!context[win_id] || !context[win_id].recorder) {
+                    sendResponse({ success: false, error: `Recorder not found for window ${win_id}` });
+                    return true;
+                }
+                const recorder = context[win_id].recorder;
+                sendResponse({
+                    success: true,
+                    recording: recorder.recording || false,
+                    actions: recorder.actions || []
+                });
+            } catch (err) {
+                sendResponse({ success: false, error: err.message || String(err) });
+            }
+            return true;
+        }
+
+        if (request.command === 'EXTRACT_DIALOG_CLOSED') {
+            const win_id = parseInt(request.win_id, 10);
+            if (isNaN(win_id) || win_id <= 0) {
+                sendResponse({ success: false, error: 'Invalid win_id' });
+                return true;
+            }
+            try {
+                if (context[win_id] && context[win_id].mplayer) {
+                    const mplayer = context[win_id].mplayer;
+                    if (typeof mplayer.next !== 'function') {
+                        sendResponse({ success: false, error: 'mplayer.next not available' });
+                        return true;
+                    }
+                    if (mplayer.waitingForExtract) {
+                        mplayer.waitingForExtract = false;
+                        mplayer.next("extractDialog");
+                    }
+                    sendResponse({ success: true });
+                } else {
+                    sendResponse({ success: false, error: 'mplayer not found' });
+                }
+            } catch (err) {
+                sendResponse({ success: false, error: err.message || String(err) });
+            }
+            return true;
+        }
+
+        switch (request.command) {
+            case 'actionClicked':
+                handleActionClicked(request.tab);
+                break;
+            case 'notificationClicked':
+                var n_id = request.notificationId;
+                var w_id = parseInt(n_id);
+                if (isNaN(w_id) || !context[w_id] || !context[w_id].info_args) break;
+                var info = context[w_id].info_args;
+                if (info.errorCode == 1) break;
+                edit(info.macro, true);
+                break;
+        }
+    } catch (e) {
+        console.error('[iMacros Offscreen] Error handling message:', e);
+    }
+    if (sendResponse) sendResponse({ success: true });
+});
         return true;
     }
 
