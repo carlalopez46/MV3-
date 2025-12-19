@@ -502,7 +502,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             if (sendResponse) {
                 sendResponse({ success: true, status: 'opening' });
             }
-            // NOTE: Completion/errors are logged asynchronously; caller should rely on UI/state updates.
 
             (async () => {
                 try {
