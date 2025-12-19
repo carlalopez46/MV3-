@@ -457,26 +457,30 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             filePath = filePath.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
             console.log("[Offscreen] Cleaned path for editor:", filePath);
 
-            const node = afio.openNode(filePath);
+            if (sendResponse) {
+                sendResponse({ success: true, status: 'opening' });
+            }
 
-            afio.readTextFile(node).then(source => {
-                console.log("[Offscreen] File read for editor success");
+            (async () => {
+                try {
+                    const node = afio.openNode(filePath);
+                    const source = await afio.readTextFile(node);
+                    console.log("[Offscreen] File read for editor success");
 
-                const macro = {
-                    source: source,
-                    name: node.leafName,
-                    file_id: filePath
-                };
+                    const macro = {
+                        source: source,
+                        name: node.leafName,
+                        file_id: filePath
+                    };
 
-                // エディタを開く（edit関数を使用）
-                console.log("[Offscreen] Calling edit() to open editor");
-                edit(macro, false, 0);
-                sendResponse({ success: true });
-            }).catch(err => {
-                console.error("[Offscreen] File read for editor error:", err);
-                sendResponse({ success: false, error: err.message || String(err) });
-            });
-            return true; // Keep message channel open for async response
+                    // エディタを開く（edit関数を使用）
+                    console.log("[Offscreen] Calling edit() to open editor");
+                    edit(macro, false, 0);
+                } catch (err) {
+                    console.error("[Offscreen] File read for editor error:", err);
+                }
+            })();
+            return false;
         } else {
             sendResponse({ success: false, error: `Unknown method: ${method}` });
         }
@@ -681,6 +685,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         playInFlight.add(windowId);
         console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`);
 
+        if (sendResponse) {
+            sendResponse({ success: true, status: 'started' });
+        }
+
         // No macro playing, start fresh execution
         // Resolve and load the macro file
         afio.getDefaultDir("savepath").then(function (dir) {
@@ -720,8 +728,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                         playInFlight.delete(windowId);
                         console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (completed)`);
                     });
-
-                    if (sendResponse) sendResponse({ success: true, message: 'Macro started' });
                 });
             });
         }).catch(function (e) {
@@ -729,10 +735,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             // ★重要: エラー時もガードをクリア
             playInFlight.delete(windowId);
             console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (error)`);
-            if (sendResponse) sendResponse({ success: false, error: e.message });
         });
 
-        return true;
+        return false;
     }
 
     if (request.command === 'reinitFileSystem') {
@@ -871,15 +876,17 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
 
         if (request.type === 'SAVE_MACRO') {
+            if (sendResponse) {
+                sendResponse({ success: true, status: 'saving' });
+            }
             try {
                 save(request.macro, request.overwrite, function (result) {
-                    sendResponse({ success: true, result: result });
+                    console.log("[Offscreen] Save completed:", result);
                 });
             } catch (err) {
                 console.error("Error saving macro:", err);
-                sendResponse({ success: false, error: err.message || String(err) });
             }
-            return true;
+            return false;
         }
 
         // Handle GET_DIALOG_ARGS from background (forwarded from dialog window)
