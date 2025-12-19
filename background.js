@@ -856,6 +856,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     const isValidTabId = (value) => Number.isInteger(value) && value >= 0;
     const isValidObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
+
     if (ignoreExtensionIframeSender(sender, sendResponse)) {
         return true;
     }
@@ -2754,11 +2755,7 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
 
 // Handle the runMacroByUrl command in the message listener
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (isExtensionIframeSender(sender)) {
-        console.log('[iMacros SW] Ignored message from extension iframe:', sender.url, 'frameId=', sender.frameId);
-        if (sendResponse) {
-            sendResponse({ ok: false, ignored: 'extension_iframe' });
-        }
+    if (ignoreExtensionIframeSender(sender, sendResponse)) {
         return true;
     }
 
@@ -2789,8 +2786,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return false;
     }
 
-// NOTE: openPanel command is handled by the main handler above.
-// Do NOT add duplicate handler here - it causes panel to open twice
+    // NOTE: openPanel command is handled by the main handler above.
+    // Do NOT add duplicate handler here - it causes panel to open twice
 
     return false;
 });
