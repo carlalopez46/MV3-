@@ -5,23 +5,37 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 const LOCALSTORAGE_PREFIX = '__imacros_ls__:';
 const SW_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
 let lastProcessedExecutionId = null;
+let executionIdRestorePromise = null;
+let executionIdRestoreComplete = false;
 
 function restoreExecutionIdFromStorage() {
-    try {
-        chrome.storage.local.get(['lastProcessedExecutionId'], (result) => {
-            if (chrome.runtime && chrome.runtime.lastError) {
-                console.warn('[iMacros SW] Failed to restore lastProcessedExecutionId:', chrome.runtime.lastError);
-                return;
-            }
-            const storedId = result && result.lastProcessedExecutionId;
-            if (storedId && typeof storedId === 'string' && storedId.trim()) {
-                lastProcessedExecutionId = storedId;
-                console.log('[iMacros SW] Restored lastProcessedExecutionId:', storedId);
-            }
-        });
-    } catch (error) {
-        console.warn('[iMacros SW] Failed to restore lastProcessedExecutionId:', error);
+    if (executionIdRestorePromise) {
+        return executionIdRestorePromise;
     }
+
+    executionIdRestorePromise = new Promise((resolve) => {
+        try {
+            chrome.storage.local.get(['lastProcessedExecutionId'], (result) => {
+                if (chrome.runtime && chrome.runtime.lastError) {
+                    console.warn('[iMacros SW] Failed to restore lastProcessedExecutionId:', chrome.runtime.lastError);
+                } else {
+                    const storedId = result && result.lastProcessedExecutionId;
+                    if (storedId && typeof storedId === 'string' && storedId.trim()) {
+                        lastProcessedExecutionId = storedId;
+                        console.log('[iMacros SW] Restored lastProcessedExecutionId:', storedId);
+                    }
+                }
+                executionIdRestoreComplete = true;
+                resolve();
+            });
+        } catch (error) {
+            console.warn('[iMacros SW] Failed to restore lastProcessedExecutionId:', error);
+            executionIdRestoreComplete = true;
+            resolve();
+        }
+    });
+
+    return executionIdRestorePromise;
 }
 
 restoreExecutionIdFromStorage();
@@ -2170,65 +2184,71 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // --- 再生 (playMacro) ---
     if (msg.command === "playMacro") {
-        const requestId = msg.requestId || createRequestId();
-        const executionId = msg.executionId;
-        const isValidExecutionId = executionId && typeof executionId === 'string' && executionId.trim().length > 0;
-        console.log("[iMacros SW] Play request for:", msg.file_path, {
-            requestId,
-            executionId,
-            win_id: msg.win_id,
-            swInstanceId: SW_INSTANCE_ID
-        });
-
-        if (isValidExecutionId && executionId === lastProcessedExecutionId) {
-            console.warn(`[iMacros SW] Duplicate play request detected (ID: ${executionId}). Ignoring.`);
-            sendResponse({ status: 'ignored', message: 'Duplicate request' });
-            return true;
-        }
-
-        if (isValidExecutionId) {
-            lastProcessedExecutionId = executionId;
-            chrome.storage.local.set({ lastProcessedExecutionId: executionId }, () => {
-                if (chrome.runtime && chrome.runtime.lastError) {
-                    console.warn('[iMacros SW] Failed to persist lastProcessedExecutionId:', chrome.runtime.lastError);
-                }
+        // Ensure stored execution ID (from prior SW sessions) is restored before checking duplicates
+        restoreExecutionIdFromStorage().then(() => {
+            const requestId = msg.requestId || createRequestId();
+            const executionId = msg.executionId;
+            const isValidExecutionId = executionId && typeof executionId === 'string' && executionId.trim().length > 0;
+            console.log("[iMacros SW] Play request for:", msg.file_path, {
+                requestId,
+                executionId,
+                win_id: msg.win_id,
+                swInstanceId: SW_INSTANCE_ID,
+                restoreComplete: executionIdRestoreComplete
             });
-        }
 
-        // win_idを取得（パネルウィンドウIDから親ウィンドウIDを解決）
-        resolveTargetWindowId(msg.win_id, sender).then(win_id => {
-            if (!win_id) {
-                console.error("[iMacros SW] Cannot determine win_id for playMacro");
-                sendResponse({ error: "Cannot determine window ID" });
+            if (isValidExecutionId && executionId === lastProcessedExecutionId) {
+                console.warn(`[iMacros SW] Duplicate play request detected (ID: ${executionId}). Ignoring.`);
+                sendResponse({ status: 'ignored', message: 'Duplicate request' });
                 return;
             }
 
-            console.log("[iMacros SW] Resolved win_id:", win_id, { requestId, swInstanceId: SW_INSTANCE_ID });
-            console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", msg.loop ?? 1, ")");
+            if (isValidExecutionId) {
+                lastProcessedExecutionId = executionId;
+                chrome.storage.local.set({ lastProcessedExecutionId: executionId }, () => {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[iMacros SW] Failed to persist lastProcessedExecutionId:', chrome.runtime.lastError);
+                    }
+                });
+            }
 
-            // Offscreenにファイル読み込みと再生を依頼
-            sendMessageToOffscreen({
-                command: "CALL_CONTEXT_METHOD",
-                method: "playFile",
-                win_id: win_id,
-                args: [msg.file_path, msg.loop ?? 1],
-                requestId: requestId,
-                executionId: executionId
-            }).then(result => {
-                console.log("[iMacros SW] playFile result:", result, { requestId, swInstanceId: SW_INSTANCE_ID });
-                // ACK応答 (ack: true, started: true) または従来の成功応答に対応
-                if (result && (result.ack === true || result.started === true)) {
-                    // マクロ開始のACK - パネルに成功を通知
-                    sendResponse({ success: true, started: true });
-                } else if (result && typeof result.success !== 'undefined') {
-                    sendResponse(result);
-                } else {
-                    sendResponse({ success: true });
+            // win_idを取得（パネルウィンドウIDから親ウィンドウIDを解決）
+            resolveTargetWindowId(msg.win_id, sender).then(win_id => {
+                if (!win_id) {
+                    console.error("[iMacros SW] Cannot determine win_id for playMacro");
+                    sendResponse({ error: "Cannot determine window ID" });
+                    return;
                 }
-            }).catch(err => {
-                console.error("[iMacros SW] playFile error:", err);
-                sendResponse({ success: false, error: (err && err.message) || String(err) });
+
+                console.log("[iMacros SW] Resolved win_id:", win_id, { requestId, swInstanceId: SW_INSTANCE_ID });
+                console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", msg.loop ?? 1, ")");
+
+                // Offscreenにファイル読み込みと再生を依頼
+                sendMessageToOffscreen({
+                    command: "CALL_CONTEXT_METHOD",
+                    method: "playFile",
+                    win_id: win_id,
+                    args: [msg.file_path, msg.loop ?? 1],
+                    requestId: requestId,
+                    executionId: executionId
+                }).then(result => {
+                    console.log("[iMacros SW] playFile result:", result, { requestId, swInstanceId: SW_INSTANCE_ID });
+                    // ACK応答 (ack: true, started: true) または従来の成功応答に対応
+                    if (result && (result.ack === true || result.started === true)) {
+                        // マクロ開始のACK - パネルに成功を通知
+                        sendResponse({ success: true, started: true });
+                    } else if (result && typeof result.success !== 'undefined') {
+                        sendResponse(result);
+                    } else {
+                        sendResponse({ success: true });
+                    }
+                }).catch(err => {
+                    console.error("[iMacros SW] playFile error:", err);
+                    sendResponse({ success: false, error: (err && err.message) || String(err) });
+                });
             });
+        }).catch((error) => {
+            console.warn('[iMacros SW] Failed to restore execution ID before playMacro check:', error);
         });
 
         return true;
