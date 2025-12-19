@@ -2422,8 +2422,11 @@ async function sendMessageToOffscreen(msg) {
             const context = [];
             if (msg.type) context.push(`type=${msg.type}`);
             if (msg.command) context.push(`command=${msg.command}`);
-            if (msg.windowId !== undefined) context.push(`windowId=${msg.windowId}`);
-            if (msg.tabId !== undefined) context.push(`tabId=${msg.tabId}`);
+            const windowId = msg.windowId !== undefined ? msg.windowId : msg.win_id;
+            const tabId = msg.tabId !== undefined ? msg.tabId : msg.tab_id;
+            if (windowId !== undefined) context.push(`windowId=${windowId}`);
+            if (tabId !== undefined) context.push(`tabId=${tabId}`);
+            if (msg.requestId) context.push(`requestId=${msg.requestId}`);
             const contextStr = context.length ? ` [${context.join(', ')}]` : '';
             throw new Error(`${err.message}${contextStr}`, { cause: err });
         }
