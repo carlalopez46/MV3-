@@ -443,10 +443,36 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     const absolutePath = await resolveAbsolutePath(filePath);
                     await readAndPlayFile(absolutePath, loops, win_id);
                     console.log("[Offscreen] Macro play completed successfully", { requestId: playRequestId });
+                    if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+                        chrome.runtime.sendMessage({
+                            type: "macroStopped",
+                            win_id: win_id,
+                            target: "panel"
+                        });
+                        chrome.runtime.sendMessage({
+                            type: 'UPDATE_BADGE',
+                            method: 'setText',
+                            winId: win_id,
+                            arg: ''
+                        });
+                    }
                     // 注: sendResponseは既に呼び出し済みのため、ここでは呼び出さない
                     // マクロ完了の通知は状態変更メッセージを通じてUIに伝達される
                 } catch (err) {
                     console.error("[Offscreen] File read/play error:", err, { requestId: playRequestId });
+                    if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+                        chrome.runtime.sendMessage({
+                            type: "macroStopped",
+                            win_id: win_id,
+                            target: "panel"
+                        });
+                        chrome.runtime.sendMessage({
+                            type: 'UPDATE_BADGE',
+                            method: 'setText',
+                            winId: win_id,
+                            arg: ''
+                        });
+                    }
                     // ★重要: ファイル読み込みエラー時にUIへ通知
                     // mplayer.play()が呼び出される前にエラーが発生した場合、
                     // 状態変更コールバックが発火しないため、明示的にUIへ通知する
