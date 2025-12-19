@@ -173,11 +173,15 @@ function play() {
     // UIを即時更新してストップボタンを有効化
     updatePanelState({ isPlaying: true, isRecording: false, currentMacro: macro });
 
+    const executionId = Date.now().toString();
+    console.log(`[Panel] Sending playMacro with ID: ${executionId}`);
+
     // パネル側ではファイルを読まず、パスだけを送る
     sendCommand("playMacro", {
         file_path: filePath, // ファイルパスまたはID
         macro_name: macroName,
-        loop: 1  // ★修正: playボタンは常に1回のみ実行(繰り返しなし)
+        loop: 1,  // ★修正: playボタンは常に1回のみ実行(繰り返しなし)
+        executionId: executionId
     });
 }
 
@@ -253,10 +257,14 @@ function playLoop() {
     // UIを即時更新してストップボタンを有効化
     updatePanelState({ isPlaying: true, isRecording: false, currentMacro: macro });
 
+    const executionId = Date.now().toString();
+    console.log(`[Panel] Sending playMacro(loop) with ID: ${executionId}`);
+
     sendCommand("playMacro", {
         file_path: filePath,
         macro_name: macroName,
-        loop: max
+        loop: max,
+        executionId: executionId
     })
         .then((response) => {
             if (!response || response.success === false) {

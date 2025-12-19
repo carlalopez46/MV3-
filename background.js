@@ -4,6 +4,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 */
 const LOCALSTORAGE_PREFIX = '__imacros_ls__:';
 const SW_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
+let lastProcessedExecutionId = null;
 
 function createRequestId() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -13,6 +14,21 @@ function createRequestId() {
 }
 
 console.log('[iMacros SW] Instance ID:', SW_INSTANCE_ID);
+function resetPlaybackStateOnStartup() {
+    try {
+        chrome.storage.local.set({ playing: false, currentMacro: null }, () => {
+            if (chrome.runtime && chrome.runtime.lastError) {
+                console.warn('[iMacros SW] Failed to reset playback state on startup:', chrome.runtime.lastError);
+            } else {
+                console.log('[iMacros SW] State reset on startup to prevent zombie execution.');
+            }
+        });
+    } catch (error) {
+        console.warn('[iMacros SW] Failed to reset playback state on startup:', error);
+    }
+}
+
+resetPlaybackStateOnStartup();
 
 function isExtensionIframeSender(sender) {
     const senderUrl = sender && typeof sender.url === 'string' ? sender.url : null;
@@ -2135,11 +2151,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // --- 再生 (playMacro) ---
     if (msg.command === "playMacro") {
         const requestId = msg.requestId || createRequestId();
+        const executionId = msg.executionId;
         console.log("[iMacros SW] Play request for:", msg.file_path, {
             requestId,
+            executionId,
             win_id: msg.win_id,
             swInstanceId: SW_INSTANCE_ID
         });
+
+        if (executionId && executionId === lastProcessedExecutionId) {
+            console.warn(`[iMacros SW] Duplicate play request detected (ID: ${executionId}). Ignoring.`);
+            sendResponse({ status: 'ignored', message: 'Duplicate request' });
+            return true;
+        }
+
+        if (executionId) {
+            lastProcessedExecutionId = executionId;
+        }
 
         // win_idを取得（パネルウィンドウIDから親ウィンドウIDを解決）
         resolveTargetWindowId(msg.win_id, sender).then(win_id => {
@@ -2158,7 +2186,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 method: "playFile",
                 win_id: win_id,
                 args: [msg.file_path, msg.loop ?? 1],
-                requestId: requestId
+                requestId: requestId,
+                executionId: executionId
             }).then(result => {
                 console.log("[iMacros SW] playFile result:", result, { requestId, swInstanceId: SW_INSTANCE_ID });
                 // ACK応答 (ack: true, started: true) または従来の成功応答に対応
