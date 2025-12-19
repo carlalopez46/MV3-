@@ -2,35 +2,6 @@
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
-if (typeof globalThis !== 'undefined' && typeof globalThis.localStorage === 'undefined') {
-    const memoryCache = Object.create(null);
-    Object.defineProperty(globalThis, 'localStorage', {
-        value: {
-            getItem: (key) => (Object.prototype.hasOwnProperty.call(memoryCache, key) ? memoryCache[key] : null),
-            setItem: (key, value) => {
-                memoryCache[key] = String(value);
-            },
-            removeItem: (key) => {
-                delete memoryCache[key];
-            },
-            clear: () => {
-                Object.keys(memoryCache).forEach((key) => {
-                    delete memoryCache[key];
-                });
-            },
-            key: (index) => Object.keys(memoryCache)[index] || null,
-            get length() {
-                return Object.keys(memoryCache).length;
-            },
-            __isInMemoryShim: true,
-            __isMinimalLocalStorageShim: true
-        },
-        writable: true,
-        configurable: true
-    });
-    globalThis._localStorageData = memoryCache;
-}
-
 const LOCALSTORAGE_PREFIX = '__imacros_ls__:';
 
 // =============================================================================
