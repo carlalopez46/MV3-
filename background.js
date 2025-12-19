@@ -23,6 +23,17 @@ function isExtensionIframeSender(sender) {
     return isExtensionPage && frameId !== null && frameId !== 0;
 }
 
+function ignoreExtensionIframeSender(sender, sendResponse) {
+    if (!isExtensionIframeSender(sender)) {
+        return false;
+    }
+    console.log('[iMacros SW] Ignored message from extension iframe:', sender.url, 'frameId=', sender.frameId);
+    if (sendResponse) {
+        sendResponse({ ok: false, ignored: 'extension_iframe' });
+    }
+    return true;
+}
+
 // =============================================================================
 // LocalStorage Polyfill Helpers (shared logic to reduce duplication)
 // =============================================================================
@@ -845,11 +856,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     const isValidTabId = (value) => Number.isInteger(value) && value >= 0;
     const isValidObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
-    if (isExtensionIframeSender(sender)) {
-        console.log('[iMacros SW] Ignored message from extension iframe:', sender.url, 'frameId=', sender.frameId);
-        if (sendResponse) {
-            sendResponse({ ok: false, ignored: 'extension_iframe' });
-        }
+
+    if (ignoreExtensionIframeSender(sender, sendResponse)) {
         return true;
     }
 
@@ -2350,11 +2358,7 @@ chrome.notifications.onClicked.addListener(function (n_id) {
 
 // Handle SET_DIALOG_RESULT - forward to offscreen
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (isExtensionIframeSender(sender)) {
-        console.log('[iMacros SW] Ignored message from extension iframe:', sender.url, 'frameId=', sender.frameId);
-        if (sendResponse) {
-            sendResponse({ ok: false, ignored: 'extension_iframe' });
-        }
+    if (ignoreExtensionIframeSender(sender, sendResponse)) {
         return true;
     }
     if (msg.type === 'SET_DIALOG_RESULT') {
@@ -2595,11 +2599,7 @@ const FocusGuard = (() => {
 })();
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (isExtensionIframeSender(sender)) {
-        console.log('[iMacros SW] Ignored message from extension iframe:', sender.url, 'frameId=', sender.frameId);
-        if (sendResponse) {
-            sendResponse({ ok: false, ignored: 'extension_iframe' });
-        }
+    if (ignoreExtensionIframeSender(sender, sendResponse)) {
         return true;
     }
     if (!msg || !msg.command || !msg.command.startsWith('FOCUS_GUARD')) return false;
@@ -2755,11 +2755,7 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
 
 // Handle the runMacroByUrl command in the message listener
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (isExtensionIframeSender(sender)) {
-        console.log('[iMacros SW] Ignored message from extension iframe:', sender.url, 'frameId=', sender.frameId);
-        if (sendResponse) {
-            sendResponse({ ok: false, ignored: 'extension_iframe' });
-        }
+    if (ignoreExtensionIframeSender(sender, sendResponse)) {
         return true;
     }
 
@@ -2790,8 +2786,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return false;
     }
 
-// NOTE: openPanel command is handled by the main handler above.
-// Do NOT add duplicate handler here - it causes panel to open twice
+    // NOTE: openPanel command is handled by the main handler above.
+    // Do NOT add duplicate handler here - it causes panel to open twice
 
     return false;
 });

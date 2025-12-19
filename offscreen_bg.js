@@ -29,6 +29,16 @@ function createRequestId() {
 
 console.log('[iMacros Offscreen] Instance ID:', OFFSCREEN_INSTANCE_ID);
 
+function notifyAsyncError(win_id, message) {
+    if (typeof notifyPanelStatLine === 'function') {
+        notifyPanelStatLine(win_id, message, "error");
+        return;
+    }
+    if (typeof showNotification === 'function') {
+        showNotification(win_id, { errorCode: 0, message: message });
+    }
+}
+
 async function ensureVirtualFileService() {
     if (!virtualFileService) {
         return null;
@@ -427,9 +437,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             console.log("[Offscreen] Cleaned path for editor:", filePath);
 
             if (sendResponse) {
-                sendResponse({ success: true, status: 'opening' });
+                sendResponse({ success: true, ack: true, status: 'opening' });
             }
-            // NOTE: Completion/errors are logged asynchronously; caller should rely on UI/state updates.
+            // NOTE: Completion/errors are reported asynchronously; caller should rely on UI/state updates.
 
             (async () => {
                 try {
@@ -448,6 +458,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     edit(macro, false, 0);
                 } catch (err) {
                     console.error("[Offscreen] File read for editor error:", err);
+                    const errorMsg = err && err.message ? err.message : String(err);
+                    notifyAsyncError(win_id, `Error opening editor: ${errorMsg}`);
                 }
             })();
             return false;
@@ -600,7 +612,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         const windowId = request.windowId;
         const requestId = request.requestId || createRequestId();
 
-        console.log('[iMacros Offscreen] runMacroByUrl:', macroPath, { requestId, windowId });
+        console.log('[iMacros Offscreen] runMacroByUrl:', macroPath, {
+            requestId,
+            windowId,
+            offscreenInstanceId: OFFSCREEN_INSTANCE_ID
+        });
 
         if (playInFlight.has(windowId)) {
             if (sendResponse) sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
@@ -624,9 +640,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
 
         playInFlight.add(windowId);
+        console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
+
         if (sendResponse) {
-            sendResponse({ success: true, status: 'started' });
+            sendResponse({ success: true, ack: true, status: 'started' });
         }
+        // NOTE: Completion/errors are logged asynchronously; caller should rely on macro state updates.
 
         afio.getDefaultDir("savepath").then(function (dir) {
             let fullPath = macroPath;
@@ -651,14 +670,22 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     const mplayer = context[windowId].mplayer;
                     const limits = { maxVariables: 'unlimited', loops: 'unlimited' };
                     mplayer.play(macro, limits, function () {
+                        console.log('[iMacros Offscreen] Macro execution completed:', macroPath, { requestId });
+                        // ★重要: 実行完了後にガードをクリア
                         playInFlight.delete(windowId);
+                        console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (completed)`, { requestId });
                     });
                 });
             });
         }).catch(function (e) {
             console.error('[iMacros Offscreen] Error loading macro:', e, { requestId });
+            // ★重要: エラー時もガードをクリア
             playInFlight.delete(windowId);
+            const errorMsg = e && e.message ? e.message : String(e);
+            notifyAsyncError(windowId, `Error loading macro: ${errorMsg}`);
+            console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (error)`, { requestId });
         });
+
         return false;
     }
 
@@ -773,19 +800,28 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
 
         if (request.type === 'SAVE_MACRO') {
+            const saveWinId = request.win_id || request.winId;
             if (sendResponse) {
-                sendResponse({ success: true, status: 'saving' });
+                sendResponse({ success: true, ack: true, status: 'saving' });
             }
+            // NOTE: Save completion/errors are logged asynchronously; caller should rely on UI/state updates.
             try {
                 save(request.macro, request.overwrite, function (result) {
                     if (result && result.error) {
                         console.error("[Offscreen] Save completed with error:", result.error);
+                        if (saveWinId) {
+                            notifyAsyncError(saveWinId, `Error saving macro: ${result.error}`);
+                        }
                     } else {
                         console.log("[Offscreen] Save completed:", result);
                     }
                 });
             } catch (err) {
                 console.error("Error saving macro:", err);
+                const errorMsg = err && err.message ? err.message : String(err);
+                if (saveWinId) {
+                    notifyAsyncError(saveWinId, `Error saving macro: ${errorMsg}`);
+                }
             }
             return false;
         }
