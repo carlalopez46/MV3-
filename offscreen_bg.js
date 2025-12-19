@@ -18,6 +18,16 @@ const virtualFileService = typeof VirtualFileService === "function" ? new Virtua
 let vfsReadyPromise = null;
 // Track in-flight play requests per window to avoid duplicate execution.
 const playInFlight = new Set();
+const OFFSCREEN_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
+
+function createRequestId() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+    return `off-${OFFSCREEN_INSTANCE_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+console.log('[iMacros Offscreen] Instance ID:', OFFSCREEN_INSTANCE_ID);
 
 async function ensureVirtualFileService() {
     if (!virtualFileService) {
@@ -164,7 +174,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     // ★重要: executeContextMethod を try ブロックの外で定義（スコープ問題の修正）
     // この関数は editMacro と CALL_CONTEXT_METHOD の両方から呼び出されるため、
     // メッセージリスナーのトップレベルで定義する必要がある
-    function executeContextMethod(win_id, method, sendResponse, args) {
+    function executeContextMethod(win_id, method, sendResponse, args, requestId) {
         if (method === "recorder.start") {
             console.log("[Offscreen] Starting recorder...");
             const rec = context[win_id].recorder;
@@ -320,10 +330,16 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
             return true; // Keep message channel open for async callback
         } else if (method === "playFile") {
+            const playRequestId = requestId || createRequestId();
+            console.log("[Offscreen] playFile request", {
+                requestId: playRequestId,
+                windowId: win_id,
+                offscreenInstanceId: OFFSCREEN_INSTANCE_ID
+            });
             // ★追加: パスからファイルを読んで再生する
             let filePath = args[0];
             const loops = Math.max(1, parseInt(args[1], 10) || 1);
-            console.log("[Offscreen] Reading and playing file (original path):", filePath);
+            console.log("[Offscreen] Reading and playing file (original path):", filePath, { requestId: playRequestId });
             if (Storage.getBool("debug"))
                 console.log("[Offscreen] Loop count:", loops, "(should be 1 for normal play, >1 for Play Loop)");
 
@@ -413,7 +429,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             // ★重要: playInFlight への追加は async 関数の開始前に行う
             // これにより、同時に届いた2つのメッセージの競合状態を防ぐ
             playInFlight.add(win_id);
-            console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`);
+            console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`, { requestId: playRequestId });
 
             // ★重要: ACKタイムアウト防止のため、即座にACKを返す
             // マクロ実行には数秒かかる可能性があり、500msのACKタイムアウトを超えてしまう
@@ -426,11 +442,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 try {
                     const absolutePath = await resolveAbsolutePath(filePath);
                     await readAndPlayFile(absolutePath, loops, win_id);
-                    console.log("[Offscreen] Macro play completed successfully");
+                    console.log("[Offscreen] Macro play completed successfully", { requestId: playRequestId });
                     // 注: sendResponseは既に呼び出し済みのため、ここでは呼び出さない
                     // マクロ完了の通知は状態変更メッセージを通じてUIに伝達される
                 } catch (err) {
-                    console.error("[Offscreen] File read/play error:", err);
+                    console.error("[Offscreen] File read/play error:", err, { requestId: playRequestId });
                     // ★重要: ファイル読み込みエラー時にUIへ通知
                     // mplayer.play()が呼び出される前にエラーが発生した場合、
                     // 状態変更コールバックが発火しないため、明示的にUIへ通知する
@@ -444,7 +460,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     }
                 } finally {
                     playInFlight.delete(win_id);
-                    console.log(`[Offscreen] playFile - Removed ${win_id} from playInFlight guard`);
+                    console.log(`[Offscreen] playFile - Removed ${win_id} from playInFlight guard`, { requestId: playRequestId });
                 }
             })();
             // sendResponseを同期的に呼び出したので、return trueは不要
@@ -457,26 +473,31 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             filePath = filePath.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
             console.log("[Offscreen] Cleaned path for editor:", filePath);
 
-            const node = afio.openNode(filePath);
+            if (sendResponse) {
+                sendResponse({ success: true, status: 'opening' });
+            }
+            // NOTE: Completion/errors are logged asynchronously; caller should rely on UI/state updates.
 
-            afio.readTextFile(node).then(source => {
-                console.log("[Offscreen] File read for editor success");
+            (async () => {
+                try {
+                    const node = afio.openNode(filePath);
+                    const source = await afio.readTextFile(node);
+                    console.log("[Offscreen] File read for editor success");
 
-                const macro = {
-                    source: source,
-                    name: node.leafName,
-                    file_id: filePath
-                };
+                    const macro = {
+                        source: source,
+                        name: node.leafName,
+                        file_id: filePath
+                    };
 
-                // エディタを開く（edit関数を使用）
-                console.log("[Offscreen] Calling edit() to open editor");
-                edit(macro, false, 0);
-                sendResponse({ success: true });
-            }).catch(err => {
-                console.error("[Offscreen] File read for editor error:", err);
-                sendResponse({ success: false, error: err.message || String(err) });
-            });
-            return true; // Keep message channel open for async response
+                    // エディタを開く（edit関数を使用）
+                    console.log("[Offscreen] Calling edit() to open editor");
+                    edit(macro, false, 0);
+                } catch (err) {
+                    console.error("[Offscreen] File read for editor error:", err);
+                }
+            })();
+            return false;
         } else {
             sendResponse({ success: false, error: `Unknown method: ${method}` });
         }
@@ -644,8 +665,13 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (request.command === 'runMacroByUrl') {
         const macroPath = request.macroPath;
         const windowId = request.windowId;
+        const requestId = request.requestId || createRequestId();
 
-        console.log('[iMacros Offscreen] runMacroByUrl:', macroPath, 'windowId:', windowId);
+        console.log('[iMacros Offscreen] runMacroByUrl:', macroPath, {
+            requestId,
+            windowId,
+            offscreenInstanceId: OFFSCREEN_INSTANCE_ID
+        });
 
         // ★重要: 競合状態を防ぐためのガード
         // playInFlight をチェックして重複実行を防止
@@ -679,7 +705,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
         // ★重要: ガードを設定してから非同期処理を開始
         playInFlight.add(windowId);
-        console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`);
+        console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
+
+        if (sendResponse) {
+            sendResponse({ success: true, status: 'started' });
+        }
+        // NOTE: Completion/errors are logged asynchronously; caller should rely on macro state updates.
 
         // No macro playing, start fresh execution
         // Resolve and load the macro file
@@ -715,24 +746,21 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
                     // Play the macro
                     mplayer.play(macro, limits, function () {
-                        console.log('[iMacros Offscreen] Macro execution completed:', macroPath);
+                        console.log('[iMacros Offscreen] Macro execution completed:', macroPath, { requestId });
                         // ★重要: 実行完了後にガードをクリア
                         playInFlight.delete(windowId);
-                        console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (completed)`);
+                        console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (completed)`, { requestId });
                     });
-
-                    if (sendResponse) sendResponse({ success: true, message: 'Macro started' });
                 });
             });
         }).catch(function (e) {
-            console.error('[iMacros Offscreen] Error loading macro:', e);
+            console.error('[iMacros Offscreen] Error loading macro:', e, { requestId });
             // ★重要: エラー時もガードをクリア
             playInFlight.delete(windowId);
-            console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (error)`);
-            if (sendResponse) sendResponse({ success: false, error: e.message });
+            console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (error)`, { requestId });
         });
 
-        return true;
+        return false;
     }
 
     if (request.command === 'reinitFileSystem') {
@@ -856,14 +884,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             try {
                 if (!context[win_id]) {
                     context.init(win_id).then(() => {
-                        executeContextMethod(win_id, method, sendResponse, request.args);
+                        executeContextMethod(win_id, method, sendResponse, request.args, request.requestId);
                     }).catch(err => {
                         sendResponse({ success: false, error: `Failed to initialize context: ${err.message || String(err)}` });
                     });
                     return true;
                 }
 
-                executeContextMethod(win_id, method, sendResponse, request.args);
+                executeContextMethod(win_id, method, sendResponse, request.args, request.requestId);
             } catch (err) {
                 sendResponse({ success: false, error: err.message || String(err) });
             }
@@ -871,15 +899,22 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
 
         if (request.type === 'SAVE_MACRO') {
+            if (sendResponse) {
+                sendResponse({ success: true, status: 'saving' });
+            }
+            // NOTE: Save completion/errors are logged asynchronously; caller should rely on UI/state updates.
             try {
                 save(request.macro, request.overwrite, function (result) {
-                    sendResponse({ success: true, result: result });
+                    if (result && result.error) {
+                        console.error("[Offscreen] Save completed with error:", result.error);
+                    } else {
+                        console.log("[Offscreen] Save completed:", result);
+                    }
                 });
             } catch (err) {
                 console.error("Error saving macro:", err);
-                sendResponse({ success: false, error: err.message || String(err) });
             }
-            return true;
+            return false;
         }
 
         // Handle GET_DIALOG_ARGS from background (forwarded from dialog window)

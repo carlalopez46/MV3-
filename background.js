@@ -3,6 +3,16 @@
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
 const LOCALSTORAGE_PREFIX = '__imacros_ls__:';
+const SW_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
+
+function createRequestId() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+    return `sw-${SW_INSTANCE_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+console.log('[iMacros SW] Instance ID:', SW_INSTANCE_ID);
 
 // =============================================================================
 // LocalStorage Polyfill Helpers (shared logic to reduce duplication)
@@ -213,7 +223,7 @@ localStorageInitPromise.catch((err) => {
 const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
     maxRetries: 3,
     backoffMs: 150,
-    ackTimeoutMs: 500
+    ackTimeoutMs: 10000
 });
 
 const sessionStorage = chrome.storage ? chrome.storage.session : null;
@@ -2100,7 +2110,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // --- 再生 (playMacro) ---
     if (msg.command === "playMacro") {
-        console.log("[iMacros SW] Play request for:", msg.file_path);
+        const requestId = msg.requestId || createRequestId();
+        console.log("[iMacros SW] Play request for:", msg.file_path, {
+            requestId,
+            win_id: msg.win_id,
+            swInstanceId: SW_INSTANCE_ID
+        });
 
         // win_idを取得（パネルウィンドウIDから親ウィンドウIDを解決）
         resolveTargetWindowId(msg.win_id, sender).then(win_id => {
@@ -2110,7 +2125,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 return;
             }
 
-            console.log("[iMacros SW] Resolved win_id:", win_id);
+            console.log("[iMacros SW] Resolved win_id:", win_id, { requestId, swInstanceId: SW_INSTANCE_ID });
             console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", msg.loop ?? 1, ")");
 
             // Offscreenにファイル読み込みと再生を依頼
@@ -2118,9 +2133,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 command: "CALL_CONTEXT_METHOD",
                 method: "playFile",
                 win_id: win_id,
-                args: [msg.file_path, msg.loop ?? 1]
+                args: [msg.file_path, msg.loop ?? 1],
+                requestId: requestId
             }).then(result => {
-                console.log("[iMacros SW] playFile result:", result);
+                console.log("[iMacros SW] playFile result:", result, { requestId, swInstanceId: SW_INSTANCE_ID });
                 // ACK応答 (ack: true, started: true) または従来の成功応答に対応
                 if (result && (result.ack === true || result.started === true)) {
                     // マクロ開始のACK - パネルに成功を通知
