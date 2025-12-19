@@ -190,20 +190,13 @@ function play() {
         executionId: executionId
     })
         .then((response) => {
-            if (!response || response.success === false) {
+            if (response && response.success === false) {
                 console.warn("[Panel] Playback failed to start", response);
                 const el = ensureStatusLineElement();
                 el.textContent = "Failed to start playback.";
                 el.style.color = "#b00020";
                 updatePanelState("idle");
             }
-        })
-        .catch((error) => {
-            console.error("[Panel] Playback command failed", error);
-            const el = ensureStatusLineElement();
-            el.textContent = "Failed to start playback.";
-            el.style.color = "#b00020";
-            updatePanelState("idle");
         });
 }
 

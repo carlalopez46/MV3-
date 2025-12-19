@@ -2242,17 +2242,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     } else {
                         sendResponse({ success: true });
                     }
-                }).catch(err => {
-                    console.error("[iMacros SW] playFile error:", err);
-                    sendResponse({ success: false, error: (err && err.message) || String(err) });
-                });
-            });
-        }).catch((error) => {
-            console.warn('[iMacros SW] Failed to restore execution ID before playMacro check:', error);
+        }).catch(err => {
+            console.error("[iMacros SW] playFile error:", err);
+            sendResponse({ success: false, error: (err && err.message) || String(err) });
         });
+        });
+    }).catch((error) => {
+        console.warn('[iMacros SW] Failed to restore execution ID before playMacro check:', error);
+        sendResponse({ success: false, error: 'Failed to restore execution ID', details: (error && error.message) || String(error) });
+    });
 
-        return true;
-    }
+    return true;
+}
 
     // --- 編集 (editMacro) ---
     if (msg.command === "editMacro") {
