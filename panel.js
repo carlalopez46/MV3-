@@ -10,6 +10,12 @@ let panelState = {
     isPlaying: false,
     currentMacro: null
 };
+
+function generateExecutionId() {
+    return (typeof crypto !== "undefined" && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
 const isTopFrame = window.top === window;
 
 // 情報パネルに表示した内容を保持（ヘルプ/編集ボタン用）
@@ -173,7 +179,7 @@ function play() {
     // UIを即時更新してストップボタンを有効化
     updatePanelState({ isPlaying: true, isRecording: false, currentMacro: macro });
 
-    const executionId = Date.now().toString();
+    const executionId = generateExecutionId();
     console.log(`[Panel] Sending playMacro with ID: ${executionId}`);
 
     // パネル側ではファイルを読まず、パスだけを送る
@@ -257,7 +263,7 @@ function playLoop() {
     // UIを即時更新してストップボタンを有効化
     updatePanelState({ isPlaying: true, isRecording: false, currentMacro: macro });
 
-    const executionId = Date.now().toString();
+    const executionId = generateExecutionId();
     console.log(`[Panel] Sending playMacro(loop) with ID: ${executionId}`);
 
     sendCommand("playMacro", {

@@ -5,6 +5,55 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 const LOCALSTORAGE_PREFIX = '__imacros_ls__:';
 const SW_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
 let lastProcessedExecutionId = null;
+const recentExecutionIds = new Map(); // executionId -> timestamp
+const EXECUTION_ID_TTL_MS = 60000; // 1 minute TTL
+
+function cleanupStaleExecutionIds() {
+    const now = Date.now();
+    for (const [id, timestamp] of recentExecutionIds.entries()) {
+        if (now - timestamp > EXECUTION_ID_TTL_MS) {
+            recentExecutionIds.delete(id);
+        }
+    }
+}
+
+function trackExecutionId(executionId, timestamp = Date.now()) {
+    recentExecutionIds.set(executionId, timestamp);
+    lastProcessedExecutionId = executionId;
+    chrome.storage.local.set({ lastProcessedExecutionId: executionId, lastProcessedExecutionTimestamp: timestamp }, () => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+            console.warn('[iMacros SW] Failed to persist lastProcessedExecutionId:', chrome.runtime.lastError);
+        }
+    });
+}
+
+function restoreExecutionIdFromStorage() {
+    try {
+        chrome.storage.local.get(['lastProcessedExecutionId', 'lastProcessedExecutionTimestamp'], (result) => {
+            if (chrome.runtime && chrome.runtime.lastError) {
+                console.warn('[iMacros SW] Failed to restore lastProcessedExecutionId:', chrome.runtime.lastError);
+                return;
+            }
+            const storedId = result && result.lastProcessedExecutionId;
+            const storedTs = result && result.lastProcessedExecutionTimestamp;
+            if (storedId && typeof storedId === 'string' && storedId.trim()) {
+                const tsNumber = typeof storedTs === 'number' ? storedTs : Date.now();
+                lastProcessedExecutionId = storedId;
+                recentExecutionIds.set(storedId, tsNumber);
+                cleanupStaleExecutionIds();
+                if (recentExecutionIds.has(storedId)) {
+                    console.log('[iMacros SW] Restored lastProcessedExecutionId:', storedId);
+                } else {
+                    lastProcessedExecutionId = null;
+                }
+            }
+        });
+    } catch (error) {
+        console.warn('[iMacros SW] Failed to restore lastProcessedExecutionId:', error);
+    }
+}
+
+restoreExecutionIdFromStorage();
 
 function createRequestId() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -16,13 +65,15 @@ function createRequestId() {
 console.log('[iMacros SW] Instance ID:', SW_INSTANCE_ID);
 function resetPlaybackStateOnStartup() {
     try {
-        chrome.storage.local.set({ playing: false, currentMacro: null }, () => {
+        chrome.storage.local.set({ playing: false, currentMacro: null, lastProcessedExecutionId: null, lastProcessedExecutionTimestamp: null }, () => {
             if (chrome.runtime && chrome.runtime.lastError) {
                 console.warn('[iMacros SW] Failed to reset playback state on startup:', chrome.runtime.lastError);
             } else {
                 console.log('[iMacros SW] State reset on startup to prevent zombie execution.');
             }
         });
+        lastProcessedExecutionId = null;
+        recentExecutionIds.clear();
     } catch (error) {
         console.warn('[iMacros SW] Failed to reset playback state on startup:', error);
     }
@@ -2152,6 +2203,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.command === "playMacro") {
         const requestId = msg.requestId || createRequestId();
         const executionId = msg.executionId;
+        const isValidExecutionId = executionId && typeof executionId === 'string' && executionId.trim().length > 0;
         console.log("[iMacros SW] Play request for:", msg.file_path, {
             requestId,
             executionId,
@@ -2159,14 +2211,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             swInstanceId: SW_INSTANCE_ID
         });
 
-        if (executionId && executionId === lastProcessedExecutionId) {
+        if (isValidExecutionId) {
+            cleanupStaleExecutionIds();
+        }
+
+        if (isValidExecutionId && recentExecutionIds.has(executionId)) {
             console.warn(`[iMacros SW] Duplicate play request detected (ID: ${executionId}). Ignoring.`);
             sendResponse({ status: 'ignored', message: 'Duplicate request' });
             return true;
         }
 
-        if (executionId) {
-            lastProcessedExecutionId = executionId;
+        if (isValidExecutionId) {
+            trackExecutionId(executionId);
         }
 
         // win_idを取得（パネルウィンドウIDから親ウィンドウIDを解決）
