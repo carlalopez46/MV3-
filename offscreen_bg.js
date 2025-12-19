@@ -371,7 +371,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             };
 
             const readAndPlayFile = async (absolutePath, loops, win_id) => {
-                const node = await afio.openNode(absolutePath);
+                const node = afio.openNode(absolutePath);
                 const source = await afio.readTextFile(node);
                 console.log("[Offscreen] File read success. Playing...");
 
@@ -463,7 +463,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
             (async () => {
                 try {
-                    const node = await afio.openNode(filePath);
+                    const node = afio.openNode(filePath);
                     const source = await afio.readTextFile(node);
                     console.log("[Offscreen] File read for editor success");
 
@@ -691,14 +691,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
         // No macro playing, start fresh execution
         // Resolve and load the macro file
-        afio.getDefaultDir("savepath").then(async function (dir) {
+        afio.getDefaultDir("savepath").then(function (dir) {
             let fullPath = macroPath;
             if (!__is_full_path(macroPath)) {
                 dir.append(macroPath);
                 fullPath = dir.path;
             }
 
-            const node = await afio.openNode(fullPath);
+            const node = afio.openNode(fullPath);
             return node.exists().then(function (exists) {
                 if (!exists) {
                     throw new Error('Macro file not found: ' + fullPath);
@@ -876,24 +876,21 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
 
         if (request.type === 'SAVE_MACRO') {
+            if (sendResponse) {
+                sendResponse({ success: true, status: 'saving' });
+            }
             try {
                 save(request.macro, request.overwrite, function (result) {
-                    if (!sendResponse) {
-                        return;
-                    }
                     if (result && result.error) {
-                        sendResponse({ success: false, error: result.error });
+                        console.error("[Offscreen] Save completed with error:", result.error);
                     } else {
-                        sendResponse({ success: true, result: result });
+                        console.log("[Offscreen] Save completed:", result);
                     }
                 });
             } catch (err) {
                 console.error("Error saving macro:", err);
-                if (sendResponse) {
-                    sendResponse({ success: false, error: err.message || String(err) });
-                }
             }
-            return true;
+            return false;
         }
 
         // Handle GET_DIALOG_ARGS from background (forwarded from dialog window)
