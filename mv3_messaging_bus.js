@@ -7,7 +7,7 @@
     const DEFAULT_OPTIONS = {
         maxRetries: 3,
         backoffMs: 150,
-        ackTimeoutMs: 500
+        ackTimeoutMs: 10000
     };
 
     /**

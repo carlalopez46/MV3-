@@ -213,7 +213,7 @@ localStorageInitPromise.catch((err) => {
 const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
     maxRetries: 3,
     backoffMs: 150,
-    ackTimeoutMs: 500
+    ackTimeoutMs: 10000
 });
 
 const sessionStorage = chrome.storage ? chrome.storage.session : null;
