@@ -1,8 +1,38 @@
-/* global chrome */
+/* global chrome, sharedSave, globalScope */
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
 const LOCALSTORAGE_PREFIX = '__imacros_ls__:';
+const SW_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
+
+function createRequestId() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+    return `sw-${SW_INSTANCE_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+console.log('[iMacros SW] Instance ID:', SW_INSTANCE_ID);
+
+function isExtensionIframeSender(sender) {
+    const senderUrl = sender && typeof sender.url === 'string' ? sender.url : null;
+    if (!senderUrl) return false;
+    const extensionOrigin = chrome.runtime.getURL('');
+    const isExtensionPage = senderUrl.startsWith(extensionOrigin);
+    const frameId = sender && typeof sender.frameId === 'number' ? sender.frameId : null;
+    return isExtensionPage && frameId !== null && frameId !== 0;
+}
+
+function ignoreExtensionIframeSender(sender, sendResponse) {
+    if (!isExtensionIframeSender(sender)) {
+        return false;
+    }
+    console.log('[iMacros SW] Ignored message from extension iframe:', sender.url, 'frameId=', sender.frameId);
+    if (sendResponse) {
+        sendResponse({ ok: false, ignored: 'extension_iframe' });
+    }
+    return true;
+}
 
 // =============================================================================
 // LocalStorage Polyfill Helpers (shared logic to reduce duplication)
@@ -213,7 +243,7 @@ localStorageInitPromise.catch((err) => {
 const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
     maxRetries: 3,
     backoffMs: 150,
-    ackTimeoutMs: 500
+    ackTimeoutMs: 10000
 });
 
 const sessionStorage = chrome.storage ? chrome.storage.session : null;
@@ -693,7 +723,7 @@ async function executeClipboardWrite(tab, text, sendResponse) {
                 // Prefer modern clipboard API but fall back to execCommand when focus is an issue
                 return navigator.clipboard.writeText(textToWrite)
                     .then(() => ({ success: true }))
-                    .catch((err) => copyUsingExecCommand(textToWrite));
+                    .catch((_err) => copyUsingExecCommand(textToWrite));
             },
             args: [text]
         });
@@ -826,6 +856,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     const isValidTabId = (value) => Number.isInteger(value) && value >= 0;
     const isValidObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
+    if (ignoreExtensionIframeSender(sender, sendResponse)) {
+        return true;
+    }
 
     // Debug: Log all messages with command or type
     if (msg.command || msg.type) {
@@ -2100,7 +2133,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // --- 再生 (playMacro) ---
     if (msg.command === "playMacro") {
-        console.log("[iMacros SW] Play request for:", msg.file_path);
+        const requestId = msg.requestId || createRequestId();
+        console.log("[iMacros SW] Play request for:", msg.file_path, {
+            requestId,
+            win_id: msg.win_id,
+            swInstanceId: SW_INSTANCE_ID
+        });
 
         // win_idを取得（パネルウィンドウIDから親ウィンドウIDを解決）
         resolveTargetWindowId(msg.win_id, sender).then(win_id => {
@@ -2110,7 +2148,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 return;
             }
 
-            console.log("[iMacros SW] Resolved win_id:", win_id);
+            console.log("[iMacros SW] Resolved win_id:", win_id, { requestId, swInstanceId: SW_INSTANCE_ID });
             console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", msg.loop ?? 1, ")");
 
             // Offscreenにファイル読み込みと再生を依頼
@@ -2118,9 +2156,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 command: "CALL_CONTEXT_METHOD",
                 method: "playFile",
                 win_id: win_id,
-                args: [msg.file_path, msg.loop ?? 1]
+                args: [msg.file_path, msg.loop ?? 1],
+                requestId: requestId
             }).then(result => {
-                console.log("[iMacros SW] playFile result:", result);
+                console.log("[iMacros SW] playFile result:", result, { requestId, swInstanceId: SW_INSTANCE_ID });
                 // ACK応答 (ack: true, started: true) または従来の成功応答に対応
                 if (result && (result.ack === true || result.started === true)) {
                     // マクロ開始のACK - パネルに成功を通知
@@ -2318,6 +2357,9 @@ chrome.notifications.onClicked.addListener(function (n_id) {
 
 // Handle SET_DIALOG_RESULT - forward to offscreen
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (ignoreExtensionIframeSender(sender, sendResponse)) {
+        return true;
+    }
     if (msg.type === 'SET_DIALOG_RESULT') {
         console.log('[iMacros SW] Forwarding SET_DIALOG_RESULT for window:', msg.windowId);
         dialogCache.set(msg.windowId, Object.assign({}, dialogCache.get(msg.windowId), { result: msg.response }));
@@ -2556,6 +2598,9 @@ const FocusGuard = (() => {
 })();
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (ignoreExtensionIframeSender(sender, sendResponse)) {
+        return true;
+    }
     if (!msg || !msg.command || !msg.command.startsWith('FOCUS_GUARD')) return false;
 
     const respond = (payload) => {
@@ -2709,6 +2754,13 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
 
 // Handle the runMacroByUrl command in the message listener
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (isExtensionIframeSender(sender)) {
+        console.log('[iMacros SW] Ignored message from extension iframe:', sender.url, 'frameId=', sender.frameId);
+        if (sendResponse) {
+            sendResponse({ ok: false, ignored: 'extension_iframe' });
+        }
+        return true;
+    }
 
     if (msg.command === 'runMacroByUrl' && msg.target === 'background') {
         // Forward to offscreen document
