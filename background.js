@@ -14,6 +14,15 @@ function createRequestId() {
 
 console.log('[iMacros SW] Instance ID:', SW_INSTANCE_ID);
 
+function isExtensionIframeSender(sender) {
+    const senderUrl = sender && typeof sender.url === 'string' ? sender.url : null;
+    if (!senderUrl) return false;
+    const extensionOrigin = chrome.runtime.getURL('');
+    const isExtensionPage = senderUrl.startsWith(extensionOrigin);
+    const frameId = sender && typeof sender.frameId === 'number' ? sender.frameId : null;
+    return isExtensionPage && frameId !== null && frameId !== 0;
+}
+
 // =============================================================================
 // LocalStorage Polyfill Helpers (shared logic to reduce duplication)
 // =============================================================================
@@ -836,6 +845,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     const isValidTabId = (value) => Number.isInteger(value) && value >= 0;
     const isValidObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
+    if (isExtensionIframeSender(sender)) {
+        console.log('[iMacros SW] Ignored message from extension iframe:', sender.url, 'frameId=', sender.frameId);
+        if (sendResponse) {
+            sendResponse({ ok: false, ignored: 'extension_iframe' });
+        }
+        return true;
+    }
 
     // Debug: Log all messages with command or type
     if (msg.command || msg.type) {
@@ -2334,6 +2350,13 @@ chrome.notifications.onClicked.addListener(function (n_id) {
 
 // Handle SET_DIALOG_RESULT - forward to offscreen
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (isExtensionIframeSender(sender)) {
+        console.log('[iMacros SW] Ignored message from extension iframe:', sender.url, 'frameId=', sender.frameId);
+        if (sendResponse) {
+            sendResponse({ ok: false, ignored: 'extension_iframe' });
+        }
+        return true;
+    }
     if (msg.type === 'SET_DIALOG_RESULT') {
         console.log('[iMacros SW] Forwarding SET_DIALOG_RESULT for window:', msg.windowId);
         dialogCache.set(msg.windowId, Object.assign({}, dialogCache.get(msg.windowId), { result: msg.response }));
@@ -2572,6 +2595,13 @@ const FocusGuard = (() => {
 })();
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (isExtensionIframeSender(sender)) {
+        console.log('[iMacros SW] Ignored message from extension iframe:', sender.url, 'frameId=', sender.frameId);
+        if (sendResponse) {
+            sendResponse({ ok: false, ignored: 'extension_iframe' });
+        }
+        return true;
+    }
     if (!msg || !msg.command || !msg.command.startsWith('FOCUS_GUARD')) return false;
 
     const respond = (payload) => {
@@ -2725,6 +2755,13 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
 
 // Handle the runMacroByUrl command in the message listener
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (isExtensionIframeSender(sender)) {
+        console.log('[iMacros SW] Ignored message from extension iframe:', sender.url, 'frameId=', sender.frameId);
+        if (sendResponse) {
+            sendResponse({ ok: false, ignored: 'extension_iframe' });
+        }
+        return true;
+    }
 
     if (msg.command === 'runMacroByUrl' && msg.target === 'background') {
         // Forward to offscreen document
