@@ -150,6 +150,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         console.log('[iMacros Offscreen] Received message:', msgLabel, request);
     }
 
+    // ★重要: executeContextMethod を try ブロックの外で定義（スコープ問題の修正）
+    // この関数は editMacro と CALL_CONTEXT_METHOD の両方から呼び出されるため、
+    // メッセージリスナーのトップレベルで定義する必要がある
     function executeContextMethod(win_id, method, sendResponse, args, requestId) {
         if (method === "recorder.start") {
             console.log("[Offscreen] Starting recorder...");
@@ -299,10 +302,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 windowId: win_id,
                 offscreenInstanceId: OFFSCREEN_INSTANCE_ID
             });
-
+            // ★追加: パスからファイルを読んで再生する
             let filePath = args[0];
             const loops = Math.max(1, parseInt(args[1], 10) || 1);
             console.log("[Offscreen] Reading and playing file (original path):", filePath, { requestId: playRequestId });
+            if (Storage.getBool("debug"))
+                console.log("[Offscreen] Loop count:", loops, "(should be 1 for normal play, >1 for Play Loop)");
 
             const existingContext = context[win_id];
             if (existingContext && existingContext.mplayer && existingContext.mplayer.playing) {
@@ -380,8 +385,13 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     const absolutePath = await resolveAbsolutePath(filePath);
                     await readAndPlayFile(absolutePath, loops, win_id);
                     console.log("[Offscreen] Macro play completed successfully", { requestId: playRequestId });
+                    // 注: sendResponseは既に呼び出し済みのため、ここでは呼び出さない
+                    // マクロ完了の通知は状態変更メッセージを通じてUIに伝達される
                 } catch (err) {
                     console.error("[Offscreen] File read/play error:", err, { requestId: playRequestId });
+                    // ★重要: ファイル読み込みエラー時にUIへ通知
+                    // mplayer.play()が呼び出される前にエラーが発生した場合、
+                    // 状態変更コールバックが発火しないため、明示的にUIへ通知する
                     const errorMsg = err && err.message ? err.message : String(err);
                     if (typeof notifyPanelStatLine === 'function') {
                         notifyPanelStatLine(win_id, `Error: ${errorMsg}`, "error");
@@ -401,10 +411,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                             arg: ''
                         });
                     }
+                    // パネルの状態をリセットしてアイドル状態に戻す
                     if (typeof notifyPanel === 'function') {
                         notifyPanel(win_id, "UPDATE_PANEL_VIEWS", {});
                     }
-
                     playInFlight.delete(win_id);
                     console.log(`[Offscreen] playFile - Removed ${win_id} from playInFlight guard`, { requestId: playRequestId });
                 }
@@ -414,20 +424,27 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         } else if (method === "openEditor") {
             let filePath = args[0];
             filePath = filePath.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
+            console.log("[Offscreen] Cleaned path for editor:", filePath);
 
             if (sendResponse) {
                 sendResponse({ success: true, status: 'opening' });
             }
+            // NOTE: Completion/errors are logged asynchronously; caller should rely on UI/state updates.
 
             (async () => {
                 try {
                     const node = afio.openNode(filePath);
                     const source = await afio.readTextFile(node);
+                    console.log("[Offscreen] File read for editor success");
+
                     const macro = {
                         source: source,
                         name: node.leafName,
                         file_id: filePath
                     };
+
+                    // エディタを開く（edit関数を使用）
+                    console.log("[Offscreen] Calling edit() to open editor");
                     edit(macro, false, 0);
                 } catch (err) {
                     console.error("[Offscreen] File read for editor error:", err);
@@ -735,6 +752,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             return true;
         }
 
+        // ★追加: command形式のCALL_CONTEXT_METHOD処理
         if (request.command === 'CALL_CONTEXT_METHOD') {
             const win_id = request.win_id;
             const method = request.method;
@@ -879,526 +897,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     } catch (e) {
         console.error('[iMacros Offscreen] Error handling message:', e);
     }
-    if (sendResponse) sendResponse({ success: true });
-});
-        return true;
-    }
-
-    // Handle panel closed notification from Service Worker
-    if (request.command === 'panelClosed') {
-        const panelId = request.panelId;
-        // Clear panelId from all contexts that have this panel
-        for (let win_id in context) {
-            if (context[win_id] && context[win_id].panelId === panelId) {
-                console.log(`[iMacros Offscreen] Clearing panelId for window ${win_id}`);
-                delete context[win_id].panelId;
-                delete context[win_id].panelWindow;
-            }
-        }
-        if (sendResponse) sendResponse({ success: true });
-        return true;
-    }
-
-    // Handle download events from Service Worker and forward to mplayer
-    if (['DOWNLOAD_CREATED', 'DOWNLOAD_CHANGED'].includes(request.type)) {
-        // Use correlation win_id if available to route to specific MacroPlayer
-        const targetWinIds = request.win_id ? [request.win_id] : Object.keys(context);
-
-        for (let win_id of targetWinIds) {
-            win_id = parseInt(win_id);
-            if (context[win_id]) {
-                const mplayer = context[win_id].mplayer;
-
-                try {
-                    if (request.type === 'DOWNLOAD_CREATED') {
-                        if (mplayer && mplayer.onDownloadCreated) {
-                            mplayer.onDownloadCreated(request.downloadItem);
-                        }
-                    } else if (request.type === 'DOWNLOAD_CHANGED') {
-                        if (mplayer && mplayer.onDownloadChanged) {
-                            mplayer.onDownloadChanged(request.downloadDelta);
-                        }
-                    }
-                } catch (e) {
-                    console.error(`[iMacros Offscreen] Error handling ${request.type} for win_id ${win_id}:`, e);
-                }
-            }
-        }
-        if (sendResponse) sendResponse({ success: true });
-        return true;
-    }
-
-    // Handle tab events from Service Worker and forward to mplayer and recorder
-    if (['TAB_UPDATED', 'TAB_ACTIVATED', 'TAB_CREATED', 'TAB_REMOVED', 'TAB_MOVED', 'TAB_ATTACHED', 'TAB_DETACHED', 'WEB_NAVIGATION_ERROR', 'WEB_NAVIGATION_COMMITTED'].includes(request.type)) {
-        for (let win_id in context) {
-            if (context[win_id]) {
-                const mplayer = context[win_id].mplayer;
-                const recorder = context[win_id].recorder;
-                const req = request;
-
-                try {
-                    if (req.type === 'TAB_UPDATED') {
-                        if (mplayer && mplayer.onTabUpdated) mplayer.onTabUpdated(req.tabId, req.changeInfo, req.tab);
-                    } else if (req.type === 'TAB_ACTIVATED') {
-                        if (mplayer && mplayer.onTabActivated) mplayer.onTabActivated(req.activeInfo);
-                        if (recorder && recorder.onActivated) recorder.onActivated(req.activeInfo);
-                    } else if (req.type === 'TAB_CREATED') {
-                        if (recorder && recorder.onCreated) recorder.onCreated(req.tab);
-                    } else if (req.type === 'TAB_REMOVED') {
-                        if (recorder && recorder.onRemoved) recorder.onRemoved(req.tabId);
-                    } else if (req.type === 'TAB_MOVED') {
-                        if (recorder && recorder.onMoved) recorder.onMoved(req.tabId, req.moveInfo);
-                    } else if (req.type === 'TAB_ATTACHED') {
-                        if (recorder && recorder.onAttached) recorder.onAttached(req.tabId, req.attachInfo);
-                    } else if (req.type === 'TAB_DETACHED') {
-                        if (recorder && recorder.onDetached) recorder.onDetached(req.tabId, req.detachInfo);
-                    } else if (req.type === 'WEB_NAVIGATION_ERROR') {
-                        if (mplayer && mplayer.onNavigationErrorOccured) mplayer.onNavigationErrorOccured(req.details);
-                    } else if (req.type === 'WEB_NAVIGATION_COMMITTED') {
-                        if (recorder && recorder.onCommitted) recorder.onCommitted(req.details);
-                    }
-                } catch (e) {
-                    console.error(`[iMacros Offscreen] Error handling ${req.type} for win_id ${win_id}:`, e);
-                }
-            }
-        }
-        if (sendResponse) sendResponse({ success: true });
-        return true;
-    }
-
-    // Handle forwarded messages from Service Worker (e.g. from Content Scripts)
-    if (request.command === 'FORWARD_MESSAGE') {
-        const { topic, data, tab_id, win_id } = request;
-
-        // Check if communicator is available
-        if (typeof communicator !== 'undefined') {
-            const msg = { topic: topic, data: data };
-            // Manually execute handlers for this topic and window
-            if (communicator.handlers && communicator.handlers[topic]) {
-                communicator._execHandlers(msg, tab_id, win_id, sendResponse);
-            } else {
-                console.debug('[iMacros Offscreen] No handler for forwarded message:', topic);
-                // Return state: 'idle' to satisfy CSRecorder.onQueryStateCompleted
-                if (sendResponse) sendResponse({
-                    success: true, // ACKNOWLEDGE the message to stop retries, even if not handled
-                    state: 'idle',
-                    error: 'No handler found',
-                    notHandled: true
-                });
-            }
-        } else {
-            // Communicator not ready
-            if (sendResponse) sendResponse({
-                success: false,
-                state: 'idle',
-                error: 'Communicator not available'
-            });
-        }
-        return true;
-    }
-
-    // Handle imacros:// URL scheme - run macro by URL
-    if (request.command === 'runMacroByUrl') {
-        const macroPath = request.macroPath;
-        const windowId = request.windowId;
-        const requestId = request.requestId || createRequestId();
-
-        console.log('[iMacros Offscreen] runMacroByUrl:', macroPath, {
-            requestId,
-            windowId,
-            offscreenInstanceId: OFFSCREEN_INSTANCE_ID
-        });
-
-        // ★重要: 競合状態を防ぐためのガード
-        // playInFlight をチェックして重複実行を防止
-        if (playInFlight.has(windowId)) {
-            console.warn(`[iMacros Offscreen] runMacroByUrl - Ignoring duplicate request, already in flight for window ${windowId}`);
-            if (sendResponse) sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
-            return true;
-        }
-
-        // Ensure context exists for this window
-        if (!context[windowId]) {
-            context[windowId] = {};
-        }
-
-        // Check if there's already an active mplayer
-        if (context[windowId].mplayer && context[windowId].mplayer.playing) {
-            // Macro is already playing, queue this one by using the RUN command internally
-            console.log('[iMacros Offscreen] Macro already playing, using RUN command to chain');
-            const mplayer = context[windowId].mplayer;
-            // Create a synthetic RUN action
-            const runCmd = [null, '"' + macroPath + '"'];
-            try {
-                mplayer._ActionTable["run"](runCmd);
-                if (sendResponse) sendResponse({ success: true, message: 'Macro queued via RUN command' });
-            } catch (e) {
-                console.error('[iMacros Offscreen] Error queueing macro:', e);
-                if (sendResponse) sendResponse({ success: false, error: e.message });
-            }
-            return true;
-        }
-
-        // ★重要: ガードを設定してから非同期処理を開始
-        playInFlight.add(windowId);
-        console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
-
-        if (sendResponse) {
-            sendResponse({ success: true, status: 'started' });
-        }
-        // NOTE: Completion/errors are logged asynchronously; caller should rely on macro state updates.
-
-        // No macro playing, start fresh execution
-        // Resolve and load the macro file
-        afio.getDefaultDir("savepath").then(function (dir) {
-            let fullPath = macroPath;
-            if (!__is_full_path(macroPath)) {
-                dir.append(macroPath);
-                fullPath = dir.path;
-            }
-
-            const node = afio.openNode(fullPath);
-            return node.exists().then(function (exists) {
-                if (!exists) {
-                    throw new Error('Macro file not found: ' + fullPath);
-                }
-                return afio.readTextFile(node).then(function (source) {
-                    // Create macro object
-                    const macro = {
-                        name: node.leafName || macroPath,
-                        source: source,
-                        file_id: fullPath,
-                        times: 1,
-                        startLoop: 1
-                    };
-
-                    // Get or create mplayer
-                    if (!context[windowId].mplayer) {
-                        context[windowId].mplayer = new MacroPlayer(windowId);
-                    }
-
-                    const mplayer = context[windowId].mplayer;
-                    const limits = { maxVariables: 'unlimited', loops: 'unlimited' };
-
-                    // Play the macro
-                    mplayer.play(macro, limits, function () {
-                        console.log('[iMacros Offscreen] Macro execution completed:', macroPath, { requestId });
-                        // ★重要: 実行完了後にガードをクリア
-                        playInFlight.delete(windowId);
-                        console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (completed)`, { requestId });
-                    });
-                });
-            });
-        }).catch(function (e) {
-            console.error('[iMacros Offscreen] Error loading macro:', e, { requestId });
-            // ★重要: エラー時もガードをクリア
-            playInFlight.delete(windowId);
-            console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (error)`, { requestId });
-        });
-
-        return false;
-    }
-
-    if (request.command === 'reinitFileSystem') {
-        if (typeof afio !== 'undefined' && afio.reinitFileSystem) {
-            afio.reinitFileSystem().then(() => {
-                console.log('[iMacros Offscreen] FileSystemAccessService re-initialized');
-                sendResponse({ success: true });
-            }).catch(err => {
-                console.error('[iMacros Offscreen] Failed to re-init FS:', err);
-                sendResponse({ success: false, error: err.message });
-            });
-        } else {
-            sendResponse({ success: false, error: 'afio or reinitFileSystem not available' });
-        }
-        return true;
-    }
-
-    // --- Handlers for panel.js commands ---
-    // NOTE: The following commands are now handled exclusively by Service Worker (background.js)
-    // which transforms them to CALL_CONTEXT_METHOD. This prevents double execution when
-    // messages are broadcast to both SW and Offscreen Document.
-    // ★CRITICAL: Explicitly skip these commands to prevent double execution!
-    if (['playMacro', 'startRecording', 'stop', 'pause', 'unpause', 'editMacro'].includes(request.command)) {
-        console.log(`[Offscreen] Skipping command '${request.command}' - handled by Service Worker`);
-        // Do NOT send response - let Service Worker handle it
-        return;
-    }
-
-    // --- End panel.js handlers ---
-
-    if (request.command === 'EVAL_REQUEST') {
-        pendingEvalRequests.set(request.requestId, sendResponse);
-        const frame = document.getElementById('eval_sandbox');
-        if (frame && frame.contentWindow) {
-            frame.contentWindow.postMessage(request, '*');
-        } else {
-            pendingEvalRequests.delete(request.requestId);
-            sendResponse({ success: false, error: "Sandbox frame not found" });
-        }
-        return true; // Keep channel open
-    }
-
-    try {
-        // Handle panel.js message types
-        if (request.type === 'CALL_BG_FUNCTION') {
-            const functionName = request.functionName;
-            const args = request.args || [];
-
-            try {
-                // Call the global function by name
-                if (typeof window[functionName] === 'function') {
-                    const result = window[functionName](...args);
-
-                    // Check if result is a Promise
-                    if (result && typeof result.then === 'function') {
-                        result.then(value => {
-                            sendResponse({ success: true, result: value });
-                        }).catch(err => {
-                            sendResponse({ success: false, error: err.message || String(err) });
-                        });
-                    } else {
-                        sendResponse({ success: true, result: result });
-                    }
-                } else {
-                    sendResponse({ success: false, error: `Function ${functionName} not found` });
-                }
-            } catch (err) {
-                sendResponse({ success: false, error: err.message || String(err) });
-            }
-            return true; // Always keep channel open for async response
-        }
-
-        if (request.type === 'CALL_CONTEXT_METHOD') {
-            const win_id = request.win_id;
-            const objectPath = request.objectPath;
-            const methodName = request.methodName;
-            const args = request.args || [];
-
-            try {
-                if (!context[win_id]) {
-                    sendResponse({ success: false, error: `Context not found for window ${win_id}` });
-                    return true;
-                }
-
-                const obj = context[win_id][objectPath];
-                if (!obj) {
-                    sendResponse({ success: false, error: `Object ${objectPath} not found in context` });
-                    return true;
-                }
-
-                if (typeof obj[methodName] !== 'function') {
-                    sendResponse({ success: false, error: `Method ${methodName} not found on ${objectPath}` });
-                    return true;
-                }
-
-                const result = obj[methodName](...args);
-
-                // Check if result is a Promise
-                if (result && typeof result.then === 'function') {
-                    result.then(value => {
-                        sendResponse({ success: true, result: value });
-                    }).catch(err => {
-                        sendResponse({ success: false, error: err.message || String(err) });
-                    });
-                } else {
-                    sendResponse({ success: true, result: result });
-                }
-            } catch (err) {
-                sendResponse({ success: false, error: err.message || String(err) });
-            }
-            return true; // Always keep channel open for async response
-        }
-
-        // ★追加: command形式のCALL_CONTEXT_METHOD処理
-        if (request.command === 'CALL_CONTEXT_METHOD') {
-            const win_id = request.win_id;
-            const method = request.method; // 例: "recorder.start" または "stop"
-
-            console.log(`[Offscreen] CALL_CONTEXT_METHOD: ${method} for window ${win_id}`);
-
-            try {
-                if (!context[win_id]) {
-                    context.init(win_id).then(() => {
-                        executeContextMethod(win_id, method, sendResponse, request.args, request.requestId);
-                    }).catch(err => {
-                        sendResponse({ success: false, error: `Failed to initialize context: ${err.message || String(err)}` });
-                    });
-                    return true;
-                }
-
-                executeContextMethod(win_id, method, sendResponse, request.args, request.requestId);
-            } catch (err) {
-                sendResponse({ success: false, error: err.message || String(err) });
-            }
-            return true;
-        }
-
-        if (request.type === 'SAVE_MACRO') {
-            if (sendResponse) {
-                sendResponse({ success: true, status: 'saving' });
-            }
-            // NOTE: Save completion/errors are logged asynchronously; caller should rely on UI/state updates.
-            try {
-                save(request.macro, request.overwrite, function (result) {
-                    if (result && result.error) {
-                        console.error("[Offscreen] Save completed with error:", result.error);
-                    } else {
-                        console.log("[Offscreen] Save completed:", result);
-                    }
-                });
-            } catch (err) {
-                console.error("Error saving macro:", err);
-            }
-            return false;
-        }
-
-        // Handle GET_DIALOG_ARGS from background (forwarded from dialog window)
-        if (request.type === 'GET_DIALOG_ARGS') {
-            const winId = parseInt(request.windowId, 10);
-            if (!Number.isInteger(winId) || winId <= 0) {
-                console.error("[Offscreen] Invalid windowId for GET_DIALOG_ARGS:", request.windowId);
-                sendResponse({ success: false, error: "Invalid windowId" });
-                return true;
-            }
-
-            // Function to attempt retrieving args with retries
-            const tryGetArgs = (attemptsLeft) => {
-                if (typeof dialogUtils === 'undefined') {
-                    console.error("[Offscreen] dialogUtils is undefined (utils.js not loaded?)");
-                    sendResponse({ success: false, error: "dialogUtils undefined" });
-                    return;
-                }
-                try {
-                    const args = dialogUtils.getDialogArgs(winId);
-                    sendResponse({ success: true, args: args });
-                } catch (e) {
-                    if (attemptsLeft > 0) {
-                        // Retry after a short delay (race condition handling)
-                        console.log(`[Offscreen] waiting for dialog args (winId: ${winId}), attempts left: ${attemptsLeft}`);
-                        setTimeout(() => tryGetArgs(attemptsLeft - 1), 200);
-                    } else {
-                        console.error("[Offscreen] GET_DIALOG_ARGS error after retries:", e);
-                        sendResponse({ success: false, error: e.message });
-                    }
-                }
-            };
-
-            tryGetArgs(30); // Try for ~6 seconds
-            return true;
-        }
-
-        // Handle SET_DIALOG_RESULT from background (forwarded from dialog window)
-        if (request.type === 'SET_DIALOG_RESULT') {
-            try {
-                if (typeof dialogUtils === 'undefined') {
-                    console.error("[Offscreen] dialogUtils is undefined (utils.js not loaded?)");
-                    sendResponse({ success: false, error: "dialogUtils undefined" });
-                    return true;
-                }
-                const winId = parseInt(request.windowId, 10);
-                if (!Number.isInteger(winId) || winId <= 0) {
-                    console.error("[Offscreen] Invalid windowId for SET_DIALOG_RESULT:", request.windowId);
-                    sendResponse({ success: false, error: "Invalid windowId" });
-                    return true;
-                }
-                dialogUtils.setDialogResult(winId, request.response);
-                sendResponse({ success: true });
-            } catch (e) {
-                console.error("[Offscreen] SET_DIALOG_RESULT error:", e);
-                sendResponse({ success: false, error: e.message });
-            }
-            return true;
-        }
-
-        if (request.type === 'GET_RECORDER_STATE') {
-            const win_id = request.win_id;
-            try {
-                if (!context[win_id] || !context[win_id].recorder) {
-                    sendResponse({ success: false, error: `Recorder not found for window ${win_id}` });
-                    return true;
-                }
-
-                const recorder = context[win_id].recorder;
-                sendResponse({
-                    success: true,
-                    recording: recorder.recording || false,
-                    actions: recorder.actions || []
-                });
-            } catch (err) {
-                sendResponse({ success: false, error: err.message || String(err) });
-            }
-            return true;
-        }
-
-        // ★FIX: Handle EXTRACT dialog close notification from extractDialog.js
-        if (request.command === 'EXTRACT_DIALOG_CLOSED') {
-            // Coerce to number to handle stringified IDs from messaging
-            const win_id = parseInt(request.win_id, 10);
-
-            // Validate win_id
-            if (isNaN(win_id) || win_id <= 0) {
-                console.error('[Offscreen] Invalid win_id for EXTRACT_DIALOG_CLOSED:', request.win_id);
-                sendResponse({ success: false, error: 'Invalid win_id' });
-                return true;
-            }
-
-            console.log('[Offscreen] Extract dialog closed for window:', win_id);
-
-            try {
-                if (context[win_id] && context[win_id].mplayer) {
-                    const mplayer = context[win_id].mplayer;
-
-                    // Verify that next is a function before calling
-                    if (typeof mplayer.next !== 'function') {
-                        console.error('[Offscreen] mplayer.next is not a function for window:', win_id);
-                        sendResponse({ success: false, error: 'mplayer.next not available' });
-                        return true;
-                    }
-
-                    // Resume macro execution if waiting for extract dialog
-                    if (mplayer.waitingForExtract) {
-                        mplayer.waitingForExtract = false;
-                        mplayer.next("extractDialog");
-                        sendResponse({ success: true });
-                    } else {
-                        // Dialog closed but macro wasn't waiting (manual close)
-                        sendResponse({ success: true });
-                    }
-                } else {
-                    console.warn('[Offscreen] Cannot find mplayer for window:', win_id);
-                    sendResponse({ success: false, error: 'mplayer not found' });
-                }
-            } catch (err) {
-                console.error('[Offscreen] Error handling EXTRACT_DIALOG_CLOSED:', err);
-                sendResponse({ success: false, error: err.message || String(err) });
-            }
-            return true;
-        }
-
-        switch (request.command) {
-            case 'actionClicked':
-                handleActionClicked(request.tab);
-                break;
-
-            case 'notificationClicked':
-                var n_id = request.notificationId;
-                var w_id = parseInt(n_id);
-                if (isNaN(w_id) || !context[w_id] || !context[w_id].info_args)
-                    break;
-                var info = context[w_id].info_args;
-                if (info.errorCode == 1)
-                    break;    // we have plain Info message; nothing to do
-
-                // for error messages since we have only one 'button'
-                // we most probably want look at macro code,
-                edit(info.macro, true);
-                break;
-        }
-    } catch (e) {
-        console.error('[iMacros Offscreen] Error handling message:', e);
-    }
-
     if (sendResponse) sendResponse({ success: true });
 });
 

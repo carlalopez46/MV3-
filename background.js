@@ -1,4 +1,4 @@
-/* global chrome */
+/* global chrome, sharedSave, globalScope */
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
@@ -712,7 +712,7 @@ async function executeClipboardWrite(tab, text, sendResponse) {
                 // Prefer modern clipboard API but fall back to execCommand when focus is an issue
                 return navigator.clipboard.writeText(textToWrite)
                     .then(() => ({ success: true }))
-                    .catch((err) => copyUsingExecCommand(textToWrite));
+                    .catch((_err) => copyUsingExecCommand(textToWrite));
             },
             args: [text]
         });
