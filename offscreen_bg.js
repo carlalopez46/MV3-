@@ -467,11 +467,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 } catch (err) {
                     console.error("[Offscreen] File read for editor error:", err);
                     const errorMsg = err && err.message ? err.message : String(err);
-                    if (typeof notifyPanelStatLine === 'function') {
-                        notifyPanelStatLine(win_id, `Error opening editor: ${errorMsg}`, "error");
-                    } else {
-                        showNotification(win_id, { errorCode: 0, message: "Error opening editor: " + errorMsg });
-                    }
+                    notifyAsyncError(win_id, `Error opening editor: ${errorMsg}`);
                 }
             })();
             return false;
@@ -715,11 +711,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             // ★重要: エラー時もガードをクリア
             playInFlight.delete(windowId);
             const errorMsg = e && e.message ? e.message : String(e);
-            if (typeof notifyPanelStatLine === 'function') {
-                notifyPanelStatLine(windowId, `Error loading macro: ${errorMsg}`, "error");
-            } else {
-                showNotification(windowId, { errorCode: 0, message: "Error loading macro: " + errorMsg });
-            }
+            notifyAsyncError(windowId, `Error loading macro: ${errorMsg}`);
             console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (error)`, { requestId });
         });
 

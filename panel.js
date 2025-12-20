@@ -190,18 +190,7 @@ function play() {
         executionId: executionId
     })
         .then((response) => {
-            if (!response) {
-                console.warn("[Panel] Playback did not return a response");
-                updatePanelState("idle");
-                return;
-            }
-            if (response.success === false) {
-                console.warn("[Panel] Playback failed to start", response);
-                const el = ensureStatusLineElement();
-                el.textContent = response.error || "Failed to start playback.";
-                el.style.color = "#b00020";
-                updatePanelState("idle");
-            }
+            handlePlayStartResponse(response, "Failed to start playback.", "Playback did not return a response");
         });
 }
 
@@ -287,19 +276,23 @@ function playLoop() {
         executionId: executionId
     })
         .then((response) => {
-            if (!response) {
-                console.warn("[Panel] Loop playback did not return a response");
-                updatePanelState("idle");
-                return;
-            }
-            if (response.success === false) {
-                console.warn("[Panel] Loop playback failed to start", response);
-                const el = ensureStatusLineElement();
-                el.textContent = response.error || "Failed to start loop playback.";
-                el.style.color = "#b00020";
-                updatePanelState("idle");
-            }
+            handlePlayStartResponse(response, "Failed to start loop playback.", "Loop playback did not return a response");
         });
+}
+
+function handlePlayStartResponse(response, failureMessage, noResponseLog) {
+    if (!response) {
+        console.warn(`[Panel] ${noResponseLog}`);
+        updatePanelState("idle");
+        return;
+    }
+    if (response.success === false) {
+        console.warn("[Panel] Playback failed to start", response);
+        const el = ensureStatusLineElement();
+        el.textContent = response.error || failureMessage;
+        el.style.color = "#b00020";
+        updatePanelState("idle");
+    }
 }
 
 function openSettings() {
