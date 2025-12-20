@@ -642,9 +642,25 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             const runCmd = [null, '"' + macroPath + '"'];
             try {
                 mplayer._ActionTable["run"](runCmd);
-                if (sendResponse) sendResponse({ success: true, message: 'Macro queued via RUN command' });
+                if (sendResponse) {
+                    sendResponse({
+                        ack: true,
+                        success: true,
+                        queued: true,
+                        requestId: requestId,
+                        status: 'queued',
+                        message: 'Macro queued via RUN command'
+                    });
+                }
             } catch (e) {
-                if (sendResponse) sendResponse({ success: false, error: e.message });
+                if (sendResponse) {
+                    sendResponse({
+                        ack: false,
+                        success: false,
+                        error: e.message,
+                        requestId: requestId
+                    });
+                }
             }
             return true;
         }
