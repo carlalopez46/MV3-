@@ -98,7 +98,7 @@ function sendCommand(command, payload = {}) {
         if (currentWindowId === null) {
             console.warn(`[Panel] Skipping command ${command}: window ID unavailable`);
             handleMissingWindowId("Unable to determine window context. Command not sent.");
-            return undefined;
+            return Promise.reject(new Error("Window ID unavailable"));
         }
         // 自動的にウィンドウIDを追加
         const message = {
@@ -108,13 +108,12 @@ function sendCommand(command, payload = {}) {
             win_id: payload.win_id || currentWindowId
         };
         console.log(`[Panel] Sending command: ${command}`, message);
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             try {
                 chrome.runtime.sendMessage(message, (response) => {
                     if (chrome.runtime.lastError) {
                         console.error("[Panel] Message error:", chrome.runtime.lastError);
-                        // 通信エラーは無視してよい場合が多い
-                        resolve();
+                        reject(chrome.runtime.lastError);
                     } else {
                         console.log(`[Panel] Command ${command} response:`, response);
                         resolve(response);
@@ -122,7 +121,7 @@ function sendCommand(command, payload = {}) {
                 });
             } catch (e) {
                 console.error("[Panel] Failed to send message:", e);
-                resolve();
+                reject(e);
             }
         });
     });
@@ -200,6 +199,10 @@ function play() {
                 "Playback did not return a response",
                 "Playback failed to start"
             );
+        })
+        .catch((error) => {
+            console.error("[Panel] Play command failed:", error);
+            updatePanelState("idle");
         });
 }
 
@@ -222,7 +225,10 @@ function record() {
     }
     // UIを即時更新してストップボタンを有効化
     updatePanelState({ isRecording: true, isPlaying: false, currentMacro: selectedMacro });
-    sendCommand("startRecording");
+    sendCommand("startRecording").catch((error) => {
+        console.error("[Panel] Record command failed:", error);
+        updatePanelState("idle");
+    });
 }
 
 function stop() {
@@ -247,7 +253,9 @@ function pause() {
         console.log("[Panel] Ignoring pause request - not playing");
         return;
     }
-    sendCommand("pause");
+    sendCommand("pause").catch((error) => {
+        console.error("[Panel] Pause command failed:", error);
+    });
 }
 
 function playLoop() {
@@ -299,6 +307,10 @@ function playLoop() {
                 "Loop playback did not return a response",
                 "Loop playback failed to start"
             );
+        })
+        .catch((error) => {
+            console.error("[Panel] Loop playback command failed:", error);
+            updatePanelState("idle");
         });
 }
 
@@ -356,6 +368,8 @@ function edit() {
     sendCommand("editMacro", {
         file_path: filePath,
         macro_name: macroName
+    }).catch((error) => {
+        console.error("[Panel] Edit command failed:", error);
     });
 }
 
@@ -379,6 +393,8 @@ function openInfoEdit() {
     sendCommand("editMacro", {
         file_path: filePath,
         macro_name: macroName
+    }).catch((error) => {
+        console.error("[Panel] Info edit command failed:", error);
     });
 }
 
@@ -671,192 +687,205 @@ function handlePanelHighlightLine(data) {
 
 if (isTopFrame) {
     window.addEventListener("message", (event) => {
-    // fileView.js (iframe) からの通知を受け取る
-    const treeFrame = document.getElementById("tree-iframe");
-    const allowedSource = treeFrame ? treeFrame.contentWindow : null;
-    if (event.origin !== window.location.origin || !event.data || typeof event.data !== "object") {
-        return;
-    }
-    // Reject if iframe not found or source doesn't match
-    if (!allowedSource) {
-        console.warn("[Panel] tree-iframe not ready yet, ignoring message from", event.origin);
-        return;
-    }
-    if (event.source !== allowedSource) {
-        console.warn("[Panel] Message from unexpected source");
-        return;
-    }
-    if (event.data.type === "iMacrosSelectionChanged") {
-        onSelectionChanged(event.data.node);
-    }
-    if (event.data.type === "playMacro") {
-        play();
-    }
+        // fileView.js (iframe) からの通知を受け取る
+        const treeFrame = document.getElementById("tree-iframe");
+        const allowedSource = treeFrame ? treeFrame.contentWindow : null;
+        if (event.origin !== window.location.origin || !event.data || typeof event.data !== "object") {
+            return;
+        }
+        // Reject if iframe not found or source doesn't match
+        if (!allowedSource) {
+            console.warn("[Panel] tree-iframe not ready yet, ignoring message from", event.origin);
+            return;
+        }
+        if (event.source !== allowedSource) {
+            console.warn("[Panel] Message from unexpected source");
+            return;
+        }
+        if (event.data.type === "iMacrosSelectionChanged") {
+            onSelectionChanged(event.data.node);
+        }
+        if (event.data.type === "playMacro") {
+            play();
+        }
     });
 
-// --- Extension Reload Detection ---
-// Establish a long-lived connection to detect when the extension context is invalidated (reloaded/updated)
-// --- Extension Reload/Lifecycle Detection ---
-// Maintain a connection to keep SW alive and detect when extension is reloaded.
-let lifeCyclePort = null;
+    // --- Extension Reload Detection ---
+    // Establish a long-lived connection to detect when the extension context is invalidated (reloaded/updated)
+    // --- Extension Reload/Lifecycle Detection ---
+    // Maintain a connection to keep SW alive and detect when extension is reloaded.
+    let lifeCyclePort = null;
 
-function connectToLifecycle() {
-    try {
-        lifeCyclePort = chrome.runtime.connect({ name: "panel-lifecycle" });
-        lifeCyclePort.onDisconnect.addListener(() => {
-            console.log("[Panel] Lifecycle port disconnected. Checking extension status...");
-            lifeCyclePort = null;
+    function connectToLifecycle() {
+        try {
+            lifeCyclePort = chrome.runtime.connect({ name: "panel-lifecycle" });
+            lifeCyclePort.onDisconnect.addListener(() => {
+                console.log("[Panel] Lifecycle port disconnected. Checking extension status...");
+                lifeCyclePort = null;
 
-            if (chrome.runtime.lastError) {
-                console.warn("[Panel] Port disconnected due to error:", chrome.runtime.lastError.message);
-            }
+                if (chrome.runtime.lastError) {
+                    console.warn("[Panel] Port disconnected due to error:", chrome.runtime.lastError.message);
+                }
 
-            // Attempt to ping the runtime to see if it's still valid
-            try {
-                chrome.runtime.sendMessage({ keepAlive: true }, (response) => {
-                    if (chrome.runtime.lastError) {
-                        // Runtime error -> Extension likely reloaded or context invalidated
-                        console.log("[Panel] Extension context appears invalid (ping failed). Reloading panel...");
-                        // Short delay to ensure the new context is ready
-                        setTimeout(() => window.location.reload(), 500);
-                    } else {
-                        // Response received -> SW just terminated, extension is still alive
-                        console.log("[Panel] Service Worker terminated (idle), reconnecting...");
-                        connectToLifecycle();
-                    }
-                });
-            } catch (e) {
-                // accessing chrome.runtime might throw if context is completely gone
-                console.log("[Panel] Extension context invalidated (exception). Reloading panel...");
-                setTimeout(() => window.location.reload(), 500);
-            }
-        });
-    } catch (e) {
-        console.error("[Panel] Failed to connect to background:", e);
+                // Attempt to ping the runtime to see if it's still valid
+                let pingHandled = false;
+                const pingTimeout = setTimeout(() => {
+                    if (pingHandled) return;
+                    pingHandled = true;
+                    console.log("[Panel] Extension context appears invalid (ping timeout). Reloading panel...");
+                    window.location.reload();
+                }, 1000);
+
+                try {
+                    chrome.runtime.sendMessage({ keepAlive: true }, () => {
+                        if (pingHandled) return;
+                        pingHandled = true;
+                        clearTimeout(pingTimeout);
+                        if (chrome.runtime.lastError) {
+                            console.log("[Panel] Extension context appears invalid (ping failed). Reloading panel...");
+                            setTimeout(() => window.location.reload(), 500);
+                        } else {
+                            console.log("[Panel] Service Worker terminated (idle), reconnecting...");
+                            connectToLifecycle();
+                        }
+                    });
+                } catch (e) {
+                    clearTimeout(pingTimeout);
+                    console.log("[Panel] Extension context invalidated (exception). Reloading panel...");
+                    setTimeout(() => window.location.reload(), 500);
+                }
+            });
+        } catch (e) {
+            console.error("[Panel] Failed to connect to background:", e);
+        }
     }
-}
 
     connectToLifecycle();
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.target === 'panel' && message.type === 'PANEL_STATE_UPDATE') {
-        if (message.state) updatePanelState(message.state);
-    }
-    if (message.type === "updatePanel") {
-        updatePanelState(message.state);
-    }
-    if (message.type === "macroStopped") {
-        updatePanelState("idle");
-    }
-    if (message.type === "UPDATE_PANEL_VIEWS") {
-        refreshTreeView();
-        sendResponse({ success: true });
-        return true;
-    }
+        if (message.target === 'panel' && message.type === 'PANEL_STATE_UPDATE') {
+            if (message.state) updatePanelState(message.state);
+        }
+        if (message.type === "updatePanel") {
+            updatePanelState(message.state);
+        }
+        if (message.type === "macroStopped") {
+            updatePanelState("idle");
+        }
+        if (message.type === "UPDATE_PANEL_VIEWS") {
+            refreshTreeView();
+            sendResponse({ success: true });
+            return true;
+        }
 
-    if (message.type === "PANEL_SHOW_INFO") {
-        handlePanelShowInfo(message.data && message.data.args);
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
+        if (message.type === "PANEL_SHOW_INFO") {
+            handlePanelShowInfo(message.data && message.data.args);
+            sendResponse && sendResponse({ success: true });
+            return true;
+        }
 
-    if (message.type === "PANEL_SHOW_LINES") {
-        handlePanelShowLines(message.data);
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
+        if (message.type === "PANEL_SHOW_LINES") {
+            handlePanelShowLines(message.data);
+            sendResponse && sendResponse({ success: true });
+            return true;
+        }
 
-    if (message.type === "PANEL_SET_STAT_LINE") {
-        handlePanelSetStatLine(message.data);
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
+        if (message.type === "PANEL_SET_STAT_LINE") {
+            handlePanelSetStatLine(message.data);
+            sendResponse && sendResponse({ success: true });
+            return true;
+        }
 
-    if (message.type === "PANEL_SET_LOOP_VALUE") {
-        handlePanelSetLoopValue(message.data);
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
+        if (message.type === "PANEL_SET_LOOP_VALUE") {
+            handlePanelSetLoopValue(message.data);
+            sendResponse && sendResponse({ success: true });
+            return true;
+        }
 
-    if (message.type === "PANEL_HIGHLIGHT_LINE") {
-        handlePanelHighlightLine(message.data);
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
+        if (message.type === "PANEL_HIGHLIGHT_LINE") {
+            handlePanelHighlightLine(message.data);
+            sendResponse && sendResponse({ success: true });
+            return true;
+        }
     });
 
     document.addEventListener("DOMContentLoaded", () => {
-    console.log("[Panel] DOMContentLoaded");
+        console.log("[Panel] DOMContentLoaded");
 
-    // ウィンドウIDを初期化
-    windowIdReadyPromise = initWindowId();
+        // ウィンドウIDを初期化
+        windowIdReadyPromise = initWindowId();
 
-    // イベントリスナーの登録
-    const addListener = (id, handler) => {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener("click", handler);
-    };
+        // イベントリスナーの登録
+        const addListener = (id, handler) => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener("click", handler);
+        };
 
-    addListener("play-button", play);
-    addListener("record-button", record);
-    addListener("stop-replaying-button", stop);
-    addListener("stop-recording-button", stop);
-    addListener("pause-button", pause);
-    addListener("loop-button", playLoop);
-    addListener("settings-button", openSettings);
-    addListener("edit-button", edit);
-    addListener("help-button", openHelp);
-    addListener("info-help-button", openErrorHelp);
-    addListener("info-edit-button", openInfoEdit);
-    addListener("info-close-button", closeInfoPanel);
+        addListener("play-button", play);
+        addListener("record-button", record);
+        addListener("stop-replaying-button", stop);
+        addListener("stop-recording-button", stop);
+        addListener("pause-button", pause);
+        addListener("loop-button", playLoop);
+        addListener("settings-button", openSettings);
+        addListener("edit-button", edit);
+        addListener("help-button", openHelp);
+        addListener("info-help-button", openErrorHelp);
+        addListener("info-edit-button", openInfoEdit);
+        addListener("info-close-button", closeInfoPanel);
 
-    requestStateUpdate();
+        requestStateUpdate();
 
-    const filesRadio = document.getElementById("radio-files-tree");
-    const bookmarksRadio = document.getElementById("radio-bookmarks-tree");
+        const filesRadio = document.getElementById("radio-files-tree");
+        const bookmarksRadio = document.getElementById("radio-bookmarks-tree");
 
-    if (filesRadio) {
-        filesRadio.addEventListener("change", async () => {
-            if (!filesRadio.checked) return;
-            try {
-                const installed = await afio.isInstalled();
-                if (!installed) {
-                    alert("File access module is not installed. Switching to Bookmarks view.");
+        if (filesRadio) {
+            filesRadio.addEventListener("change", async () => {
+                if (!filesRadio.checked) return;
+                try {
+                    const installed = await afio.isInstalled();
+                    if (!installed) {
+                        alert("File access module is not installed. Switching to Bookmarks view.");
+                        applyTreeSelection("bookmarks", { persist: true, forceReload: true });
+                        return;
+                    }
+                    applyTreeSelection("files", { persist: true });
+                } catch (e) {
+                    console.error("[Panel] Failed to switch to files tree", e);
                     applyTreeSelection("bookmarks", { persist: true, forceReload: true });
-                    return;
                 }
-                applyTreeSelection("files", { persist: true });
-            } catch (e) {
-                console.error("[Panel] Failed to switch to files tree", e);
-                applyTreeSelection("bookmarks", { persist: true, forceReload: true });
+            });
+        }
+
+        if (bookmarksRadio) {
+            bookmarksRadio.addEventListener("change", () => {
+                if (!bookmarksRadio.checked) return;
+                applyTreeSelection("bookmarks", { persist: true });
+            });
+        }
+
+        // 右クリックはボタンに限定して無効化（一般操作は維持）
+        document.body.addEventListener("contextmenu", (event) => {
+            const target = event.target;
+            if (target && typeof target.closest === "function" && target.closest(".button")) {
+                event.preventDefault();
             }
         });
-    }
 
-    if (bookmarksRadio) {
-        bookmarksRadio.addEventListener("change", () => {
-            if (!bookmarksRadio.checked) return;
-            applyTreeSelection("bookmarks", { persist: true });
-        });
-    }
+        if (filesRadio) filesRadio.disabled = true;
+        if (bookmarksRadio) bookmarksRadio.disabled = true;
 
-    // 右クリック無効化
-    document.body.oncontextmenu = (e) => { e.preventDefault(); return false; };
+        selectInitialTree()
+            .catch((error) => {
+                console.error("[Panel] Initialization failed", error);
+            })
+            .finally(() => {
+                if (filesRadio) filesRadio.disabled = false;
+                if (bookmarksRadio) bookmarksRadio.disabled = false;
+            });
 
-    if (filesRadio) filesRadio.disabled = true;
-    if (bookmarksRadio) bookmarksRadio.disabled = true;
-
-    selectInitialTree()
-        .catch((error) => {
-            console.error("[Panel] Initialization failed", error);
-        })
-        .finally(() => {
-            if (filesRadio) filesRadio.disabled = false;
-            if (bookmarksRadio) bookmarksRadio.disabled = false;
-        });
-
-    // 広告などの読み込み
-    if (typeof setAdDetails === "function") setAdDetails();
+        // 広告などの読み込み
+        if (typeof setAdDetails === "function") setAdDetails();
     });
 } else {
     console.info("[Panel] iframe context detected; skipping panel initialization:", window.location.href);

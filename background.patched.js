@@ -674,7 +674,7 @@ chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
     forwardToOffscreen({
         type: 'TAB_DETACHED',
         tabId: tabId,
-        attachInfo: detachInfo
+        detachInfo: detachInfo
     }).catch((error) => logForwardingError('TAB_DETACHED', error));
 });
 
@@ -1124,6 +1124,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (!obj || !obj._path) return null;
             return afio.openNode(obj._path);
         };
+        const requireNode = (value, label) => {
+            if (!value) {
+                throw new Error(`AFIO ${method}: ${label} is missing`);
+            }
+            return value;
+        };
 
         (async () => {
             try {
@@ -1135,37 +1141,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
                 switch (method) {
                     case 'node_exists':
-                        result = { exists: await node.exists() };
+                        result = { exists: await requireNode(node, 'node').exists() };
                         break;
                     case 'node_isDir':
-                        result = { isDir: await node.isDir() };
+                        result = { isDir: await requireNode(node, 'node').isDir() };
                         break;
                     case 'node_isWritable':
-                        result = { isWritable: await node.isWritable() };
+                        result = { isWritable: await requireNode(node, 'node').isWritable() };
                         break;
                     case 'node_isReadable':
-                        result = { isReadable: await node.isReadable() };
+                        result = { isReadable: await requireNode(node, 'node').isReadable() };
                         break;
                     case 'node_copyTo':
-                        await src.copyTo(dst);
+                        await requireNode(src, 'src').copyTo(requireNode(dst, 'dst'));
                         break;
                     case 'node_moveTo':
-                        await src.moveTo(dst);
+                        await requireNode(src, 'src').moveTo(requireNode(dst, 'dst'));
                         break;
                     case 'node_remove':
-                        await node.remove();
+                        await requireNode(node, 'node').remove();
                         break;
                     case 'readTextFile':
-                        result = { data: await afio.readTextFile(node) };
+                        result = { data: await afio.readTextFile(requireNode(node, 'node')) };
                         break;
                     case 'writeTextFile':
-                        await afio.writeTextFile(node, payload.data);
+                        await afio.writeTextFile(requireNode(node, 'node'), payload.data);
                         break;
                     case 'appendTextFile':
-                        await afio.appendTextFile(node, payload.data);
+                        await afio.appendTextFile(requireNode(node, 'node'), payload.data);
                         break;
                     case 'getNodesInDir':
-                        const nodes = await afio.getNodesInDir(node, payload.filter);
+                        const nodes = await afio.getNodesInDir(requireNode(node, 'node'), payload.filter);
                         result = { nodes: nodes.map(n => ({ _path: n.path, _is_dir_int: n.is_dir })) };
                         break;
                     case 'getLogicalDrives':
@@ -1177,10 +1183,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                         result = { node: { _path: defDir.path, _is_dir_int: defDir.is_dir } };
                         break;
                     case 'makeDirectory':
-                        await node.createDirectory();
+                        await requireNode(node, 'node').createDirectory();
                         break;
                     case 'writeImageToFile':
-                        await afio.writeImageToFile(node, payload.imageData);
+                        await afio.writeImageToFile(requireNode(node, 'node'), payload.imageData);
                         break;
                     case 'queryLimits':
                         result = await afio.queryLimits();
@@ -1418,7 +1424,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     // Generate a unique property name to store the result
                     var resultProp = '__imacros_eval_result_' + Math.random().toString(36).substr(2, 9);
                     // Wrap the code to capture its result and any errors
-                    var wrappedCode = 'try { window["' + resultProp + '"] = (function(){ return (' + code + '); })(); } catch(e) { window["' + resultProp + '_error"] = e && (e.message || String(e)); }';
+                    var wrappedCode = 'try { window["' + resultProp + '"] = (0, eval)(' + JSON.stringify(String(code)) + '); } catch(e) { window["' + resultProp + '_error"] = e && (e.message || String(e)); }';
 
                     // Create a script element to execute the code
                     var script = document.createElement('script');

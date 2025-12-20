@@ -11,6 +11,12 @@ worker via explicit messaging.
 /* global FileSyncBridge, afio, communicator, dialogUtils */
 "use strict";
 
+if (typeof globalThis.afioCache === "undefined") {
+    globalThis.afioCache = {
+        isInstalled: () => Promise.resolve(false)
+    };
+}
+
 // Virtual filesystem fallback for RUN and related file lookups when the native
 // connector is unavailable. This keeps nested macros working in MV3 by letting
 // MacroPlayer pull sources from the chunked VirtualFileService storage.
@@ -620,6 +626,28 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         const macroPath = request.macroPath;
         const windowId = request.windowId;
         const requestId = request.requestId || createRequestId();
+        const finalizeRunMacro = (status) => {
+            if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+                chrome.runtime.sendMessage({
+                    type: "macroStopped",
+                    win_id: windowId,
+                    target: "panel"
+                });
+                chrome.runtime.sendMessage({
+                    type: 'UPDATE_BADGE',
+                    method: 'setText',
+                    winId: windowId,
+                    arg: ''
+                });
+            }
+            if (typeof notifyPanel === 'function') {
+                notifyPanel(windowId, "UPDATE_PANEL_VIEWS", {});
+            }
+            playInFlight.delete(windowId);
+            if (status) {
+                console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (${status})`, { requestId });
+            }
+        };
 
         console.log('[iMacros Offscreen] runMacroByUrl:', macroPath, {
             requestId,
@@ -679,7 +707,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
         afio.getDefaultDir("savepath").then(function (dir) {
             let fullPath = macroPath;
-            if (!__is_full_path(macroPath)) {
+            if (!(macroPath.startsWith('/') || /^[a-zA-Z]:/.test(macroPath))) {
                 dir.append(macroPath);
                 fullPath = dir.path;
             }
@@ -694,26 +722,29 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                         times: 1,
                         startLoop: 1
                     };
-                    if (!context[windowId].mplayer) {
-                        context[windowId].mplayer = new MacroPlayer(windowId);
-                    }
-                    const mplayer = context[windowId].mplayer;
-                    const limits = { maxVariables: 'unlimited', loops: 'unlimited' };
-                    mplayer.play(macro, limits, function () {
-                        console.log('[iMacros Offscreen] Macro execution completed:', macroPath, { requestId });
-                        // ★重要: 実行完了後にガードをクリア
-                        playInFlight.delete(windowId);
-                        console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (completed)`, { requestId });
+                    const contextPromise = context[windowId] && context[windowId]._initialized
+                        ? Promise.resolve(context[windowId])
+                        : context.init(windowId);
+                    return contextPromise.then((ctx) => {
+                        const mplayer = ctx.mplayer;
+                        const limits = { maxVariables: 'unlimited', loops: 'unlimited' };
+                        try {
+                            mplayer.play(macro, limits, function () {
+                                console.log('[iMacros Offscreen] Macro execution completed:', macroPath, { requestId });
+                                finalizeRunMacro('completed');
+                            });
+                        } catch (playErr) {
+                            console.error('[iMacros Offscreen] mplayer.play threw:', playErr, { requestId });
+                            finalizeRunMacro('play_error');
+                        }
                     });
                 });
             });
         }).catch(function (e) {
             console.error('[iMacros Offscreen] Error loading macro:', e, { requestId });
-            // ★重要: エラー時もガードをクリア
-            playInFlight.delete(windowId);
             const errorMsg = e && e.message ? e.message : String(e);
             notifyAsyncError(windowId, `Error loading macro: ${errorMsg}`);
-            console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (error)`, { requestId });
+            finalizeRunMacro('error');
         });
 
         return false;
@@ -954,17 +985,19 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
 
         switch (request.command) {
-            case 'actionClicked':
+            case 'actionClicked': {
                 handleActionClicked(request.tab);
                 break;
-            case 'notificationClicked':
-                var n_id = request.notificationId;
-                var w_id = parseInt(n_id);
+            }
+            case 'notificationClicked': {
+                const n_id = request.notificationId;
+                const w_id = parseInt(n_id);
                 if (isNaN(w_id) || !context[w_id] || !context[w_id].info_args) break;
-                var info = context[w_id].info_args;
+                const info = context[w_id].info_args;
                 if (info.errorCode == 1) break;
                 edit(info.macro, true);
                 break;
+            }
         }
     } catch (e) {
         console.error('[iMacros Offscreen] Error handling message:', e);
@@ -1571,7 +1604,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 
 // Override edit function to use message passing for MV3
 // This replaces the window.open based implementation from bg.js which doesn't work in Offscreen Document
-globalScope.edit = function (macro, overwrite, line) {
+globalThis.edit = function (macro, overwrite, line) {
     console.log("[iMacros Offscreen] Requesting Service Worker to open editor for:", macro.name);
 
     if (!chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
@@ -2053,20 +2086,23 @@ if (typeof chrome.windows !== 'undefined' && chrome.windows.getAll) {
 }
 
 // Add this wrapper to offscreen_bg.js to handle notifications via Service Worker
-if (typeof chrome.notifications === 'undefined' || !chrome.notifications.create) {
-    chrome.notifications = {
-        create: function (notificationId, options, callback) {
-            chrome.runtime.sendMessage({
-                target: "background",
-                command: "show_notification",
-                args: options // Pass options directly
-            }, function (response) {
-                if (callback) callback(response);
-            });
-        },
-        clear: function (notificationId, callback) {
-            // Optional: implement clear logic
-            if (callback) callback();
-        }
+if (typeof chrome.notifications === 'undefined') {
+    chrome.notifications = {};
+}
+if (!chrome.notifications.create) {
+    chrome.notifications.create = function (notificationId, options, callback) {
+        chrome.runtime.sendMessage({
+            target: "background",
+            command: "show_notification",
+            args: options // Pass options directly
+        }, function (response) {
+            if (callback) callback(response);
+        });
+    };
+}
+if (!chrome.notifications.clear) {
+    chrome.notifications.clear = function (notificationId, callback) {
+        // Optional: implement clear logic
+        if (callback) callback();
     };
 }
