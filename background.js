@@ -79,6 +79,74 @@ function resetPlaybackStateOnStartup() {
 
 resetPlaybackStateOnStartup();
 
+function isDuplicateRequest(cache, windowMs, maxEntries, pruneAgeMs, key, debugLabel, debugContext) {
+    if (!key) {
+        console.debug(`[iMacros SW] ${debugLabel} guard skipped due to missing context`, debugContext);
+        return false;
+    }
+    const now = Date.now();
+    const last = cache.get(key);
+    cache.set(key, now);
+    if (typeof last === 'number' && now - last < windowMs) {
+        return true;
+    }
+    if (cache.size > maxEntries) {
+        for (const [entryKey, timestamp] of cache.entries()) {
+            if (typeof timestamp !== 'number' || now - timestamp > pruneAgeMs) {
+                cache.delete(entryKey);
+            }
+        }
+        while (cache.size > maxEntries) {
+            const oldestKey = cache.keys().next().value;
+            if (!oldestKey) break;
+            cache.delete(oldestKey);
+        }
+    }
+    return false;
+}
+
+function isDuplicatePlayRequest(winId, filePath) {
+    const hasKey = winId && filePath;
+    const key = hasKey ? `${winId}:${filePath}` : '';
+    return isDuplicateRequest(
+        recentPlayRequests,
+        DUPLICATE_PLAY_WINDOW_MS,
+        DUPLICATE_PLAY_MAX_ENTRIES,
+        DUPLICATE_PLAY_PRUNE_AGE_MS,
+        key,
+        'Duplicate play',
+        { winId, filePath }
+    );
+}
+
+function isDuplicatePanelPlayRequest(panelWinId, filePath) {
+    const hasKey = panelWinId && filePath;
+    const key = hasKey ? `${panelWinId}:${filePath}` : '';
+    return isDuplicateRequest(
+        recentPanelPlayRequests,
+        DUPLICATE_PANEL_PLAY_WINDOW_MS,
+        DUPLICATE_PANEL_PLAY_MAX_ENTRIES,
+        DUPLICATE_PANEL_PLAY_PRUNE_AGE_MS,
+        key,
+        'Duplicate panel play',
+        { panelWinId, filePath }
+    );
+}
+
+function isDuplicateRunByUrlRequest(winId, macroPath) {
+    const hasKey = winId && macroPath;
+    const key = hasKey ? `${winId}:${macroPath}` : '';
+    return isDuplicateRequest(
+        recentRunByUrlRequests,
+        DUPLICATE_RUN_BY_URL_WINDOW_MS,
+        DUPLICATE_RUN_BY_URL_MAX_ENTRIES,
+        DUPLICATE_RUN_BY_URL_PRUNE_AGE_MS,
+        key,
+        'Duplicate run-by-url',
+        { winId, macroPath }
+    );
+}
+
 function isExtensionIframeSender(sender) {
     const senderUrl = sender && typeof sender.url === 'string' ? sender.url : null;
     if (!senderUrl) return false;
@@ -2344,96 +2412,6 @@ async function resolveTargetWindowId(msgWinId, sender) {
     });
 
     return true;
-}
-
-function isDuplicatePlayRequest(winId, filePath) {
-    if (!winId || !filePath) {
-        console.debug('[iMacros SW] Duplicate play guard skipped due to missing winId or filePath', {
-            winId,
-            filePath
-        });
-        return false;
-    }
-    const key = `${winId}:${filePath}`;
-    const now = Date.now();
-    const last = recentPlayRequests.get(key);
-    recentPlayRequests.set(key, now);
-    if (typeof last === 'number' && now - last < DUPLICATE_PLAY_WINDOW_MS) {
-        return true;
-    }
-    if (recentPlayRequests.size > DUPLICATE_PLAY_MAX_ENTRIES) {
-        for (const [entryKey, timestamp] of recentPlayRequests.entries()) {
-            if (typeof timestamp !== 'number' || now - timestamp > DUPLICATE_PLAY_PRUNE_AGE_MS) {
-                recentPlayRequests.delete(entryKey);
-            }
-        }
-        while (recentPlayRequests.size > DUPLICATE_PLAY_MAX_ENTRIES) {
-            const oldestKey = recentPlayRequests.keys().next().value;
-            if (!oldestKey) break;
-            recentPlayRequests.delete(oldestKey);
-        }
-    }
-    return false;
-}
-
-function isDuplicatePanelPlayRequest(panelWinId, filePath) {
-    if (!panelWinId || !filePath) {
-        console.debug('[iMacros SW] Duplicate panel play guard skipped due to missing panelWinId or filePath', {
-            panelWinId,
-            filePath
-        });
-        return false;
-    }
-    const key = `${panelWinId}:${filePath}`;
-    const now = Date.now();
-    const last = recentPanelPlayRequests.get(key);
-    recentPanelPlayRequests.set(key, now);
-    if (typeof last === 'number' && now - last < DUPLICATE_PANEL_PLAY_WINDOW_MS) {
-        return true;
-    }
-    if (recentPanelPlayRequests.size > DUPLICATE_PANEL_PLAY_MAX_ENTRIES) {
-        for (const [entryKey, timestamp] of recentPanelPlayRequests.entries()) {
-            if (typeof timestamp !== 'number' || now - timestamp > DUPLICATE_PANEL_PLAY_PRUNE_AGE_MS) {
-                recentPanelPlayRequests.delete(entryKey);
-            }
-        }
-        while (recentPanelPlayRequests.size > DUPLICATE_PANEL_PLAY_MAX_ENTRIES) {
-            const oldestKey = recentPanelPlayRequests.keys().next().value;
-            if (!oldestKey) break;
-            recentPanelPlayRequests.delete(oldestKey);
-        }
-    }
-    return false;
-}
-
-function isDuplicateRunByUrlRequest(winId, macroPath) {
-    if (!winId || !macroPath) {
-        console.debug('[iMacros SW] Duplicate run-by-url guard skipped due to missing winId or macroPath', {
-            winId,
-            macroPath
-        });
-        return false;
-    }
-    const key = `${winId}:${macroPath}`;
-    const now = Date.now();
-    const last = recentRunByUrlRequests.get(key);
-    recentRunByUrlRequests.set(key, now);
-    if (typeof last === 'number' && now - last < DUPLICATE_RUN_BY_URL_WINDOW_MS) {
-        return true;
-    }
-    if (recentRunByUrlRequests.size > DUPLICATE_RUN_BY_URL_MAX_ENTRIES) {
-        for (const [entryKey, timestamp] of recentRunByUrlRequests.entries()) {
-            if (typeof timestamp !== 'number' || now - timestamp > DUPLICATE_RUN_BY_URL_PRUNE_AGE_MS) {
-                recentRunByUrlRequests.delete(entryKey);
-            }
-        }
-        while (recentRunByUrlRequests.size > DUPLICATE_RUN_BY_URL_MAX_ENTRIES) {
-            const oldestKey = recentRunByUrlRequests.keys().next().value;
-            if (!oldestKey) break;
-            recentRunByUrlRequests.delete(oldestKey);
-        }
-    }
-    return false;
 }
 
     // --- 編集 (editMacro) ---
