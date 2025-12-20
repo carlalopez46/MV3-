@@ -12,6 +12,8 @@ const DUPLICATE_PLAY_WINDOW_MS = 800;
 const DUPLICATE_PLAY_MAX_ENTRIES = 200;
 const DUPLICATE_PLAY_PRUNE_AGE_MS = DUPLICATE_PLAY_WINDOW_MS * 4;
 let duplicatePlayBlockedCount = 0;
+const inFlightPlayByWindow = new Map();
+const INFLIGHT_PLAY_CLEANUP_MS = 5 * 60 * 1000;
 const recentPanelPlayRequests = new Map();
 const DUPLICATE_PANEL_PLAY_WINDOW_MS = 800;
 const DUPLICATE_PANEL_PLAY_MAX_ENTRIES = 200;
@@ -103,6 +105,30 @@ function isDuplicateRequest(cache, windowMs, maxEntries, pruneAgeMs, key, debugL
         }
     }
     return false;
+}
+
+function markPlayInFlight(winId, requestId) {
+    if (!winId) return;
+    inFlightPlayByWindow.set(winId, {
+        requestId: requestId || null,
+        startedAt: Date.now()
+    });
+}
+
+function clearPlayInFlight(winId) {
+    if (!winId) return;
+    inFlightPlayByWindow.delete(winId);
+}
+
+function hasPlayInFlight(winId) {
+    if (!winId) return false;
+    const entry = inFlightPlayByWindow.get(winId);
+    if (!entry) return false;
+    if (Date.now() - entry.startedAt > INFLIGHT_PLAY_CLEANUP_MS) {
+        inFlightPlayByWindow.delete(winId);
+        return false;
+    }
+    return true;
 }
 
 function isDuplicatePlayRequest(winId, filePath) {
@@ -1011,6 +1037,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // Handle panel tree refresh request from options or other extension pages
     if (msg.type === 'UPDATE_PANEL_VIEWS') {
         return handleUpdatePanelViews(sendResponse);
+    }
+
+    if (msg.type === "macroStopped" && msg.win_id) {
+        clearPlayInFlight(msg.win_id);
     }
 
     if (msg.command === 'UPDATE_EXECUTION_STATE' && typeof msg.state === 'string') {
@@ -2370,6 +2400,15 @@ async function resolveTargetWindowId(msgWinId, sender) {
                 console.log("[iMacros SW] Resolved win_id:", win_id, { requestId, swInstanceId: SW_INSTANCE_ID });
                 console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", msg.loop ?? 1, ")");
 
+                if (hasPlayInFlight(win_id)) {
+                    console.warn("[iMacros SW] Play request ignored - macro already running for window", {
+                        win_id,
+                        requestId
+                    });
+                    sendResponse({ status: 'ignored', message: 'Macro already running' });
+                    return;
+                }
+
                 if (isDuplicatePlayRequest(win_id, msg.file_path)) {
                     duplicatePlayBlockedCount += 1;
                     console.warn("[iMacros SW] Duplicate play request detected (guarded). Ignoring.", {
@@ -2382,6 +2421,7 @@ async function resolveTargetWindowId(msgWinId, sender) {
                     return;
                 }
 
+                markPlayInFlight(win_id, requestId);
                 // Offscreenにファイル読み込みと再生を依頼
                 sendMessageToOffscreen({
                     command: "CALL_CONTEXT_METHOD",
@@ -2396,6 +2436,9 @@ async function resolveTargetWindowId(msgWinId, sender) {
                     if (result && (result.ack === true || result.started === true)) {
                         // マクロ開始のACK - パネルに成功を通知
                         sendResponse({ success: true, started: true });
+                    } else if (result && result.success === false) {
+                        clearPlayInFlight(win_id);
+                        sendResponse(result);
                     } else if (result && typeof result.success !== 'undefined') {
                         sendResponse(result);
                     } else {
@@ -2403,6 +2446,7 @@ async function resolveTargetWindowId(msgWinId, sender) {
                     }
         }).catch(err => {
             console.error("[iMacros SW] playFile error:", err);
+            clearPlayInFlight(win_id);
             sendResponse({ success: false, error: (err && err.message) || String(err) });
         });
         });
