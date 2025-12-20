@@ -291,9 +291,9 @@ localStorageInitPromise.catch((err) => {
 // MV3 infrastructure (message bus + state machine)
 // ---------------------------------------------------------
 const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
-    maxRetries: 3,
+    maxRetries: 0,
     backoffMs: 150,
-    ackTimeoutMs: 10000
+    ackTimeoutMs: 5000
 });
 
 const sessionStorage = chrome.storage ? chrome.storage.session : null;
@@ -674,7 +674,7 @@ chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
     forwardToOffscreen({
         type: 'TAB_DETACHED',
         tabId: tabId,
-        attachInfo: detachInfo
+        detachInfo: detachInfo
     }).catch((error) => logForwardingError('TAB_DETACHED', error));
 });
 
@@ -1124,49 +1124,93 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (!obj || !obj._path) return null;
             return afio.openNode(obj._path);
         };
+        /*
+         * AFIO proxy resilience note:
+         * We return safe defaults (false/empty/no-op) when node reconstruction fails to
+         * keep messaging robust across malformed payloads and SW/offscreen lifecycle
+         * boundaries. This favors availability over strict correctness; callers that
+         * need hard failures must validate inputs and handle null/empty responses.
+         * Primary callers include the AsyncFileIO AFIO_CALL proxy path and offscreen
+         * consumers of AFIO methods; adjust call sites/tests if stricter handling is
+         * required for specific flows.
+         */
 
         (async () => {
             try {
                 let result = {};
                 // Reconstruct nodes if present in payload
-                let node = getNode(payload.node);
-                let src = getNode(payload.src);
-                let dst = getNode(payload.dst);
+                const node = getNode(payload.node);
+                const src = getNode(payload.src);
+                const dst = getNode(payload.dst);
+                const warnNullNode = (action, nodeRef) => {
+                    const path = nodeRef && nodeRef._path ? nodeRef._path : undefined;
+                    console.warn(`[iMacros SW] AFIO ${action}: null node, returning safe default`, { path });
+                };
 
                 switch (method) {
                     case 'node_exists':
-                        result = { exists: await node.exists() };
+                        if (!node) warnNullNode('node_exists', payload.node);
+                        result = { exists: node ? await node.exists() : false };
                         break;
                     case 'node_isDir':
-                        result = { isDir: await node.isDir() };
+                        if (!node) warnNullNode('node_isDir', payload.node);
+                        result = { isDir: node ? await node.isDir() : false };
                         break;
                     case 'node_isWritable':
-                        result = { isWritable: await node.isWritable() };
+                        if (!node) warnNullNode('node_isWritable', payload.node);
+                        result = { isWritable: node ? await node.isWritable() : false };
                         break;
                     case 'node_isReadable':
-                        result = { isReadable: await node.isReadable() };
+                        if (!node) warnNullNode('node_isReadable', payload.node);
+                        result = { isReadable: node ? await node.isReadable() : false };
                         break;
                     case 'node_copyTo':
-                        await src.copyTo(dst);
+                        if (src && dst) {
+                            await src.copyTo(dst);
+                        } else {
+                            warnNullNode('node_copyTo', payload.src || payload.dst);
+                        }
                         break;
                     case 'node_moveTo':
-                        await src.moveTo(dst);
+                        if (src && dst) {
+                            await src.moveTo(dst);
+                        } else {
+                            warnNullNode('node_moveTo', payload.src || payload.dst);
+                        }
                         break;
                     case 'node_remove':
-                        await node.remove();
+                        if (node) {
+                            await node.remove();
+                        } else {
+                            warnNullNode('node_remove', payload.node);
+                        }
                         break;
                     case 'readTextFile':
-                        result = { data: await afio.readTextFile(node) };
+                        if (!node) warnNullNode('readTextFile', payload.node);
+                        result = { data: node ? await afio.readTextFile(node) : "" };
                         break;
                     case 'writeTextFile':
-                        await afio.writeTextFile(node, payload.data);
+                        if (node) {
+                            await afio.writeTextFile(node, payload.data);
+                        } else {
+                            warnNullNode('writeTextFile', payload.node);
+                        }
                         break;
                     case 'appendTextFile':
-                        await afio.appendTextFile(node, payload.data);
+                        if (node) {
+                            await afio.appendTextFile(node, payload.data);
+                        } else {
+                            warnNullNode('appendTextFile', payload.node);
+                        }
                         break;
                     case 'getNodesInDir':
-                        const nodes = await afio.getNodesInDir(node, payload.filter);
-                        result = { nodes: nodes.map(n => ({ _path: n.path, _is_dir_int: n.is_dir })) };
+                        if (node) {
+                            const nodes = await afio.getNodesInDir(node, payload.filter);
+                            result = { nodes: nodes.map(n => ({ _path: n.path, _is_dir_int: n.is_dir })) };
+                        } else {
+                            warnNullNode('getNodesInDir', payload.node);
+                            result = { nodes: [] };
+                        }
                         break;
                     case 'getLogicalDrives':
                         const drives = await afio.getLogicalDrives();
@@ -1177,10 +1221,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                         result = { node: { _path: defDir.path, _is_dir_int: defDir.is_dir } };
                         break;
                     case 'makeDirectory':
-                        await node.createDirectory();
+                        if (node) {
+                            await node.createDirectory();
+                        } else {
+                            warnNullNode('makeDirectory', payload.node);
+                        }
                         break;
                     case 'writeImageToFile':
-                        await afio.writeImageToFile(node, payload.imageData);
+                        if (node) {
+                            await afio.writeImageToFile(node, payload.imageData);
+                        } else {
+                            warnNullNode('writeImageToFile', payload.node);
+                        }
                         break;
                     case 'queryLimits':
                         result = await afio.queryLimits();
@@ -2490,7 +2542,12 @@ async function sendMessageToOffscreen(msg) {
 
     await ensureOffscreenDocument();
     try {
-        return await messagingBus.sendRuntime(payload, { expectAck: true });
+        const options = { expectAck: true };
+        if (msg.command === 'CALL_CONTEXT_METHOD' && msg.method === 'playFile') {
+            options.maxRetries = 0;
+            options.ackTimeoutMs = 10000;
+        }
+        return await messagingBus.sendRuntime(payload, options);
     } catch (err) {
         const genericPatterns = ['No ack received on channel', 'Ack timeout'];
         const isGeneric = genericPatterns.some(pat => err && err.message && err.message.includes(pat));
