@@ -291,9 +291,9 @@ localStorageInitPromise.catch((err) => {
 // MV3 infrastructure (message bus + state machine)
 // ---------------------------------------------------------
 const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
-    maxRetries: 1,
+    maxRetries: 0,
     backoffMs: 150,
-    ackTimeoutMs: 10000
+    ackTimeoutMs: 5000
 });
 
 const sessionStorage = chrome.storage ? chrome.storage.session : null;
@@ -1124,6 +1124,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (!obj || !obj._path) return null;
             return afio.openNode(obj._path);
         };
+        // Note: when node reconstruction fails, return safe defaults instead of throwing
+        // to keep AFIO proxy resilient to invalid payloads.
 
         (async () => {
             try {
