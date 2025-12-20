@@ -672,15 +672,13 @@ var imns = {
         },
 
         _writeClipboardFallback: function (str) {
+            var self = this;
+
             // If in Offscreen Document, first try execCommand('copy') directly
             // This avoids SW proxy which can cause focus changes and other side effects
-            if (this._isOffscreenContext()) {
+            if (self._isOffscreenContext()) {
                 var textarea = null;
                 try {
-                    if (!document.body) {
-                        console.warn('[iMacros] document.body not available in offscreen context, using SW proxy');
-                        throw new Error('Offscreen body unavailable');
-                    }
                     textarea = document.createElement('textarea');
                     textarea.setAttribute('readonly', '');
                     textarea.style.position = 'fixed';
@@ -699,14 +697,14 @@ var imns = {
                 } catch (e) {
                     console.warn('[iMacros] offscreen clipboard write error, falling back to SW proxy:', e);
                 } finally {
-                    if (textarea && textarea.parentNode && document.body) {
+                    if (textarea && textarea.parentNode) {
                         document.body.removeChild(textarea);
                     }
                 }
 
                 // Fallback: proxy through Service Worker -> Content Script
                 console.log("[iMacros] Clipboard write: proxying through Service Worker (offscreen fallback)");
-                return new Promise((resolve) => {
+                return new Promise(function (resolve, reject) {
                     try {
                         chrome.runtime.sendMessage({
                             command: 'CLIPBOARD_WRITE',
