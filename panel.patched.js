@@ -54,10 +54,14 @@ function initWindowId() {
 
         if (winIdParam) {
             // 安全のため基数10を指定 (Main側の記述を採用)
-            currentWindowId = parseInt(winIdParam, 10);
-            console.log("[Panel] Current window ID from URL:", currentWindowId);
-            resolve(currentWindowId);
-            return;
+            const parsedWinId = parseInt(winIdParam, 10);
+            if (!Number.isNaN(parsedWinId)) {
+                currentWindowId = parsedWinId;
+                console.log("[Panel] Current window ID from URL:", currentWindowId);
+                resolve(currentWindowId);
+                return;
+            }
+            console.warn("[Panel] Ignoring invalid window ID from URL:", winIdParam);
         }
 
         // Fallback to getCurrent if no URL param (e.g. sidebar or direct open)

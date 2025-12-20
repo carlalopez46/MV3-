@@ -731,8 +731,7 @@ function findUsableTabForClipboard(tabs) {
 
 async function executeClipboardWrite(tab, text, sendResponse) {
     // Skip restricted URLs - return success since clipboard is non-critical
-    // Note: Keep this in sync with isUsableTabForClipboard() checks
-    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:') || tab.url.startsWith('devtools://')) {
+    if (!isUsableTabForClipboard(tab)) {
         console.warn('[iMacros SW] Cannot write clipboard on restricted URL:', tab.url);
         sendResponse({ success: true, warning: 'Restricted URL skipped' });
         return;
@@ -792,15 +791,14 @@ async function executeClipboardWrite(tab, text, sendResponse) {
         }
     } catch (err) {
         console.error('[iMacros SW] executeScript failed for clipboard:', err);
-        sendResponse({ success: false, error: err.message });
+        sendResponse({ success: false, error: (err && err.message) || String(err) });
     }
 }
 
 // Execute clipboard read operation in the context of a web page tab
 async function executeClipboardRead(tab, sendResponse) {
     // Skip restricted URLs - return empty string since clipboard is non-critical
-    // Note: Keep this in sync with isUsableTabForClipboard() checks
-    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:') || tab.url.startsWith('devtools://')) {
+    if (!isUsableTabForClipboard(tab)) {
         console.warn('[iMacros SW] Cannot read clipboard on restricted URL:', tab.url);
         sendResponse({ success: true, text: '', warning: 'Restricted URL skipped' });
         return;
@@ -868,7 +866,7 @@ async function executeClipboardRead(tab, sendResponse) {
         }
     } catch (err) {
         console.error('[iMacros SW] executeScript failed for clipboard read:', err);
-        sendResponse({ success: false, error: err.message });
+        sendResponse({ success: false, error: (err && err.message) || String(err) });
     }
 }
 
@@ -1170,18 +1168,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     case 'appendTextFile':
                         await afio.appendTextFile(requireNode(node, 'node'), payload.data);
                         break;
-                    case 'getNodesInDir':
+                    case 'getNodesInDir': {
                         const nodes = await afio.getNodesInDir(requireNode(node, 'node'), payload.filter);
                         result = { nodes: nodes.map(n => ({ _path: n.path, _is_dir_int: n.is_dir })) };
                         break;
-                    case 'getLogicalDrives':
+                    }
+                    case 'getLogicalDrives': {
                         const drives = await afio.getLogicalDrives();
                         result = { nodes: drives.map(n => ({ _path: n.path, _is_dir_int: n.is_dir })) };
                         break;
-                    case 'getDefaultDir':
+                    }
+                    case 'getDefaultDir': {
                         const defDir = await afio.getDefaultDir(payload.name);
                         result = { node: { _path: defDir.path, _is_dir_int: defDir.is_dir } };
                         break;
+                    }
                     case 'makeDirectory':
                         await requireNode(node, 'node').createDirectory();
                         break;
@@ -2073,10 +2074,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 }
 
                 if (!targetWindowId) {
-                    // Fall back to last focused window
                     try {
-                        const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
-                        if (win) targetWindowId = win.id;
+                        const windows = await chrome.windows.getAll({ windowTypes: ['normal'] });
+                        const focusedWindow = windows.find((window) => window.focused) || windows[0];
+                        if (focusedWindow) targetWindowId = focusedWindow.id;
                     } catch (e) { /* ignore */ }
                 }
 
@@ -2111,7 +2112,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 }
             } catch (err) {
                 console.error("[iMacros SW] GET_ACTIVE_TAB error:", err);
-                sendResponse({ error: err.message });
+                sendResponse({ error: (err && err.message) || String(err) });
             }
         })();
 
@@ -2135,6 +2136,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             for (const [key, value] of Object.entries(sessionData)) {
                 if (key.startsWith('panel_') && value === msgWinId) {
                     const parentWinId = parseInt(key.replace('panel_', ''), 10);
+                    if (Number.isNaN(parentWinId)) {
+                        console.warn('[iMacros SW] Invalid parent window ID in panel mapping:', key);
+                        continue;
+                    }
                     console.log(`[iMacros SW] Panel ${msgWinId} mapped to parent window ${parentWinId}`);
                     return parentWinId;
                 }
@@ -2190,8 +2195,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // --- 再生 (playMacro) ---
     if (msg.command === "playMacro") {
-        // Ensure stored execution ID (from prior SW sessions) is restored before checking duplicates
-        restoreExecutionIdFromStorage().then(() => {
+        (async () => {
+            try {
+                // Ensure stored execution ID (from prior SW sessions) is restored before checking duplicates
+                await restoreExecutionIdFromStorage();
+            } catch (error) {
+                console.warn('[iMacros SW] Failed to restore execution ID before playMacro check:', error);
+            }
+
             const requestId = msg.requestId || createRequestId();
             const executionId = msg.executionId;
             const isValidExecutionId = executionId && typeof executionId === 'string' && executionId.trim().length > 0;
@@ -2248,18 +2259,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     } else {
                         sendResponse({ success: true });
                     }
-        }).catch(err => {
-            console.error("[iMacros SW] playFile error:", err);
-            sendResponse({ success: false, error: (err && err.message) || String(err) });
-        });
-        });
-    }).catch((error) => {
-        console.warn('[iMacros SW] Failed to restore execution ID before playMacro check:', error);
-        sendResponse({ success: false, error: 'Failed to restore execution ID', details: (error && error.message) || String(error) });
-    });
+                }).catch(err => {
+                    console.error("[iMacros SW] playFile error:", err);
+                    sendResponse({ success: false, error: (err && err.message) || String(err) });
+                });
+            });
+        })();
 
-    return true;
-}
+        return true;
+    }
 
     // --- 編集 (editMacro) ---
     if (msg.command === "editMacro") {
@@ -2455,7 +2463,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse(result || { success: true });
         }).catch(err => {
             console.error('[iMacros SW] SET_DIALOG_RESULT error:', err);
-            sendResponse({ success: false, error: err.message });
+            sendResponse({ success: false, error: (err && err.message) || String(err) });
         });
         return true;
     }
@@ -2479,7 +2487,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse(result || { success: false, error: 'No response from offscreen' });
         }).catch(err => {
             console.error('[iMacros SW] GET_DIALOG_ARGS error:', err);
-            sendResponse({ success: false, error: err.message });
+            sendResponse({ success: false, error: (err && err.message) || String(err) });
         });
         return true;
     }
