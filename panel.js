@@ -224,6 +224,11 @@ function record() {
     // UIを即時更新してストップボタンを有効化
     updatePanelState({ isRecording: true, isPlaying: false, currentMacro: selectedMacro });
     sendCommand("startRecording")
+        .then((response) => {
+            if (!response || response.success === false) {
+                updatePanelState("idle");
+            }
+        })
         .catch(() => {
             updatePanelState("idle");
         });
