@@ -1,8 +1,122 @@
-/* global chrome */
+/* global chrome, sharedSave, globalScope */
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
 const LOCALSTORAGE_PREFIX = '__imacros_ls__:';
+const SW_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
+let lastProcessedExecutionId = null;
+let executionIdRestorePromise = null;
+let executionIdRestoreComplete = false;
+
+function restoreExecutionIdFromStorage() {
+    if (executionIdRestorePromise) {
+        return executionIdRestorePromise;
+    }
+
+    executionIdRestorePromise = new Promise((resolve) => {
+        try {
+            chrome.storage.local.get(['lastProcessedExecutionId'], (result) => {
+                if (chrome.runtime && chrome.runtime.lastError) {
+                    console.warn('[iMacros SW] Failed to restore lastProcessedExecutionId:', chrome.runtime.lastError);
+                } else {
+                    const storedId = result && result.lastProcessedExecutionId;
+                    if (storedId && typeof storedId === 'string' && storedId.trim()) {
+                        lastProcessedExecutionId = storedId;
+                        console.log('[iMacros SW] Restored lastProcessedExecutionId:', storedId);
+                    }
+                }
+                executionIdRestoreComplete = true;
+                resolve();
+            });
+        } catch (error) {
+            console.warn('[iMacros SW] Failed to restore lastProcessedExecutionId:', error);
+            executionIdRestoreComplete = true;
+            resolve();
+        }
+    });
+
+    return executionIdRestorePromise;
+}
+
+restoreExecutionIdFromStorage();
+
+function createRequestId() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+    return `sw-${SW_INSTANCE_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+console.log('[iMacros SW] Instance ID:', SW_INSTANCE_ID);
+function resetPlaybackStateOnStartup() {
+    try {
+        chrome.storage.local.set({ playing: false, currentMacro: null }, () => {
+            if (chrome.runtime && chrome.runtime.lastError) {
+                console.warn('[iMacros SW] Failed to reset playback state on startup:', chrome.runtime.lastError);
+            } else {
+                console.log('[iMacros SW] State reset on startup to prevent zombie execution.');
+            }
+        });
+    } catch (error) {
+        console.warn('[iMacros SW] Failed to reset playback state on startup:', error);
+    }
+}
+
+resetPlaybackStateOnStartup();
+
+function isExtensionIframeSender(sender) {
+    const senderUrl = sender && typeof sender.url === 'string' ? sender.url : null;
+    if (!senderUrl) return false;
+    const extensionOrigin = chrome.runtime.getURL('');
+    const isExtensionPage = senderUrl.startsWith(extensionOrigin);
+    const frameId = sender && typeof sender.frameId === 'number' ? sender.frameId : null;
+    return isExtensionPage && frameId !== null && frameId !== 0;
+}
+
+function ignoreExtensionIframeSender(sender, sendResponse) {
+    if (!isExtensionIframeSender(sender)) {
+        return false;
+    }
+    console.log('[iMacros SW] Ignored message from extension iframe:', sender.url, 'frameId=', sender.frameId);
+    if (sendResponse) {
+        sendResponse({ ok: false, ignored: 'extension_iframe' });
+    }
+    return true;
+}
+
+// =============================================================================
+// LocalStorage Polyfill Helpers (shared logic to reduce duplication)
+// =============================================================================
+
+/**
+ * Check if localStorage needs to be polyfilled in this environment.
+ * Service Workers don't have native localStorage access.
+ */
+function needsLocalStoragePolyfill() {
+    try {
+        return (typeof localStorage === 'undefined' || localStorage === null ||
+                localStorage.__isMinimalLocalStorageShim || localStorage.__isInMemoryShim);
+    } catch (err) {
+        return true;
+    }
+}
+
+/**
+ * Install the localStorage polyfill on globalThis using the provided cache.
+ * Returns the created polyfill object.
+ */
+function installLocalStoragePolyfill(cache) {
+    const polyfill = createLocalStoragePolyfill(cache, LOCALSTORAGE_PREFIX);
+    polyfill.__isInMemoryShim = true;
+    polyfill.__isMinimalLocalStorageShim = true;
+
+    if (typeof globalThis !== 'undefined') {
+        globalThis.localStorage = polyfill;
+        globalThis._localStorageData = cache;
+        globalThis._LOCALSTORAGE_PREFIX = LOCALSTORAGE_PREFIX;
+    }
+    return polyfill;
+}
 
 function createLocalStoragePolyfill(cache, prefix) {
     return {
@@ -67,33 +181,31 @@ function createLocalStoragePolyfill(cache, prefix) {
     };
 }
 
+/**
+ * Asynchronously hydrate the localStorage polyfill from chrome.storage.
+ * If the synchronous polyfill was already installed, reuses that cache.
+ * This prevents data loss from modules that wrote during the sync phase.
+ */
 async function initializeLocalStoragePolyfill() {
-    let needsPolyfill = false;
-    try {
-        needsPolyfill = (typeof localStorage === 'undefined' || localStorage === null || localStorage.__isMinimalLocalStorageShim || localStorage.__isInMemoryShim);
-    } catch (err) {
-        needsPolyfill = true;
-    }
+    // Check if the synchronous polyfill was already installed
+    // If so, reuse the existing cache to avoid data loss
+    let cache;
+    let polyfill;
 
-    if (!needsPolyfill) {
+    if (typeof globalThis !== 'undefined' && globalThis._localStorageData) {
+        // Reuse existing cache from synchronous setup
+        cache = globalThis._localStorageData;
+        polyfill = globalThis.localStorage;
+    } else if (needsLocalStoragePolyfill()) {
+        // Fallback: install fresh polyfill (shouldn't happen if sync setup ran)
+        cache = Object.create(null);
+        polyfill = installLocalStoragePolyfill(cache);
+    } else {
+        // Native localStorage available, nothing to do
         return;
     }
 
-    // Install an in-memory shim immediately so modules imported synchronously
-    // below can rely on localStorage being defined. The backing cache will be
-    // hydrated asynchronously from chrome.storage once available.
-    const cache = Object.create(null);
-    const polyfill = createLocalStoragePolyfill(cache, LOCALSTORAGE_PREFIX);
-    polyfill.__isInMemoryShim = true;
-    polyfill.__isMinimalLocalStorageShim = true;
-
-    if (typeof globalThis !== 'undefined') {
-        globalThis.localStorage = polyfill;
-        // Expose the cache for legacy modules that expect synchronous access; treat as internal-only.
-        globalThis._localStorageData = cache;
-        globalThis._LOCALSTORAGE_PREFIX = LOCALSTORAGE_PREFIX;
-    }
-
+    // Hydrate cache from chrome.storage.local
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
         try {
             const items = await new Promise((resolve, reject) => {
@@ -116,26 +228,31 @@ async function initializeLocalStoragePolyfill() {
             console.log(`[iMacros SW] localStorage cache loaded asynchronously: ${hydratedCount} items`);
         } catch (err) {
             console.error('[iMacros SW] Failed to hydrate localStorage cache:', err);
-            // Optional: Throwing here would prevent starting with an empty cache if that is critical
-            // throw err;
         }
     }
 
-    polyfill.__isHydratedPolyfill = true;
+    if (polyfill) {
+        polyfill.__isHydratedPolyfill = true;
+    }
 }
 
-// NOTE: MV3 background scripts run as classic service workers, so top-level
-// await is forbidden. Expose the initialization promise instead; any module
-// that needs hydrated storage on startup should await
-// globalThis.localStorageInitPromise within its own async flow.
-const localStorageInitPromise = initializeLocalStoragePolyfill();
-globalThis.localStorageInitPromise = localStorageInitPromise;
+// NOTE: MV3 Service Workers REQUIRE importScripts() to be called synchronously
+// at the top level during initial script evaluation. Calling it asynchronously
+// (e.g., inside a .then() callback) will fail with a NetworkError.
 
-// NOTE: These imports must remain synchronous (relative to the code below)
-// because the code instantiates globals such as MessagingBus/ExecutionStateMachine
-// that depend on the imported modules. importScripts is invoked synchronously at
-// top level (immediately after creating localStorageInitPromise), so imports run
-// synchronously and may execute in parallel with the async localStorage hydration.
+// Step 1: Set up the localStorage polyfill synchronously BEFORE importing modules.
+// This ensures imported modules can access localStorage immediately.
+// The async hydration from chrome.storage happens separately afterward.
+(function setupSyncLocalStoragePolyfill() {
+    if (!needsLocalStoragePolyfill()) {
+        return;
+    }
+    const cache = Object.create(null);
+    installLocalStoragePolyfill(cache);
+})();
+
+// Step 2: Import all required scripts synchronously at the top level.
+// This MUST happen during initial script evaluation, not in a callback.
 try {
     importScripts(
         'utils.js',
@@ -154,6 +271,18 @@ try {
     throw e;
 }
 
+// Step 3: Hydrate localStorage cache asynchronously from chrome.storage.
+// This populates persisted data but modules can function with empty cache initially.
+// NOTE: All code below runs synchronously at top level to comply with MV3 requirements.
+// Event listeners MUST be registered synchronously - they cannot be inside .then() callbacks.
+// Handlers that need hydrated localStorage can await globalThis.localStorageInitPromise internally.
+const localStorageInitPromise = initializeLocalStoragePolyfill();
+globalThis.localStorageInitPromise = localStorageInitPromise;
+
+localStorageInitPromise.catch((err) => {
+    console.error('[iMacros SW] Failed to hydrate localStorage:', err);
+});
+
 // Background Service Worker for iMacros MV3
 // Handles Offscreen Document lifecycle and event forwarding
 
@@ -164,7 +293,7 @@ try {
 const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
     maxRetries: 3,
     backoffMs: 150,
-    ackTimeoutMs: 500
+    ackTimeoutMs: 10000
 });
 
 const sessionStorage = chrome.storage ? chrome.storage.session : null;
@@ -644,7 +773,7 @@ async function executeClipboardWrite(tab, text, sendResponse) {
                 // Prefer modern clipboard API but fall back to execCommand when focus is an issue
                 return navigator.clipboard.writeText(textToWrite)
                     .then(() => ({ success: true }))
-                    .catch((err) => copyUsingExecCommand(textToWrite));
+                    .catch((_err) => copyUsingExecCommand(textToWrite));
             },
             args: [text]
         });
@@ -777,6 +906,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     const isValidTabId = (value) => Number.isInteger(value) && value >= 0;
     const isValidObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
+
+    if (ignoreExtensionIframeSender(sender, sendResponse)) {
+        return true;
+    }
 
     // Debug: Log all messages with command or type
     if (msg.command || msg.type) {
@@ -2051,39 +2184,76 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     // --- 再生 (playMacro) ---
     if (msg.command === "playMacro") {
-        console.log("[iMacros SW] Play request for:", msg.file_path);
+        // Ensure stored execution ID (from prior SW sessions) is restored before checking duplicates
+        restoreExecutionIdFromStorage().then(() => {
+            const requestId = msg.requestId || createRequestId();
+            const executionId = msg.executionId;
+            const isValidExecutionId = executionId && typeof executionId === 'string' && executionId.trim().length > 0;
+            console.log("[iMacros SW] Play request for:", msg.file_path, {
+                requestId,
+                executionId,
+                win_id: msg.win_id,
+                swInstanceId: SW_INSTANCE_ID,
+                restoreComplete: executionIdRestoreComplete
+            });
 
-        // win_idを取得（パネルウィンドウIDから親ウィンドウIDを解決）
-        resolveTargetWindowId(msg.win_id, sender).then(win_id => {
-            if (!win_id) {
-                console.error("[iMacros SW] Cannot determine win_id for playMacro");
-                sendResponse({ error: "Cannot determine window ID" });
+            if (isValidExecutionId && executionId === lastProcessedExecutionId) {
+                console.warn(`[iMacros SW] Duplicate play request detected (ID: ${executionId}). Ignoring.`);
+                sendResponse({ status: 'ignored', message: 'Duplicate request' });
                 return;
             }
 
-            console.log("[iMacros SW] Resolved win_id:", win_id);
+            if (isValidExecutionId) {
+                lastProcessedExecutionId = executionId;
+                chrome.storage.local.set({ lastProcessedExecutionId: executionId }, () => {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[iMacros SW] Failed to persist lastProcessedExecutionId:', chrome.runtime.lastError);
+                    }
+                });
+            }
 
-            // Offscreenにファイル読み込みと再生を依頼
-            sendMessageToOffscreen({
-                command: "CALL_CONTEXT_METHOD",
-                method: "playFile",
-                win_id: win_id,
-                args: [msg.file_path, msg.loop || 1]
-            }).then(result => {
-                console.log("[iMacros SW] playFile result:", result);
-                if (result && typeof result.success !== 'undefined') {
-                    sendResponse(result);
-                } else {
-                    sendResponse({ success: true });
+            // win_idを取得（パネルウィンドウIDから親ウィンドウIDを解決）
+            resolveTargetWindowId(msg.win_id, sender).then(win_id => {
+                if (!win_id) {
+                    console.error("[iMacros SW] Cannot determine win_id for playMacro");
+                    sendResponse({ error: "Cannot determine window ID" });
+                    return;
                 }
-            }).catch(err => {
-                console.error("[iMacros SW] playFile error:", err);
-                sendResponse({ success: false, error: (err && err.message) || String(err) });
-            });
-        });
 
-        return true;
-    }
+                console.log("[iMacros SW] Resolved win_id:", win_id, { requestId, swInstanceId: SW_INSTANCE_ID });
+                console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", msg.loop ?? 1, ")");
+
+                // Offscreenにファイル読み込みと再生を依頼
+                sendMessageToOffscreen({
+                    command: "CALL_CONTEXT_METHOD",
+                    method: "playFile",
+                    win_id: win_id,
+                    args: [msg.file_path, msg.loop ?? 1],
+                    requestId: requestId,
+                    executionId: executionId
+                }).then(result => {
+                    console.log("[iMacros SW] playFile result:", result, { requestId, swInstanceId: SW_INSTANCE_ID });
+                    // ACK応答 (ack: true, started: true) または従来の成功応答に対応
+                    if (result && (result.ack === true || result.started === true)) {
+                        // マクロ開始のACK - パネルに成功を通知
+                        sendResponse({ success: true, started: true });
+                    } else if (result && typeof result.success !== 'undefined') {
+                        sendResponse(result);
+                    } else {
+                        sendResponse({ success: true });
+                    }
+        }).catch(err => {
+            console.error("[iMacros SW] playFile error:", err);
+            sendResponse({ success: false, error: (err && err.message) || String(err) });
+        });
+        });
+    }).catch((error) => {
+        console.warn('[iMacros SW] Failed to restore execution ID before playMacro check:', error);
+        sendResponse({ success: false, error: 'Failed to restore execution ID', details: (error && error.message) || String(error) });
+    });
+
+    return true;
+}
 
     // --- 編集 (editMacro) ---
     if (msg.command === "editMacro") {
@@ -2264,6 +2434,9 @@ chrome.notifications.onClicked.addListener(function (n_id) {
 
 // Handle SET_DIALOG_RESULT - forward to offscreen
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (ignoreExtensionIframeSender(sender, sendResponse)) {
+        return true;
+    }
     if (msg.type === 'SET_DIALOG_RESULT') {
         console.log('[iMacros SW] Forwarding SET_DIALOG_RESULT for window:', msg.windowId);
         dialogCache.set(msg.windowId, Object.assign({}, dialogCache.get(msg.windowId), { result: msg.response }));
@@ -2325,8 +2498,11 @@ async function sendMessageToOffscreen(msg) {
             const context = [];
             if (msg.type) context.push(`type=${msg.type}`);
             if (msg.command) context.push(`command=${msg.command}`);
-            if (msg.windowId !== undefined) context.push(`windowId=${msg.windowId}`);
-            if (msg.tabId !== undefined) context.push(`tabId=${msg.tabId}`);
+            const windowId = msg.windowId !== undefined ? msg.windowId : msg.win_id;
+            const tabId = msg.tabId !== undefined ? msg.tabId : msg.tab_id;
+            if (windowId !== undefined) context.push(`windowId=${windowId}`);
+            if (tabId !== undefined) context.push(`tabId=${tabId}`);
+            if (msg.requestId) context.push(`requestId=${msg.requestId}`);
             const contextStr = context.length ? ` [${context.join(', ')}]` : '';
             throw new Error(`${err.message}${contextStr}`, { cause: err });
         }
@@ -2502,6 +2678,9 @@ const FocusGuard = (() => {
 })();
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (ignoreExtensionIframeSender(sender, sendResponse)) {
+        return true;
+    }
     if (!msg || !msg.command || !msg.command.startsWith('FOCUS_GUARD')) return false;
 
     const respond = (payload) => {
@@ -2655,6 +2834,9 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
 
 // Handle the runMacroByUrl command in the message listener
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (ignoreExtensionIframeSender(sender, sendResponse)) {
+        return true;
+    }
 
     if (msg.command === 'runMacroByUrl' && msg.target === 'background') {
         // Forward to offscreen document
