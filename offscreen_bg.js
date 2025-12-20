@@ -716,7 +716,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             playInFlight.delete(windowId);
             const errorMsg = e && e.message ? e.message : String(e);
             if (typeof notifyPanelStatLine === 'function') {
-                notifyPanelStatLine(windowId, `Error: ${errorMsg}`, "error");
+                notifyPanelStatLine(windowId, `Error loading macro: ${errorMsg}`, "error");
             } else {
                 showNotification(windowId, { errorCode: 0, message: "Error loading macro: " + errorMsg });
             }
