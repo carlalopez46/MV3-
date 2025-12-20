@@ -8,6 +8,9 @@ let lastProcessedExecutionId = null;
 let executionIdRestorePromise = null;
 let executionIdRestoreComplete = false;
 const recentPlayRequests = new Map();
+const DUPLICATE_PLAY_WINDOW_MS = 800;
+const DUPLICATE_PLAY_MAX_ENTRIES = 200;
+const DUPLICATE_PLAY_PRUNE_AGE_MS = DUPLICATE_PLAY_WINDOW_MS * 4;
 
 function restoreExecutionIdFromStorage() {
     if (executionIdRestorePromise) {
@@ -2318,10 +2321,14 @@ async function resolveTargetWindowId(msgWinId, sender) {
     return true;
 }
 
-const DUPLICATE_PLAY_WINDOW_MS = 800;
-
 function isDuplicatePlayRequest(winId, filePath) {
-    if (!winId || !filePath) return false;
+    if (!winId || !filePath) {
+        console.debug('[iMacros SW] Duplicate play guard skipped due to missing winId or filePath', {
+            winId,
+            filePath
+        });
+        return false;
+    }
     const key = `${winId}:${filePath}`;
     const now = Date.now();
     const last = recentPlayRequests.get(key);
@@ -2329,9 +2336,9 @@ function isDuplicatePlayRequest(winId, filePath) {
     if (typeof last === 'number' && now - last < DUPLICATE_PLAY_WINDOW_MS) {
         return true;
     }
-    if (recentPlayRequests.size > 200) {
+    if (recentPlayRequests.size > DUPLICATE_PLAY_MAX_ENTRIES) {
         for (const [entryKey, timestamp] of recentPlayRequests.entries()) {
-            if (typeof timestamp !== 'number' || now - timestamp > DUPLICATE_PLAY_WINDOW_MS * 4) {
+            if (typeof timestamp !== 'number' || now - timestamp > DUPLICATE_PLAY_PRUNE_AGE_MS) {
                 recentPlayRequests.delete(entryKey);
             }
         }
