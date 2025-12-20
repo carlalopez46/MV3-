@@ -645,6 +645,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 if (sendResponse) {
                     sendResponse({
                         ack: true,
+                        success: true,
                         queued: true,
                         requestId: requestId,
                         status: 'queued',
@@ -652,7 +653,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     });
                 }
             } catch (e) {
-                if (sendResponse) sendResponse({ success: false, error: e.message });
+                if (sendResponse) {
+                    sendResponse({
+                        ack: false,
+                        success: false,
+                        error: e.message,
+                        requestId: requestId
+                    });
+                }
             }
             return true;
         }
