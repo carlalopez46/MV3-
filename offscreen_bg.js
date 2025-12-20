@@ -18,6 +18,10 @@ const virtualFileService = typeof VirtualFileService === "function" ? new Virtua
 let vfsReadyPromise = null;
 // Track in-flight play requests per window to avoid duplicate execution.
 const playInFlight = new Set();
+const recentPlayStarts = new Map();
+const DUPLICATE_PLAY_START_WINDOW_MS = 1500;
+const DUPLICATE_PLAY_START_MAX_ENTRIES = 200;
+const DUPLICATE_PLAY_START_PRUNE_AGE_MS = DUPLICATE_PLAY_START_WINDOW_MS * 4;
 const OFFSCREEN_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
 
 if (typeof globalThis.afioCache === "undefined") {
@@ -44,6 +48,36 @@ function notifyAsyncError(win_id, message) {
     if (typeof showNotification === 'function') {
         showNotification(win_id, { errorCode: 0, message: message });
     }
+}
+
+function isDuplicatePlayStart(winId, macroPath, sourceLabel) {
+    if (!winId || !macroPath) {
+        console.debug(`[iMacros Offscreen] Duplicate play start guard skipped (${sourceLabel})`, {
+            winId,
+            macroPath
+        });
+        return false;
+    }
+    const key = `${winId}:${macroPath}`;
+    const now = Date.now();
+    const last = recentPlayStarts.get(key);
+    recentPlayStarts.set(key, now);
+    if (typeof last === 'number' && now - last < DUPLICATE_PLAY_START_WINDOW_MS) {
+        return true;
+    }
+    if (recentPlayStarts.size > DUPLICATE_PLAY_START_MAX_ENTRIES) {
+        for (const [entryKey, timestamp] of recentPlayStarts.entries()) {
+            if (typeof timestamp !== 'number' || now - timestamp > DUPLICATE_PLAY_START_PRUNE_AGE_MS) {
+                recentPlayStarts.delete(entryKey);
+            }
+        }
+        while (recentPlayStarts.size > DUPLICATE_PLAY_START_MAX_ENTRIES) {
+            const oldestKey = recentPlayStarts.keys().next().value;
+            if (!oldestKey) break;
+            recentPlayStarts.delete(oldestKey);
+        }
+    }
+    return false;
 }
 
 async function ensureVirtualFileService() {
@@ -332,6 +366,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             console.log("[Offscreen] Reading and playing file (original path):", filePath, { requestId: playRequestId });
             if (Storage.getBool("debug"))
                 console.log("[Offscreen] Loop count:", loops, "(should be 1 for normal play, >1 for Play Loop)");
+
+            if (isDuplicatePlayStart(win_id, filePath, "playFile")) {
+                console.warn(`[Offscreen] Ignoring playFile - duplicate start detected for window ${win_id}`);
+                if (sendResponse) {
+                    sendResponse({ success: false, error: 'Duplicate play request', state: 'starting' });
+                }
+                return false;
+            }
 
             if (playInFlight.has(win_id)) {
                 console.warn(`[Offscreen] Ignoring playFile - a play request is already pending for window ${win_id}`);
@@ -640,6 +682,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             windowId,
             offscreenInstanceId: OFFSCREEN_INSTANCE_ID
         });
+
+        if (isDuplicatePlayStart(windowId, macroPath, "runMacroByUrl")) {
+            console.warn(`[iMacros Offscreen] Ignoring runMacroByUrl - duplicate start detected for window ${windowId}`);
+            if (sendResponse) sendResponse({ success: false, error: 'Duplicate runMacroByUrl request', state: 'starting' });
+            return false;
+        }
 
         if (playInFlight.has(windowId)) {
             if (sendResponse) sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
