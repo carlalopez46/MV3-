@@ -312,6 +312,14 @@ function handlePlayStartResponse(response, failureMessage, noResponseLog, failur
         updatePanelState("idle");
         return;
     }
+    if (response.status === 'ignored') {
+        console.info("[Panel] Play request ignored:", response);
+        const el = ensureStatusLineElement();
+        el.textContent = response.message || "Playback request ignored.";
+        el.style.color = "#666";
+        updatePanelState("idle");
+        return;
+    }
     if (response.success === false) {
         console.warn(`[Panel] ${failureLog}`, response);
         const el = ensureStatusLineElement();

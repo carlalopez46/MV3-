@@ -7,6 +7,11 @@ const SW_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
 let lastProcessedExecutionId = null;
 let executionIdRestorePromise = null;
 let executionIdRestoreComplete = false;
+const recentPlayRequests = new Map();
+const DUPLICATE_PLAY_WINDOW_MS = 800;
+const DUPLICATE_PLAY_MAX_ENTRIES = 200;
+const DUPLICATE_PLAY_PRUNE_AGE_MS = DUPLICATE_PLAY_WINDOW_MS * 4;
+let duplicatePlayBlockedCount = 0;
 
 function restoreExecutionIdFromStorage() {
     if (executionIdRestorePromise) {
@@ -2165,7 +2170,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     // --- Helper: パネルウィンドウIDから親ウィンドウIDを解決 ---
-    async function resolveTargetWindowId(msgWinId, sender) {
+async function resolveTargetWindowId(msgWinId, sender) {
         // 1. メッセージに含まれるwin_idをチェック
         if (msgWinId) {
             // パネルウィンドウのIDの場合、親ウィンドウを探す
@@ -2275,6 +2280,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 console.log("[iMacros SW] Resolved win_id:", win_id, { requestId, swInstanceId: SW_INSTANCE_ID });
                 console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", msg.loop ?? 1, ")");
 
+                if (isDuplicatePlayRequest(win_id, msg.file_path)) {
+                    duplicatePlayBlockedCount += 1;
+                    console.warn("[iMacros SW] Duplicate play request detected (guarded). Ignoring.", {
+                        win_id,
+                        file_path: msg.file_path,
+                        requestId,
+                        blockedCount: duplicatePlayBlockedCount
+                    });
+                    sendResponse({ status: 'ignored', message: 'Duplicate play request' });
+                    return;
+                }
+
                 // Offscreenにファイル読み込みと再生を依頼
                 sendMessageToOffscreen({
                     command: "CALL_CONTEXT_METHOD",
@@ -2305,6 +2322,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
 
     return true;
+}
+
+function isDuplicatePlayRequest(winId, filePath) {
+    if (!winId || !filePath) {
+        console.debug('[iMacros SW] Duplicate play guard skipped due to missing winId or filePath', {
+            winId,
+            filePath
+        });
+        return false;
+    }
+    const key = `${winId}:${filePath}`;
+    const now = Date.now();
+    const last = recentPlayRequests.get(key);
+    recentPlayRequests.set(key, now);
+    if (typeof last === 'number' && now - last < DUPLICATE_PLAY_WINDOW_MS) {
+        return true;
+    }
+    if (recentPlayRequests.size > DUPLICATE_PLAY_MAX_ENTRIES) {
+        for (const [entryKey, timestamp] of recentPlayRequests.entries()) {
+            if (typeof timestamp !== 'number' || now - timestamp > DUPLICATE_PLAY_PRUNE_AGE_MS) {
+                recentPlayRequests.delete(entryKey);
+            }
+        }
+        while (recentPlayRequests.size > DUPLICATE_PLAY_MAX_ENTRIES) {
+            const oldestKey = recentPlayRequests.keys().next().value;
+            if (!oldestKey) break;
+            recentPlayRequests.delete(oldestKey);
+        }
+    }
+    return false;
 }
 
     // --- 編集 (editMacro) ---
