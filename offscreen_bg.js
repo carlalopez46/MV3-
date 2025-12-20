@@ -387,7 +387,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`, { requestId: playRequestId });
 
             if (sendResponse) {
-                sendResponse({ ack: true, started: true });
+                sendResponse({
+                    ack: true,
+                    started: true,
+                    requestId: playRequestId,
+                    status: 'started'
+                });
             }
 
             (async () => {
@@ -437,9 +442,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             console.log("[Offscreen] Cleaned path for editor:", filePath);
 
             if (sendResponse) {
+                const openRequestId = requestId || createRequestId();
                 sendResponse({
                     ack: true,
-                    requestId: requestId,
+                    requestId: openRequestId,
                     status: 'opening'
                 });
             }
