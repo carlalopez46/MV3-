@@ -20,6 +20,13 @@ let vfsReadyPromise = null;
 const playInFlight = new Set();
 const OFFSCREEN_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
 
+if (typeof globalThis.afioCache === "undefined") {
+    console.warn("[iMacros Offscreen] afioCache not found, using polyfill that reports not installed");
+    globalThis.afioCache = {
+        isInstalled: () => Promise.resolve(false)
+    };
+}
+
 function createRequestId() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
         return crypto.randomUUID();
@@ -319,19 +326,23 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             if (Storage.getBool("debug"))
                 console.log("[Offscreen] Loop count:", loops, "(should be 1 for normal play, >1 for Play Loop)");
 
-            const existingContext = context[win_id];
-            if (existingContext && existingContext.mplayer && existingContext.mplayer.playing) {
-                console.warn(`[Offscreen] Ignoring playFile - macro already playing for window ${win_id}`);
-                if (sendResponse) {
-                    sendResponse({ success: false, error: 'Macro already playing', state: 'playing' });
-                }
-                return;
-            }
-
             if (playInFlight.has(win_id)) {
                 console.warn(`[Offscreen] Ignoring playFile - a play request is already pending for window ${win_id}`);
                 if (sendResponse) {
                     sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
+                }
+                return false;
+            }
+
+            playInFlight.add(win_id);
+            console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`, { requestId: playRequestId });
+
+            const existingContext = context[win_id];
+            if (existingContext && existingContext.mplayer && existingContext.mplayer.playing) {
+                console.warn(`[Offscreen] Ignoring playFile - macro already playing for window ${win_id}`);
+                playInFlight.delete(win_id);
+                if (sendResponse) {
+                    sendResponse({ success: false, error: 'Macro already playing', state: 'playing' });
                 }
                 return;
             }
@@ -382,9 +393,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     }
                 });
             };
-
-            playInFlight.add(win_id);
-            console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`, { requestId: playRequestId });
 
             if (sendResponse) {
                 sendResponse({
@@ -628,8 +636,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
         if (playInFlight.has(windowId)) {
             if (sendResponse) sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
-            return true;
+            return false;
         }
+
+        playInFlight.add(windowId);
+        console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
 
         if (!context[windowId]) {
             context[windowId] = {};
@@ -651,6 +662,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     });
                 }
             } catch (e) {
+                playInFlight.delete(windowId);
+                console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (queue error)`, { requestId });
                 if (sendResponse) {
                     sendResponse({
                         ack: false,
@@ -660,11 +673,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     });
                 }
             }
-            return true;
+            playInFlight.delete(windowId);
+            console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (queued)`, { requestId });
+            return false;
         }
-
-        playInFlight.add(windowId);
-        console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
 
         if (sendResponse) {
             sendResponse({
@@ -821,7 +833,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     });
                     return true;
                 }
-                executeContextMethod(win_id, method, sendResponse, request.args, request.requestId);
+                return executeContextMethod(win_id, method, sendResponse, request.args, request.requestId);
             } catch (err) {
                 sendResponse({ success: false, error: err.message || String(err) });
             }
@@ -953,10 +965,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
 
         switch (request.command) {
-            case 'actionClicked':
+            case 'actionClicked': {
                 handleActionClicked(request.tab);
                 break;
-            case 'notificationClicked':
+            }
+            case 'notificationClicked': {
                 var n_id = request.notificationId;
                 var w_id = parseInt(n_id);
                 if (isNaN(w_id) || !context[w_id] || !context[w_id].info_args) break;
@@ -964,6 +977,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 if (info.errorCode == 1) break;
                 edit(info.macro, true);
                 break;
+            }
         }
     } catch (e) {
         console.error('[iMacros Offscreen] Error handling message:', e);
@@ -2052,20 +2066,24 @@ if (typeof chrome.windows !== 'undefined' && chrome.windows.getAll) {
 }
 
 // Add this wrapper to offscreen_bg.js to handle notifications via Service Worker
-if (typeof chrome.notifications === 'undefined' || !chrome.notifications.create) {
-    chrome.notifications = {
-        create: function (notificationId, options, callback) {
-            chrome.runtime.sendMessage({
-                target: "background",
-                command: "show_notification",
-                args: options // Pass options directly
-            }, function (response) {
-                if (callback) callback(response);
-            });
-        },
-        clear: function (notificationId, callback) {
-            // Optional: implement clear logic
-            if (callback) callback();
-        }
+if (typeof chrome.notifications === 'undefined') {
+    chrome.notifications = {};
+}
+if (!chrome.notifications.create) {
+    chrome.notifications.create = function (notificationId, options, callback) {
+        chrome.runtime.sendMessage({
+            target: "background",
+            command: "showNotification",
+            options: options,
+            notificationId: notificationId
+        }, function (response) {
+            if (callback) callback(response);
+        });
+    };
+}
+if (!chrome.notifications.clear) {
+    chrome.notifications.clear = function (notificationId, callback) {
+        // Optional: implement clear logic
+        if (callback) callback();
     };
 }

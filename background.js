@@ -291,9 +291,9 @@ localStorageInitPromise.catch((err) => {
 // MV3 infrastructure (message bus + state machine)
 // ---------------------------------------------------------
 const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
-    maxRetries: 3,
+    maxRetries: 0,
     backoffMs: 150,
-    ackTimeoutMs: 10000
+    ackTimeoutMs: 5000
 });
 
 const sessionStorage = chrome.storage ? chrome.storage.session : null;
@@ -674,7 +674,7 @@ chrome.tabs.onDetached.addListener((tabId, detachInfo) => {
     forwardToOffscreen({
         type: 'TAB_DETACHED',
         tabId: tabId,
-        attachInfo: detachInfo
+        detachInfo: detachInfo
     }).catch((error) => logForwardingError('TAB_DETACHED', error));
 });
 
@@ -1129,44 +1129,58 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             try {
                 let result = {};
                 // Reconstruct nodes if present in payload
-                let node = getNode(payload.node);
-                let src = getNode(payload.src);
-                let dst = getNode(payload.dst);
+                const node = getNode(payload.node);
+                const src = getNode(payload.src);
+                const dst = getNode(payload.dst);
 
                 switch (method) {
                     case 'node_exists':
-                        result = { exists: await node.exists() };
+                        result = { exists: node ? await node.exists() : false };
                         break;
                     case 'node_isDir':
-                        result = { isDir: await node.isDir() };
+                        result = { isDir: node ? await node.isDir() : false };
                         break;
                     case 'node_isWritable':
-                        result = { isWritable: await node.isWritable() };
+                        result = { isWritable: node ? await node.isWritable() : false };
                         break;
                     case 'node_isReadable':
-                        result = { isReadable: await node.isReadable() };
+                        result = { isReadable: node ? await node.isReadable() : false };
                         break;
                     case 'node_copyTo':
-                        await src.copyTo(dst);
+                        if (src && dst) {
+                            await src.copyTo(dst);
+                        }
                         break;
                     case 'node_moveTo':
-                        await src.moveTo(dst);
+                        if (src && dst) {
+                            await src.moveTo(dst);
+                        }
                         break;
                     case 'node_remove':
-                        await node.remove();
+                        if (node) {
+                            await node.remove();
+                        }
                         break;
                     case 'readTextFile':
-                        result = { data: await afio.readTextFile(node) };
+                        result = { data: node ? await afio.readTextFile(node) : "" };
                         break;
                     case 'writeTextFile':
-                        await afio.writeTextFile(node, payload.data);
+                        if (node) {
+                            await afio.writeTextFile(node, payload.data);
+                        }
                         break;
                     case 'appendTextFile':
-                        await afio.appendTextFile(node, payload.data);
+                        if (node) {
+                            await afio.appendTextFile(node, payload.data);
+                        }
                         break;
                     case 'getNodesInDir':
-                        const nodes = await afio.getNodesInDir(node, payload.filter);
-                        result = { nodes: nodes.map(n => ({ _path: n.path, _is_dir_int: n.is_dir })) };
+                        if (node) {
+                            const nodes = await afio.getNodesInDir(node, payload.filter);
+                            result = { nodes: nodes.map(n => ({ _path: n.path, _is_dir_int: n.is_dir })) };
+                        } else {
+                            result = { nodes: [] };
+                        }
                         break;
                     case 'getLogicalDrives':
                         const drives = await afio.getLogicalDrives();
@@ -1177,10 +1191,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                         result = { node: { _path: defDir.path, _is_dir_int: defDir.is_dir } };
                         break;
                     case 'makeDirectory':
-                        await node.createDirectory();
+                        if (node) {
+                            await node.createDirectory();
+                        }
                         break;
                     case 'writeImageToFile':
-                        await afio.writeImageToFile(node, payload.imageData);
+                        if (node) {
+                            await afio.writeImageToFile(node, payload.imageData);
+                        }
                         break;
                     case 'queryLimits':
                         result = await afio.queryLimits();
@@ -2490,7 +2508,12 @@ async function sendMessageToOffscreen(msg) {
 
     await ensureOffscreenDocument();
     try {
-        return await messagingBus.sendRuntime(payload, { expectAck: true });
+        const options = { expectAck: true };
+        if (msg.command === 'CALL_CONTEXT_METHOD' && msg.method === 'playFile') {
+            options.maxRetries = 0;
+            options.ackTimeoutMs = 10000;
+        }
+        return await messagingBus.sendRuntime(payload, options);
     } catch (err) {
         const genericPatterns = ['No ack received on channel', 'Ack timeout'];
         const isGeneric = genericPatterns.some(pat => err && err.message && err.message.includes(pat));

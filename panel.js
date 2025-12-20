@@ -54,10 +54,13 @@ function initWindowId() {
 
         if (winIdParam) {
             // 安全のため基数10を指定 (Main側の記述を採用)
-            currentWindowId = parseInt(winIdParam, 10);
-            console.log("[Panel] Current window ID from URL:", currentWindowId);
-            resolve(currentWindowId);
-            return;
+            const parsed = parseInt(winIdParam, 10);
+            if (!isNaN(parsed)) {
+                currentWindowId = parsed;
+                console.log("[Panel] Current window ID from URL:", currentWindowId);
+                resolve(currentWindowId);
+                return;
+            }
         }
 
         // Fallback to getCurrent if no URL param (e.g. sidebar or direct open)
@@ -108,13 +111,12 @@ function sendCommand(command, payload = {}) {
             win_id: payload.win_id || currentWindowId
         };
         console.log(`[Panel] Sending command: ${command}`, message);
-        return new Promise((resolve) => {
+        return new Promise((resolve, reject) => {
             try {
                 chrome.runtime.sendMessage(message, (response) => {
                     if (chrome.runtime.lastError) {
                         console.error("[Panel] Message error:", chrome.runtime.lastError);
-                        // 通信エラーは無視してよい場合が多い
-                        resolve();
+                        reject(chrome.runtime.lastError);
                     } else {
                         console.log(`[Panel] Command ${command} response:`, response);
                         resolve(response);
@@ -122,7 +124,7 @@ function sendCommand(command, payload = {}) {
                 });
             } catch (e) {
                 console.error("[Panel] Failed to send message:", e);
-                resolve();
+                reject(e);
             }
         });
     });
@@ -699,25 +701,33 @@ function connectToLifecycle() {
                 console.warn("[Panel] Port disconnected due to error:", chrome.runtime.lastError.message);
             }
 
-            // Attempt to ping the runtime to see if it's still valid
-            try {
-                chrome.runtime.sendMessage({ keepAlive: true }, (response) => {
-                    if (chrome.runtime.lastError) {
-                        // Runtime error -> Extension likely reloaded or context invalidated
-                        console.log("[Panel] Extension context appears invalid (ping failed). Reloading panel...");
-                        // Short delay to ensure the new context is ready
-                        setTimeout(() => window.location.reload(), 500);
-                    } else {
-                        // Response received -> SW just terminated, extension is still alive
-                        console.log("[Panel] Service Worker terminated (idle), reconnecting...");
-                        connectToLifecycle();
-                    }
+            const pingPromise = new Promise((resolve, reject) => {
+                try {
+                    chrome.runtime.sendMessage({ keepAlive: true }, (response) => {
+                        if (chrome.runtime.lastError) {
+                            reject(chrome.runtime.lastError);
+                        } else {
+                            resolve(response);
+                        }
+                    });
+                } catch (e) {
+                    reject(e);
+                }
+            });
+
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error("Timeout")), 1000);
+            });
+
+            Promise.race([pingPromise, timeoutPromise])
+                .then(() => {
+                    console.log("[Panel] Service Worker terminated (idle), reconnecting...");
+                    connectToLifecycle();
+                })
+                .catch(() => {
+                    console.log("[Panel] Extension context appears invalid or timed out. Reloading panel...");
+                    setTimeout(() => window.location.reload(), 500);
                 });
-            } catch (e) {
-                // accessing chrome.runtime might throw if context is completely gone
-                console.log("[Panel] Extension context invalidated (exception). Reloading panel...");
-                setTimeout(() => window.location.reload(), 500);
-            }
         });
     } catch (e) {
         console.error("[Panel] Failed to connect to background:", e);
