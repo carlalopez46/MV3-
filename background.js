@@ -1124,8 +1124,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (!obj || !obj._path) return null;
             return afio.openNode(obj._path);
         };
-        // Note: when node reconstruction fails, return safe defaults instead of throwing
-        // to keep AFIO proxy resilient to invalid payloads.
+        /*
+         * AFIO proxy resilience note:
+         * We return safe defaults (false/empty/no-op) when node reconstruction fails to
+         * keep messaging robust across malformed payloads and SW/offscreen lifecycle
+         * boundaries. This favors availability over strict correctness; callers that
+         * need hard failures must validate inputs and handle null/empty responses.
+         * Primary callers include the AsyncFileIO AFIO_CALL proxy path and offscreen
+         * consumers of AFIO methods; adjust call sites/tests if stricter handling is
+         * required for specific flows.
+         */
 
         (async () => {
             try {
@@ -1134,46 +1142,65 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 const node = getNode(payload.node);
                 const src = getNode(payload.src);
                 const dst = getNode(payload.dst);
+                const warnNullNode = (action, nodeRef) => {
+                    const path = nodeRef && nodeRef._path ? nodeRef._path : undefined;
+                    console.warn(`[iMacros SW] AFIO ${action}: null node, returning safe default`, { path });
+                };
 
                 switch (method) {
                     case 'node_exists':
+                        if (!node) warnNullNode('node_exists', payload.node);
                         result = { exists: node ? await node.exists() : false };
                         break;
                     case 'node_isDir':
+                        if (!node) warnNullNode('node_isDir', payload.node);
                         result = { isDir: node ? await node.isDir() : false };
                         break;
                     case 'node_isWritable':
+                        if (!node) warnNullNode('node_isWritable', payload.node);
                         result = { isWritable: node ? await node.isWritable() : false };
                         break;
                     case 'node_isReadable':
+                        if (!node) warnNullNode('node_isReadable', payload.node);
                         result = { isReadable: node ? await node.isReadable() : false };
                         break;
                     case 'node_copyTo':
                         if (src && dst) {
                             await src.copyTo(dst);
+                        } else {
+                            warnNullNode('node_copyTo', payload.src || payload.dst);
                         }
                         break;
                     case 'node_moveTo':
                         if (src && dst) {
                             await src.moveTo(dst);
+                        } else {
+                            warnNullNode('node_moveTo', payload.src || payload.dst);
                         }
                         break;
                     case 'node_remove':
                         if (node) {
                             await node.remove();
+                        } else {
+                            warnNullNode('node_remove', payload.node);
                         }
                         break;
                     case 'readTextFile':
+                        if (!node) warnNullNode('readTextFile', payload.node);
                         result = { data: node ? await afio.readTextFile(node) : "" };
                         break;
                     case 'writeTextFile':
                         if (node) {
                             await afio.writeTextFile(node, payload.data);
+                        } else {
+                            warnNullNode('writeTextFile', payload.node);
                         }
                         break;
                     case 'appendTextFile':
                         if (node) {
                             await afio.appendTextFile(node, payload.data);
+                        } else {
+                            warnNullNode('appendTextFile', payload.node);
                         }
                         break;
                     case 'getNodesInDir':
@@ -1181,6 +1208,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                             const nodes = await afio.getNodesInDir(node, payload.filter);
                             result = { nodes: nodes.map(n => ({ _path: n.path, _is_dir_int: n.is_dir })) };
                         } else {
+                            warnNullNode('getNodesInDir', payload.node);
                             result = { nodes: [] };
                         }
                         break;
@@ -1195,11 +1223,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     case 'makeDirectory':
                         if (node) {
                             await node.createDirectory();
+                        } else {
+                            warnNullNode('makeDirectory', payload.node);
                         }
                         break;
                     case 'writeImageToFile':
                         if (node) {
                             await afio.writeImageToFile(node, payload.imageData);
+                        } else {
+                            warnNullNode('writeImageToFile', payload.node);
                         }
                         break;
                     case 'queryLimits':
