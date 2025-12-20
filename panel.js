@@ -223,7 +223,10 @@ function record() {
     }
     // UIを即時更新してストップボタンを有効化
     updatePanelState({ isRecording: true, isPlaying: false, currentMacro: selectedMacro });
-    sendCommand("startRecording");
+    sendCommand("startRecording")
+        .catch(() => {
+            updatePanelState("idle");
+        });
 }
 
 function stop() {
