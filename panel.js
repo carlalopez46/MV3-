@@ -190,10 +190,15 @@ function play() {
         executionId: executionId
     })
         .then((response) => {
-            if (response && response.success === false) {
+            if (!response) {
+                console.warn("[Panel] Playback did not return a response");
+                updatePanelState("idle");
+                return;
+            }
+            if (response.success === false) {
                 console.warn("[Panel] Playback failed to start", response);
                 const el = ensureStatusLineElement();
-                el.textContent = "Failed to start playback.";
+                el.textContent = response.error || "Failed to start playback.";
                 el.style.color = "#b00020";
                 updatePanelState("idle");
             }
@@ -282,20 +287,18 @@ function playLoop() {
         executionId: executionId
     })
         .then((response) => {
-            if (!response || response.success === false) {
+            if (!response) {
+                console.warn("[Panel] Loop playback did not return a response");
+                updatePanelState("idle");
+                return;
+            }
+            if (response.success === false) {
                 console.warn("[Panel] Loop playback failed to start", response);
                 const el = ensureStatusLineElement();
-                el.textContent = "Failed to start loop playback.";
+                el.textContent = response.error || "Failed to start loop playback.";
                 el.style.color = "#b00020";
                 updatePanelState("idle");
             }
-        })
-        .catch((error) => {
-            console.error("[Panel] Loop playback command failed", error);
-            const el = ensureStatusLineElement();
-            el.textContent = "Failed to start loop playback.";
-            el.style.color = "#b00020";
-            updatePanelState("idle");
         });
 }
 
