@@ -11,6 +11,13 @@ let panelState = {
     currentMacro: null
 };
 
+function generateExecutionId() {
+    return (typeof crypto !== "undefined" && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+const isTopFrame = window.top === window;
+
 // 情報パネルに表示した内容を保持（ヘルプ/編集ボタン用）
 let lastInfoArgs = null;
 
@@ -172,11 +179,25 @@ function play() {
     // UIを即時更新してストップボタンを有効化
     updatePanelState({ isPlaying: true, isRecording: false, currentMacro: macro });
 
+    const executionId = generateExecutionId();
+    console.log(`[Panel] Sending playMacro with ID: ${executionId}`);
+
     // パネル側ではファイルを読まず、パスだけを送る
     sendCommand("playMacro", {
         file_path: filePath, // ファイルパスまたはID
-        macro_name: macroName
-    });
+        macro_name: macroName,
+        loop: 1,  // ★修正: playボタンは常に1回のみ実行(繰り返しなし)
+        executionId: executionId
+    })
+        .then((response) => {
+            if (response && response.success === false) {
+                console.warn("[Panel] Playback failed to start", response);
+                const el = ensureStatusLineElement();
+                el.textContent = "Failed to start playback.";
+                el.style.color = "#b00020";
+                updatePanelState("idle");
+            }
+        });
 }
 
 function record() {
@@ -251,10 +272,14 @@ function playLoop() {
     // UIを即時更新してストップボタンを有効化
     updatePanelState({ isPlaying: true, isRecording: false, currentMacro: macro });
 
+    const executionId = generateExecutionId();
+    console.log(`[Panel] Sending playMacro(loop) with ID: ${executionId}`);
+
     sendCommand("playMacro", {
         file_path: filePath,
         macro_name: macroName,
-        loop: max
+        loop: max,
+        executionId: executionId
     })
         .then((response) => {
             if (!response || response.success === false) {
@@ -626,7 +651,8 @@ function handlePanelHighlightLine(data) {
 
 // --- 初期化とイベントリスナー ---
 
-window.addEventListener("message", (event) => {
+if (isTopFrame) {
+    window.addEventListener("message", (event) => {
     // fileView.js (iframe) からの通知を受け取る
     const treeFrame = document.getElementById("tree-iframe");
     const allowedSource = treeFrame ? treeFrame.contentWindow : null;
@@ -648,7 +674,7 @@ window.addEventListener("message", (event) => {
     if (event.data.type === "playMacro") {
         play();
     }
-});
+    });
 
 // --- Extension Reload Detection ---
 // Establish a long-lived connection to detect when the extension context is invalidated (reloaded/updated)
@@ -692,9 +718,9 @@ function connectToLifecycle() {
     }
 }
 
-connectToLifecycle();
+    connectToLifecycle();
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.target === 'panel' && message.type === 'PANEL_STATE_UPDATE') {
         if (message.state) updatePanelState(message.state);
     }
@@ -739,9 +765,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse && sendResponse({ success: true });
         return true;
     }
-});
+    });
 
-document.addEventListener("DOMContentLoaded", () => {
+    document.addEventListener("DOMContentLoaded", () => {
     console.log("[Panel] DOMContentLoaded");
 
     // ウィンドウIDを初期化
@@ -813,4 +839,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // 広告などの読み込み
     if (typeof setAdDetails === "function") setAdDetails();
-});
+    });
+} else {
+    console.info("[Panel] iframe context detected; skipping panel initialization:", window.location.href);
+}
