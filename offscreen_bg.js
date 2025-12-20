@@ -61,10 +61,10 @@ function isDuplicatePlayStart(winId, macroPath, sourceLabel) {
     const key = `${winId}:${macroPath}`;
     const now = Date.now();
     const last = recentPlayStarts.get(key);
-    recentPlayStarts.set(key, now);
     if (typeof last === 'number' && now - last < DUPLICATE_PLAY_START_WINDOW_MS) {
         return true;
     }
+    recentPlayStarts.set(key, now);
     if (recentPlayStarts.size > DUPLICATE_PLAY_START_MAX_ENTRIES) {
         for (const [entryKey, timestamp] of recentPlayStarts.entries()) {
             if (typeof timestamp !== 'number' || now - timestamp > DUPLICATE_PLAY_START_PRUNE_AGE_MS) {
