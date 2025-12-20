@@ -291,7 +291,7 @@ localStorageInitPromise.catch((err) => {
 // MV3 infrastructure (message bus + state machine)
 // ---------------------------------------------------------
 const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
-    maxRetries: 0,
+    maxRetries: 1,
     backoffMs: 150,
     ackTimeoutMs: 10000
 });
