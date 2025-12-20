@@ -198,6 +198,9 @@ function play() {
                 "Playback did not return a response",
                 "Playback failed to start"
             );
+        })
+        .catch(() => {
+            updatePanelState("idle");
         });
 }
 
@@ -289,6 +292,9 @@ function playLoop() {
                 "Loop playback did not return a response",
                 "Loop playback failed to start"
             );
+        })
+        .catch(() => {
+            updatePanelState("idle");
         });
 }
 
