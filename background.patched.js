@@ -2495,8 +2495,13 @@ async function sendMessageToOffscreen(msg) {
     const payload = { target: 'offscreen', ...msg };
 
     await ensureOffscreenDocument();
+    const options = { expectAck: true };
+    if (msg.command === 'CALL_CONTEXT_METHOD' && msg.method === 'playFile') {
+        options.maxRetries = 0;
+        options.ackTimeoutMs = 10000;
+    }
     try {
-        return await messagingBus.sendRuntime(payload, { expectAck: true });
+        return await messagingBus.sendRuntime(payload, options);
     } catch (err) {
         const genericPatterns = ['No ack received on channel', 'Ack timeout'];
         const isGeneric = genericPatterns.some(pat => err && err.message && err.message.includes(pat));

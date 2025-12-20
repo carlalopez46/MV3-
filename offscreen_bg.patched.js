@@ -1605,34 +1605,30 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 // Override edit function to use message passing for MV3
 // This replaces the window.open based implementation from bg.js which doesn't work in Offscreen Document
 globalThis.edit = function (macro, overwrite, line) {
-    console.log("[iMacros Offscreen] Requesting Service Worker to open editor for:", macro.name);
+    if (!macro) return;
+    const macroPath = macro.path || macro.file_id || (typeof macro === "string" ? macro : null);
+    if (!macroPath) {
+        console.warn("[iMacros Offscreen] edit called without a usable macro path");
+        return;
+    }
 
     if (!chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
         console.error("[iMacros Offscreen] chrome.runtime messaging not available");
         return;
     }
 
-    const editorData = {
-        "currentMacroToEdit": macro,
-        "editorOverwriteMode": overwrite,
-        "editorStartLine": line || 0
-    };
-
     chrome.runtime.sendMessage({
-        command: "openEditorWindow",
-        editorData
+        command: "editMacro",
+        file_path: macroPath,
+        line: line || 0,
+        overwrite: !!overwrite
     }, (response) => {
-        // ★Refactor: Consolidated error checking with robust message construction
         if (chrome.runtime.lastError || (response && response.success === false)) {
             const errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
-                             (response && response.error) ||
-                             "Unknown error opening editor";
-
-            console.error("[iMacros Offscreen] Failed to open editor:", errorMsg);
-            return;
+                (response && response.error) ||
+                "Unknown error opening editor";
+            console.error("[iMacros Offscreen] Failed to request editor:", errorMsg);
         }
-        // Success - editor window opened
-        console.log("[iMacros Offscreen] Editor window requested successfully");
     });
 };
 
@@ -2093,8 +2089,9 @@ if (!chrome.notifications.create) {
     chrome.notifications.create = function (notificationId, options, callback) {
         chrome.runtime.sendMessage({
             target: "background",
-            command: "show_notification",
-            args: options // Pass options directly
+            command: "showNotification",
+            options: options,
+            notificationId: notificationId
         }, function (response) {
             if (callback) callback(response);
         });
