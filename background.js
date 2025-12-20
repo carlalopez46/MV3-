@@ -131,10 +131,10 @@ async function initializeLocalStoragePolyfill() {
 const localStorageInitPromise = initializeLocalStoragePolyfill();
 globalThis.localStorageInitPromise = localStorageInitPromise;
 
-// NOTE: These imports must remain synchronous because code below instantiates
-// globals such as MessagingBus/ExecutionStateMachine at top level. Deferring
-// imports would trigger ReferenceError before the service worker finishes
-// evaluating.
+// NOTE: These imports must remain synchronous (relative to the code below)
+// because the code instantiates globals such as MessagingBus/ExecutionStateMachine
+// that depend on the imported modules. While wrapped in a promise callback to await
+// localStorage hydration, importScripts still executes synchronously once invoked.
 try {
     importScripts(
         'utils.js',
