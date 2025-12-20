@@ -11,6 +11,7 @@ const recentPlayRequests = new Map();
 const DUPLICATE_PLAY_WINDOW_MS = 800;
 const DUPLICATE_PLAY_MAX_ENTRIES = 200;
 const DUPLICATE_PLAY_PRUNE_AGE_MS = DUPLICATE_PLAY_WINDOW_MS * 4;
+let duplicatePlayBlockedCount = 0;
 
 function restoreExecutionIdFromStorage() {
     if (executionIdRestorePromise) {
@@ -2280,10 +2281,12 @@ async function resolveTargetWindowId(msgWinId, sender) {
                 console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", msg.loop ?? 1, ")");
 
                 if (isDuplicatePlayRequest(win_id, msg.file_path)) {
+                    duplicatePlayBlockedCount += 1;
                     console.warn("[iMacros SW] Duplicate play request detected (guarded). Ignoring.", {
                         win_id,
                         file_path: msg.file_path,
-                        requestId
+                        requestId,
+                        blockedCount: duplicatePlayBlockedCount
                     });
                     sendResponse({ status: 'ignored', message: 'Duplicate play request' });
                     return;
