@@ -12,6 +12,11 @@ const DUPLICATE_PLAY_WINDOW_MS = 800;
 const DUPLICATE_PLAY_MAX_ENTRIES = 200;
 const DUPLICATE_PLAY_PRUNE_AGE_MS = DUPLICATE_PLAY_WINDOW_MS * 4;
 let duplicatePlayBlockedCount = 0;
+const recentRunByUrlRequests = new Map();
+const DUPLICATE_RUN_BY_URL_WINDOW_MS = 1000;
+const DUPLICATE_RUN_BY_URL_MAX_ENTRIES = 200;
+const DUPLICATE_RUN_BY_URL_PRUNE_AGE_MS = DUPLICATE_RUN_BY_URL_WINDOW_MS * 4;
+let duplicateRunByUrlBlockedCount = 0;
 
 function restoreExecutionIdFromStorage() {
     if (executionIdRestorePromise) {
@@ -2354,6 +2359,36 @@ function isDuplicatePlayRequest(winId, filePath) {
     return false;
 }
 
+function isDuplicateRunByUrlRequest(winId, macroPath) {
+    if (!winId || !macroPath) {
+        console.debug('[iMacros SW] Duplicate run-by-url guard skipped due to missing winId or macroPath', {
+            winId,
+            macroPath
+        });
+        return false;
+    }
+    const key = `${winId}:${macroPath}`;
+    const now = Date.now();
+    const last = recentRunByUrlRequests.get(key);
+    recentRunByUrlRequests.set(key, now);
+    if (typeof last === 'number' && now - last < DUPLICATE_RUN_BY_URL_WINDOW_MS) {
+        return true;
+    }
+    if (recentRunByUrlRequests.size > DUPLICATE_RUN_BY_URL_MAX_ENTRIES) {
+        for (const [entryKey, timestamp] of recentRunByUrlRequests.entries()) {
+            if (typeof timestamp !== 'number' || now - timestamp > DUPLICATE_RUN_BY_URL_PRUNE_AGE_MS) {
+                recentRunByUrlRequests.delete(entryKey);
+            }
+        }
+        while (recentRunByUrlRequests.size > DUPLICATE_RUN_BY_URL_MAX_ENTRIES) {
+            const oldestKey = recentRunByUrlRequests.keys().next().value;
+            if (!oldestKey) break;
+            recentRunByUrlRequests.delete(oldestKey);
+        }
+    }
+    return false;
+}
+
     // --- 編集 (editMacro) ---
     if (msg.command === "editMacro") {
         console.log("[iMacros SW] Edit request for:", msg.file_path);
@@ -2884,6 +2919,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     // Check if this is an imacros:// URL
     if (details.url && details.url.startsWith('imacros://')) {
+        if (details.frameId !== 0) {
+            return;
+        }
         console.log('[iMacros SW] Intercepted imacros:// URL:', details.url);
 
         // Parse the imacros URL
@@ -2902,6 +2940,16 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
             // Get the window ID from the tab
             const tab = await chrome.tabs.get(details.tabId);
             const windowId = tab.windowId;
+
+            if (isDuplicateRunByUrlRequest(windowId, macroPath)) {
+                duplicateRunByUrlBlockedCount += 1;
+                console.warn('[iMacros SW] Duplicate run-by-url request detected (guarded). Ignoring.', {
+                    windowId,
+                    macroPath,
+                    blockedCount: duplicateRunByUrlBlockedCount
+                });
+                return;
+            }
 
             // Send message to offscreen to execute the macro
             try {
@@ -2943,6 +2991,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     if (msg.command === 'runMacroByUrl' && msg.target === 'background') {
+        if (isDuplicateRunByUrlRequest(msg.windowId || msg.win_id, msg.macroPath)) {
+            duplicateRunByUrlBlockedCount += 1;
+            console.warn('[iMacros SW] Duplicate run-by-url request detected (guarded). Ignoring.', {
+                windowId: msg.windowId || msg.win_id,
+                macroPath: msg.macroPath,
+                blockedCount: duplicateRunByUrlBlockedCount
+            });
+            sendResponse({ status: 'ignored', message: 'Duplicate run-by-url request' });
+            return true;
+        }
         // Forward to offscreen document
         sendMessageToOffscreen({
             command: 'runMacroByUrl',
