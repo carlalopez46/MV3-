@@ -3014,26 +3014,26 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
             const tab = await chrome.tabs.get(details.tabId);
             const windowId = tab.windowId;
 
-            if (isDuplicateRunByUrlRequest(windowId, macroPath)) {
+            const isDuplicate = isDuplicateRunByUrlRequest(windowId, macroPath);
+            if (isDuplicate) {
                 duplicateRunByUrlBlockedCount += 1;
                 console.warn('[iMacros SW] Duplicate run-by-url request detected (guarded). Ignoring.', {
                     windowId,
                     macroPath,
                     blockedCount: duplicateRunByUrlBlockedCount
                 });
-                return;
-            }
-
-            // Send message to offscreen to execute the macro
-            try {
-                await sendMessageToOffscreen({
-                    command: 'runMacroByUrl',
-                    macroPath: macroPath,
-                    windowId: windowId,
-                    tabId: details.tabId
-                });
-            } catch (error) {
-                console.error('[iMacros SW] Failed to trigger macro from imacros:// URL:', error);
+            } else {
+                // Send message to offscreen to execute the macro
+                try {
+                    await sendMessageToOffscreen({
+                        command: 'runMacroByUrl',
+                        macroPath: macroPath,
+                        windowId: windowId,
+                        tabId: details.tabId
+                    });
+                } catch (error) {
+                    console.error('[iMacros SW] Failed to trigger macro from imacros:// URL:', error);
+                }
             }
 
             // Navigate back or to a blank page to prevent the error page

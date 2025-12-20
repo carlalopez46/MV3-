@@ -13,6 +13,8 @@ let panelState = {
 const COMMAND_LOCK_WINDOW_MS = 800;
 let commandInFlight = false;
 let lastCommandAt = 0;
+const COMMAND_LOCK_TIMEOUT_MS = 10000;
+let commandLockTimeoutId = null;
 
 function generateExecutionId() {
     return (typeof crypto !== "undefined" && crypto.randomUUID)
@@ -57,11 +59,22 @@ function acquireCommandLock(context) {
     }
     commandInFlight = true;
     lastCommandAt = now;
+    if (commandLockTimeoutId) {
+        clearTimeout(commandLockTimeoutId);
+    }
+    commandLockTimeoutId = setTimeout(() => {
+        console.warn("[Panel] Command lock timed out; releasing");
+        releaseCommandLock();
+    }, COMMAND_LOCK_TIMEOUT_MS);
     return true;
 }
 
 function releaseCommandLock() {
     commandInFlight = false;
+    if (commandLockTimeoutId) {
+        clearTimeout(commandLockTimeoutId);
+        commandLockTimeoutId = null;
+    }
 }
 
 // パネルのウィンドウIDを保持
@@ -362,7 +375,7 @@ function handlePlayStartResponse(response, failureMessage, noResponseLog, failur
         updatePanelState("idle");
         return;
     }
-    if (response.success === false) {
+    if (response.success === false || (response.error && response.success !== true)) {
         console.warn(`[Panel] ${failureLog}`, response);
         const el = ensureStatusLineElement();
         el.textContent = response.error || failureMessage;
