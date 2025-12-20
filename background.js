@@ -2345,6 +2345,11 @@ function isDuplicatePlayRequest(winId, filePath) {
                 recentPlayRequests.delete(entryKey);
             }
         }
+        while (recentPlayRequests.size > DUPLICATE_PLAY_MAX_ENTRIES) {
+            const oldestKey = recentPlayRequests.keys().next().value;
+            if (!oldestKey) break;
+            recentPlayRequests.delete(oldestKey);
+        }
     }
     return false;
 }
