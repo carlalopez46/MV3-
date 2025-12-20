@@ -12,6 +12,11 @@ const DUPLICATE_PLAY_WINDOW_MS = 800;
 const DUPLICATE_PLAY_MAX_ENTRIES = 200;
 const DUPLICATE_PLAY_PRUNE_AGE_MS = DUPLICATE_PLAY_WINDOW_MS * 4;
 let duplicatePlayBlockedCount = 0;
+const recentPanelPlayRequests = new Map();
+const DUPLICATE_PANEL_PLAY_WINDOW_MS = 800;
+const DUPLICATE_PANEL_PLAY_MAX_ENTRIES = 200;
+const DUPLICATE_PANEL_PLAY_PRUNE_AGE_MS = DUPLICATE_PANEL_PLAY_WINDOW_MS * 4;
+let duplicatePanelPlayBlockedCount = 0;
 const recentRunByUrlRequests = new Map();
 const DUPLICATE_RUN_BY_URL_WINDOW_MS = 1000;
 const DUPLICATE_RUN_BY_URL_MAX_ENTRIES = 200;
@@ -2274,6 +2279,18 @@ async function resolveTargetWindowId(msgWinId, sender) {
                 });
             }
 
+            if (isDuplicatePanelPlayRequest(msg.win_id, msg.file_path)) {
+                duplicatePanelPlayBlockedCount += 1;
+                console.warn("[iMacros SW] Duplicate panel play request detected (guarded). Ignoring.", {
+                    win_id: msg.win_id,
+                    file_path: msg.file_path,
+                    requestId,
+                    blockedCount: duplicatePanelPlayBlockedCount
+                });
+                sendResponse({ status: 'ignored', message: 'Duplicate panel play request' });
+                return;
+            }
+
             // win_idを取得（パネルウィンドウIDから親ウィンドウIDを解決）
             resolveTargetWindowId(msg.win_id, sender).then(win_id => {
                 if (!win_id) {
@@ -2354,6 +2371,36 @@ function isDuplicatePlayRequest(winId, filePath) {
             const oldestKey = recentPlayRequests.keys().next().value;
             if (!oldestKey) break;
             recentPlayRequests.delete(oldestKey);
+        }
+    }
+    return false;
+}
+
+function isDuplicatePanelPlayRequest(panelWinId, filePath) {
+    if (!panelWinId || !filePath) {
+        console.debug('[iMacros SW] Duplicate panel play guard skipped due to missing panelWinId or filePath', {
+            panelWinId,
+            filePath
+        });
+        return false;
+    }
+    const key = `${panelWinId}:${filePath}`;
+    const now = Date.now();
+    const last = recentPanelPlayRequests.get(key);
+    recentPanelPlayRequests.set(key, now);
+    if (typeof last === 'number' && now - last < DUPLICATE_PANEL_PLAY_WINDOW_MS) {
+        return true;
+    }
+    if (recentPanelPlayRequests.size > DUPLICATE_PANEL_PLAY_MAX_ENTRIES) {
+        for (const [entryKey, timestamp] of recentPanelPlayRequests.entries()) {
+            if (typeof timestamp !== 'number' || now - timestamp > DUPLICATE_PANEL_PLAY_PRUNE_AGE_MS) {
+                recentPanelPlayRequests.delete(entryKey);
+            }
+        }
+        while (recentPanelPlayRequests.size > DUPLICATE_PANEL_PLAY_MAX_ENTRIES) {
+            const oldestKey = recentPanelPlayRequests.keys().next().value;
+            if (!oldestKey) break;
+            recentPanelPlayRequests.delete(oldestKey);
         }
     }
     return false;
@@ -2481,10 +2528,14 @@ function isDuplicateRunByUrlRequest(winId, macroPath) {
             type: 'QUERY_STATE',
             win_id: targetWin
         }).then((response) => {
-            sendResponse(response || { ok: false });
+            if (!response || typeof response.state === 'undefined') {
+                sendResponse(Object.assign({ state: 'idle', ok: false }, response || {}));
+                return;
+            }
+            sendResponse(response);
         }).catch((error) => {
             console.warn('[iMacros SW] Failed to retrieve state from Offscreen:', error);
-            sendResponse({ ok: false, error: error && error.message });
+            sendResponse({ state: 'idle', ok: false, error: error && error.message });
         });
         return true;
     }

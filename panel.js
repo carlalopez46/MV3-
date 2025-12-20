@@ -10,6 +10,9 @@ let panelState = {
     isPlaying: false,
     currentMacro: null
 };
+const COMMAND_LOCK_WINDOW_MS = 800;
+let commandInFlight = false;
+let lastCommandAt = 0;
 
 function generateExecutionId() {
     return (typeof crypto !== "undefined" && crypto.randomUUID)
@@ -40,6 +43,25 @@ function getMacroPathAndName(macro) {
         filePath: normalized ? (normalized.path || normalized.id) : null,
         macroName: normalized ? (normalized.name || normalized.text || "") : ""
     };
+}
+
+function acquireCommandLock(context) {
+    const now = Date.now();
+    if (commandInFlight) {
+        console.log(`[Panel] Ignoring ${context} request - command already in flight`);
+        return false;
+    }
+    if (now - lastCommandAt < COMMAND_LOCK_WINDOW_MS) {
+        console.log(`[Panel] Ignoring ${context} request - within debounce window`);
+        return false;
+    }
+    commandInFlight = true;
+    lastCommandAt = now;
+    return true;
+}
+
+function releaseCommandLock() {
+    commandInFlight = false;
 }
 
 // パネルのウィンドウIDを保持
@@ -166,15 +188,20 @@ function play() {
         console.log("[Panel] Ignoring play request - already playing");
         return;
     }
+    if (!acquireCommandLock("play")) {
+        return;
+    }
 
     if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
+        releaseCommandLock();
         return;
     }
 
     const { filePath, macroName, macro } = getMacroPathAndName(selectedMacro);
     if (!filePath) {
         alert("Unable to play: no macro path found.");
+        releaseCommandLock();
         return;
     }
 
@@ -201,6 +228,7 @@ function play() {
         })
         .catch(() => {
             updatePanelState("idle");
+            releaseCommandLock();
         });
 }
 
@@ -216,9 +244,13 @@ function record() {
         console.log("[Panel] Ignoring record request - currently playing");
         return;
     }
+    if (!acquireCommandLock("record")) {
+        return;
+    }
 
     if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
+        releaseCommandLock();
         return;
     }
     // UIを即時更新してストップボタンを有効化
@@ -231,6 +263,7 @@ function record() {
         })
         .catch(() => {
             updatePanelState("idle");
+            releaseCommandLock();
         });
 }
 
@@ -239,10 +272,12 @@ function stop() {
     sendCommand("stop")
         .then(() => {
             updatePanelState("idle");
+            releaseCommandLock();
         })
         .catch(() => {
             // Even if stop fails, reset the UI so the user can retry
             updatePanelState("idle");
+            releaseCommandLock();
         });
 }
 
@@ -263,21 +298,27 @@ function playLoop() {
         console.log("[Panel] Ignoring playLoop request - currently recording");
         return;
     }
+    if (!acquireCommandLock("playLoop")) {
+        return;
+    }
 
     if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
+        releaseCommandLock();
         return;
     }
     const loopInput = document.getElementById("max-loop");
     const max = loopInput ? parseInt(loopInput.value, 10) : NaN;
     if (!Number.isInteger(max) || max < 1) {
         alert("Please enter a valid loop count (positive integer).");
+        releaseCommandLock();
         return;
     }
 
     const { filePath, macroName, macro } = getMacroPathAndName(selectedMacro);
     if (!filePath) {
         alert("Unable to play: no macro path found.");
+        releaseCommandLock();
         return;
     }
 
@@ -303,6 +344,7 @@ function playLoop() {
         })
         .catch(() => {
             updatePanelState("idle");
+            releaseCommandLock();
         });
 }
 
@@ -525,6 +567,7 @@ function updatePanelState(state) {
         setDisabled("stop-replaying-button", true);
         setDisabled("stop-recording-button", true);
         setDisabled("record-button", false);
+        releaseCommandLock();
 
         // 選択状態に応じてボタン復帰
         if (selectedMacro && selectedMacro.type === 'macro') {
