@@ -408,9 +408,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     // mplayer.play()が呼び出される前にエラーが発生した場合、
                     // 状態変更コールバックが発火しないため、明示的にUIへ通知する
                     const errorMsg = err && err.message ? err.message : String(err);
-                    if (typeof notifyPanelStatLine === 'function') {
-                        notifyPanelStatLine(win_id, `Error: ${errorMsg}`, "error");
-                    }
+                    notifyAsyncError(win_id, `Error: ${errorMsg}`);
                 } finally {
                     // ★重要: パネルの状態更新とガード解除を共通化
                     if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
