@@ -319,6 +319,13 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 windowId: win_id,
                 offscreenInstanceId: OFFSCREEN_INSTANCE_ID
             });
+            if (typeof afio === 'undefined') {
+                console.error("[Offscreen] AFIO is not available for playFile");
+                if (sendResponse) {
+                    sendResponse({ success: false, error: 'AFIO not available', state: 'idle' });
+                }
+                return false;
+            }
             // ★追加: パスからファイルを読んで再生する
             let filePath = args[0];
             const loops = Math.max(1, parseInt(args[1], 10) || 1);
@@ -639,6 +646,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             return false;
         }
 
+        if (typeof afio === 'undefined') {
+            console.error('[iMacros Offscreen] AFIO is not available for runMacroByUrl');
+            if (sendResponse) sendResponse({ success: false, error: 'AFIO not available' });
+            return false;
+        }
+
         playInFlight.add(windowId);
         console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
 
@@ -649,8 +662,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         if (context[windowId].mplayer && context[windowId].mplayer.playing) {
             const mplayer = context[windowId].mplayer;
             const runCmd = [null, '"' + macroPath + '"'];
+            let queued = false;
             try {
                 mplayer._ActionTable["run"](runCmd);
+                queued = true;
                 if (sendResponse) {
                     sendResponse({
                         ack: true,
@@ -672,9 +687,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                         requestId: requestId
                     });
                 }
+                return false;
             }
-            playInFlight.delete(windowId);
-            console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (queued)`, { requestId });
+            if (queued) {
+                playInFlight.delete(windowId);
+                console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (queued)`, { requestId });
+            }
             return false;
         }
 
