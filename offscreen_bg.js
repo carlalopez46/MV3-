@@ -387,7 +387,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`, { requestId: playRequestId });
 
             if (sendResponse) {
-                sendResponse({ ack: true, started: true });
+                sendResponse({
+                    ack: true,
+                    started: true,
+                    requestId: playRequestId,
+                    status: 'started'
+                });
             }
 
             (async () => {
@@ -437,7 +442,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             console.log("[Offscreen] Cleaned path for editor:", filePath);
 
             if (sendResponse) {
-                sendResponse({ success: true, ack: true, status: 'opening' });
+                const openRequestId = requestId || createRequestId();
+                sendResponse({
+                    ack: true,
+                    requestId: openRequestId,
+                    status: 'opening'
+                });
             }
             // NOTE: Completion/errors are reported asynchronously; caller should rely on UI/state updates.
 
@@ -643,7 +653,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
 
         if (sendResponse) {
-            sendResponse({ success: true, ack: true, status: 'started' });
+            sendResponse({
+                ack: true,
+                started: true,
+                requestId: requestId,
+                status: 'started'
+            });
         }
         // NOTE: Completion/errors are logged asynchronously; caller should rely on macro state updates.
 
