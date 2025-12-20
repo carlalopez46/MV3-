@@ -190,13 +190,12 @@ function play() {
         executionId: executionId
     })
         .then((response) => {
-            if (response && response.success === false) {
-                console.warn("[Panel] Playback failed to start", response);
-                const el = ensureStatusLineElement();
-                el.textContent = "Failed to start playback.";
-                el.style.color = "#b00020";
-                updatePanelState("idle");
-            }
+            handlePlayStartResponse(
+                response,
+                "Failed to start playback.",
+                "Playback did not return a response",
+                "Playback failed to start"
+            );
         });
 }
 
@@ -282,21 +281,28 @@ function playLoop() {
         executionId: executionId
     })
         .then((response) => {
-            if (!response || response.success === false) {
-                console.warn("[Panel] Loop playback failed to start", response);
-                const el = ensureStatusLineElement();
-                el.textContent = "Failed to start loop playback.";
-                el.style.color = "#b00020";
-                updatePanelState("idle");
-            }
-        })
-        .catch((error) => {
-            console.error("[Panel] Loop playback command failed", error);
-            const el = ensureStatusLineElement();
-            el.textContent = "Failed to start loop playback.";
-            el.style.color = "#b00020";
-            updatePanelState("idle");
+            handlePlayStartResponse(
+                response,
+                "Failed to start loop playback.",
+                "Loop playback did not return a response",
+                "Loop playback failed to start"
+            );
         });
+}
+
+function handlePlayStartResponse(response, failureMessage, noResponseLog, failureLog) {
+    if (!response) {
+        console.warn(`[Panel] ${noResponseLog}`);
+        updatePanelState("idle");
+        return;
+    }
+    if (response.success === false) {
+        console.warn(`[Panel] ${failureLog}`, response);
+        const el = ensureStatusLineElement();
+        el.textContent = response.error || failureMessage;
+        el.style.color = "#b00020";
+        updatePanelState("idle");
+    }
 }
 
 function openSettings() {
