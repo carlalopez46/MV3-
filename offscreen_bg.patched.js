@@ -1932,7 +1932,7 @@ if (chrome.runtime.onInstalled) {
             const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*", "file://*/*"] });
             for (const tab of tabs) {
                 // Skip restricted URLs
-                if (tab.url.startsWith("chrome://") || tab.url.startsWith("edge://") || tab.url.startsWith("about:")) {
+                if (!tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("edge://") || tab.url.startsWith("about:")) {
                     continue;
                 }
 
