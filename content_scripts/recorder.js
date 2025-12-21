@@ -3,6 +3,13 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 */
 
 (function () {
+	    // MV3: content scripts can be injected multiple times by the SW retry logic.
+	    // Ensure we only create one CSRecorder instance per frame to avoid double recording.
+	    var __imacrosGlobal = (typeof globalThis !== 'undefined') ? globalThis : window;
+	    var __imacrosRecorderKey = '__imacros_mv3_cs_recorder_instance__';
+	    if (__imacrosGlobal && __imacrosGlobal[__imacrosRecorderKey]) {
+	        return;
+	    }
 
     // NOTE:  A small step towards unifying code base; at some later time
     // we'll have updated utils.js with better ns separation but for now
@@ -1604,5 +1611,12 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
     };
 
     var recorder = new CSRecorder();
+	    try {
+	        if (__imacrosGlobal) {
+	            __imacrosGlobal[__imacrosRecorderKey] = recorder;
+	        }
+	    } catch (e) {
+	        // ignore
+	    }
 
 })();

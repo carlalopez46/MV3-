@@ -71,12 +71,36 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             this.setupGlobalHandlers();
         }
 
-        /**
-         * Setup global error handlers to catch all uncaught errors
-         */
-        setupGlobalHandlers() {
-            // Catch uncaught errors in the main thread, including resource load failures
-            window.addEventListener('error', (event) => {
+	        /**
+	         * Setup global error handlers to catch all uncaught errors
+	         */
+	        setupGlobalHandlers() {
+	            // MV3 service worker/content scripts may end up evaluating this file more than once.
+	            // Ensure global handlers (and console wrapping) are installed only once per realm.
+	            if (this.__imacrosGlobalHandlersInstalled) {
+	                return;
+	            }
+	            this.__imacrosGlobalHandlersInstalled = true;
+	
+	            if (window && window.__imacros_errorLogger_globalHandlersInstalled) {
+	                // Handlers already installed by a previous evaluation.
+	                // Preserve access to the original console.error if it was wrapped.
+	                try {
+	                    const existingConsoleError = console.error;
+	                    if (existingConsoleError && existingConsoleError.__imacros_originalConsoleError) {
+	                        this.originalConsoleError = existingConsoleError.__imacros_originalConsoleError;
+	                    }
+	                } catch (e) {
+	                    // Ignore console access errors in restricted contexts.
+	                }
+	                return;
+	            }
+	            if (window) {
+	                window.__imacros_errorLogger_globalHandlersInstalled = true;
+	            }
+
+	            // Catch uncaught errors in the main thread, including resource load failures
+	            window.addEventListener('error', (event) => {
                 // Ignore benign ResizeObserver errors commonly seen in modern web apps
                 if (event.message && (
                     event.message.includes('ResizeObserver loop completed with undelivered notifications') ||
@@ -161,14 +185,20 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
                 });
             });
 
-            // Monitor console.error calls
-            const originalConsoleError = console.error;
-            const self = this;
-            console.error = (...args) => {
-                // Don't re-log if this is already an ErrorLogger formatted message
-                if (typeof args[0] === 'string' && args[0].indexOf('[iMacros ') === 0) {
-                    return originalConsoleError.apply(console, args);
-                }
+	            // Monitor console.error calls
+	            const originalConsoleError = console.error;
+	            const self = this;
+	            if (originalConsoleError && originalConsoleError.__imacros_errorLoggerWrapped) {
+	                // Already wrapped by a previous evaluation; keep the existing wrapper.
+	                this.originalConsoleError = originalConsoleError.__imacros_originalConsoleError || originalConsoleError;
+	                return;
+	            }
+	
+	            const wrappedConsoleError = (...args) => {
+	                // Don't re-log if this is already an ErrorLogger formatted message
+	                if (typeof args[0] === 'string' && args[0].indexOf('[iMacros ') === 0) {
+	                    return originalConsoleError.apply(console, args);
+	                }
 
                 const message = args.map(arg => {
                     if (typeof arg === 'object') {
@@ -196,13 +226,21 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
                     type: "ConsoleError"
                 });
 
-                // Call original console.error
-                originalConsoleError.apply(console, args);
-            };
+	                // Call original console.error
+	                originalConsoleError.apply(console, args);
+	            };
+	
+	            try {
+	                wrappedConsoleError.__imacros_errorLoggerWrapped = true;
+	                wrappedConsoleError.__imacros_originalConsoleError = originalConsoleError;
+	            } catch (e) {
+	                // Ignore failures to annotate functions (should be rare).
+	            }
+	            console.error = wrappedConsoleError;
 
-            // Store reference for use in outputToConsole
-            this.originalConsoleError = originalConsoleError;
-        }
+	            // Store reference for use in outputToConsole
+	            this.originalConsoleError = originalConsoleError;
+	        }
 
         /**
          * Extract filename from stack trace
@@ -777,13 +815,21 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
             return lines.join('\n');
         }
-    }
+	    }
 
-    // Create singleton instance
-    const errorLogger = new ErrorLogger();
+	    // Create/reuse singleton instance (idempotent across MV3 re-injection).
+	    const existingLogger = window && window.ErrorLogger;
+	    const errorLogger = existingLogger && typeof existingLogger.logError === 'function'
+	        ? existingLogger
+	        : new ErrorLogger();
+	    try {
+	        errorLogger.__imacrosErrorLoggerSingleton = true;
+	    } catch (e) {
+	        // ignore
+	    }
 
-    // Export to window for global access
-    window.ErrorLogger = errorLogger;
+	    // Export to window for global access
+	    window.ErrorLogger = errorLogger;
     window.ErrorLevel = ErrorLevel;
     window.ErrorCodes = ErrorCodes;
 

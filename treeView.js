@@ -94,7 +94,8 @@ window.addEventListener("load", function (event) {
         }
     });
 
-    window.top.onSelectionChanged(TreeView.selectedItem != null);
+    // Notify parent panel that no item is selected yet.
+    window.parent.postMessage({ type: "iMacrosSelectionChanged", node: null }, "*");
     document.body.oncontextmenu = function(e) {
         e.preventDefault()
     }
@@ -488,15 +489,30 @@ const TreeView = {
                         console.error("Can not parse bookmarklet " + data.node.text);
                         return;
                     }
-                    document.getElementById("imacros-macro-container").value = decodeURIComponent(atob(m[1]));
-                    window.top.onSelectionChanged(true);
+                    const macroSource = decodeURIComponent(atob(m[1]));
+                    document.getElementById("imacros-macro-container").value = macroSource;
+                    const nodeInfo = {
+                        type: 'macro',
+                        id: data.node.id,
+                        bookmark_id: data.node.id,
+                        text: data.node.text,
+                        source: macroSource
+                    };
+                    window.parent.postMessage({ type: "selectionChanged", selected: true }, "*");
+                    window.parent.postMessage({ type: "iMacrosSelectionChanged", node: nodeInfo }, "*");
 
                     e.preventDefault();
 
                 }
                 //folder
                 else {
-                    window.top.onSelectionChanged(false);
+                    const nodeInfo = {
+                        type: data.node.type || 'folder',
+                        id: data.node.id,
+                        text: data.node.text
+                    };
+                    window.parent.postMessage({ type: "selectionChanged", selected: false }, "*");
+                    window.parent.postMessage({ type: "iMacrosSelectionChanged", node: nodeInfo }, "*");
                 }
             });
 
@@ -505,7 +521,9 @@ const TreeView = {
                 const target_node = jQuery('#jstree_container').jstree(true).get_node(e.target.getAttribute("bookmark_id"));
 
                 if (target_node.type == 'macro') {
-                    setTimeout(function () { window.top.play(); }, 200);
+                    setTimeout(function () {
+                        window.parent.postMessage({ type: "playMacro" }, "*");
+                    }, 200);
                 }
             });
         });

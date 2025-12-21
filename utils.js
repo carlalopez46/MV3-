@@ -158,6 +158,17 @@ if (_needsLocalStoragePolyfill) {
 (function () {
     const globalScope = typeof self !== 'undefined' ? self : window;
 
+    // In MV3 the service worker may re-inject content scripts after a
+    // "Receiving end does not exist" error. utils.js must be safe to evaluate
+    // multiple times in the same document. Guard against re-registering the
+    // asyncRun message listener (and re-defining asyncRun) on reinjection.
+    if (globalScope && globalScope.__imacros_asyncRun_installed) {
+        return;
+    }
+    if (globalScope) {
+        globalScope.__imacros_asyncRun_installed = true;
+    }
+
     if (typeof window !== 'undefined' && window.postMessage) {
         const timers = [];
         const onMessage = function (event) {
@@ -1538,7 +1549,8 @@ var dialogUtils = (function () {
 // Allow utils.js to be evaluated multiple times (e.g., across MV3 contexts)
 // without throwing a SyntaxError for redeclaring the cached version variable.
 // Preserve any cached value that may already live on the global scope.
-const _cachedManifestGlobal = typeof globalThis !== 'undefined'
+// eslint-disable-next-line no-var
+var _cachedManifestGlobal = typeof globalThis !== 'undefined'
     ? globalThis
     : (typeof self !== 'undefined' ? self : window);
 if (typeof _cachedManifestGlobal.cachedManifestVersion === 'undefined') {
