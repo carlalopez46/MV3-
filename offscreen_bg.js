@@ -219,6 +219,32 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 console.error('[Offscreen] Error starting recorder:', e);
                 sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
             }
+        } else if (method === "recorder.saveAs") {
+            const rec = context[win_id].recorder;
+            if (!rec || typeof rec.saveAs !== 'function') {
+                sendResponse({ success: false, error: `Recorder saveAs not available for window ${win_id}` });
+                return;
+            }
+            try {
+                rec.saveAs();
+                sendResponse({ success: true });
+            } catch (e) {
+                console.error('[Offscreen] Error in recorder.saveAs:', e);
+                sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+            }
+        } else if (method === "recorder.capture") {
+            const rec = context[win_id].recorder;
+            if (!rec || typeof rec.capture !== 'function') {
+                sendResponse({ success: false, error: `Recorder capture not available for window ${win_id}` });
+                return;
+            }
+            try {
+                rec.capture();
+                sendResponse({ success: true });
+            } catch (e) {
+                console.error('[Offscreen] Error in recorder.capture:', e);
+                sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+            }
         } else if (method === "stop") {
             console.log("[Offscreen] Stopping...");
             if (win_id) {

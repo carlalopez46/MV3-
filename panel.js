@@ -280,6 +280,36 @@ function record() {
         });
 }
 
+function saveAs() {
+    console.log("[Panel] Save Page button clicked");
+    if (!panelState.isRecording) {
+        console.log("[Panel] Ignoring saveAs request - not recording");
+        return;
+    }
+    sendCommand("CALL_CONTEXT_METHOD", {
+        method: "recorder.saveAs",
+        args: []
+    }).catch(() => {
+        updatePanelState("idle");
+        releaseCommandLock();
+    });
+}
+
+function capture() {
+    console.log("[Panel] Capture button clicked");
+    if (!panelState.isRecording) {
+        console.log("[Panel] Ignoring capture request - not recording");
+        return;
+    }
+    sendCommand("CALL_CONTEXT_METHOD", {
+        method: "recorder.capture",
+        args: []
+    }).catch(() => {
+        updatePanelState("idle");
+        releaseCommandLock();
+    });
+}
+
 function stop() {
     console.log("[Panel] Stop button clicked");
     sendCommand("stop")
@@ -571,15 +601,21 @@ function updatePanelState(state) {
         setCollapsed("pause-button", false);
         setDisabled("stop-replaying-button", false);
         setDisabled("record-button", true);
+        setDisabled("saveas-button", true);
+        setDisabled("capture-button", true);
     } else if (stateName === "recording") {
         setDisabled("stop-recording-button", false);
         setDisabled("play-button", true);
+        setDisabled("saveas-button", false);
+        setDisabled("capture-button", false);
     } else { // idle
         setCollapsed("play-button", false);
         setCollapsed("pause-button", true);
         setDisabled("stop-replaying-button", true);
         setDisabled("stop-recording-button", true);
         setDisabled("record-button", false);
+        setDisabled("saveas-button", true);
+        setDisabled("capture-button", true);
         releaseCommandLock();
 
         // 選択状態に応じてボタン復帰
@@ -879,6 +915,8 @@ function connectToLifecycle() {
     addListener("stop-recording-button", stop);
     addListener("pause-button", pause);
     addListener("loop-button", playLoop);
+    addListener("saveas-button", saveAs);
+    addListener("capture-button", capture);
     addListener("settings-button", openSettings);
     addListener("edit-button", edit);
     addListener("help-button", openHelp);
