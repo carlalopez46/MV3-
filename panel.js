@@ -290,8 +290,8 @@ function saveAs() {
         method: "recorder.saveAs",
         args: []
     }).catch(() => {
-        updatePanelState("idle");
-        releaseCommandLock();
+        console.error("[Panel] saveAs command failed, stopping recorder");
+        stop();
     });
 }
 
@@ -305,8 +305,8 @@ function capture() {
         method: "recorder.capture",
         args: []
     }).catch(() => {
-        updatePanelState("idle");
-        releaseCommandLock();
+        console.error("[Panel] capture command failed, stopping recorder");
+        stop();
     });
 }
 
