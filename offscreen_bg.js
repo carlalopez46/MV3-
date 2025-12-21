@@ -18,6 +18,10 @@ const virtualFileService = typeof VirtualFileService === "function" ? new Virtua
 let vfsReadyPromise = null;
 // Track in-flight play requests per window to avoid duplicate execution.
 const playInFlight = new Set();
+const recentPlayStarts = new Map();
+const DUPLICATE_PLAY_START_WINDOW_MS = 1500;
+const DUPLICATE_PLAY_START_MAX_ENTRIES = 200;
+const DUPLICATE_PLAY_START_PRUNE_AGE_MS = DUPLICATE_PLAY_START_WINDOW_MS * 4;
 const OFFSCREEN_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
 
 if (typeof globalThis.afioCache === "undefined") {
@@ -43,6 +47,44 @@ function notifyAsyncError(win_id, message) {
     }
     if (typeof showNotification === 'function') {
         showNotification(win_id, { errorCode: 0, message: message });
+    }
+}
+
+function isDuplicatePlayStart(winId, macroPath, sourceLabel) {
+    if (!winId || !macroPath) {
+        console.debug(`[iMacros Offscreen] Duplicate play start guard skipped (${sourceLabel})`, {
+            winId,
+            macroPath
+        });
+        return false;
+    }
+    const key = `${winId}:${macroPath}`;
+    const now = Date.now();
+    const last = recentPlayStarts.get(key);
+    if (typeof last === 'number' && now - last < DUPLICATE_PLAY_START_WINDOW_MS) {
+        return true;
+    }
+    return false;
+}
+
+function recordPlayStart(winId, macroPath) {
+    if (!winId || !macroPath) {
+        return;
+    }
+    const key = `${winId}:${macroPath}`;
+    const now = Date.now();
+    recentPlayStarts.set(key, now);
+    if (recentPlayStarts.size > DUPLICATE_PLAY_START_MAX_ENTRIES) {
+        for (const [entryKey, timestamp] of recentPlayStarts.entries()) {
+            if (typeof timestamp !== 'number' || now - timestamp > DUPLICATE_PLAY_START_PRUNE_AGE_MS) {
+                recentPlayStarts.delete(entryKey);
+            }
+        }
+        while (recentPlayStarts.size > DUPLICATE_PLAY_START_MAX_ENTRIES) {
+            const oldestKey = recentPlayStarts.keys().next().value;
+            if (!oldestKey) break;
+            recentPlayStarts.delete(oldestKey);
+        }
     }
 }
 
@@ -185,8 +227,37 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 console.error('[Offscreen] Error starting recorder:', e);
                 sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
             }
+        } else if (method === "recorder.saveAs") {
+            const rec = context[win_id].recorder;
+            if (!rec || typeof rec.saveAs !== 'function') {
+                sendResponse({ success: false, error: `Recorder saveAs not available for window ${win_id}` });
+                return;
+            }
+            try {
+                rec.saveAs();
+                sendResponse({ success: true });
+            } catch (e) {
+                console.error('[Offscreen] Error in recorder.saveAs:', e);
+                sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+            }
+        } else if (method === "recorder.capture") {
+            const rec = context[win_id].recorder;
+            if (!rec || typeof rec.capture !== 'function') {
+                sendResponse({ success: false, error: `Recorder capture not available for window ${win_id}` });
+                return;
+            }
+            try {
+                rec.capture();
+                sendResponse({ success: true });
+            } catch (e) {
+                console.error('[Offscreen] Error in recorder.capture:', e);
+                sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+            }
         } else if (method === "stop") {
             console.log("[Offscreen] Stopping...");
+            if (win_id) {
+                playInFlight.delete(win_id);
+            }
             const stopContext = (ctx, id) => {
                 let stoppedPlayer = false;
                 let stoppedRecorder = false;
@@ -341,18 +412,26 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 return false;
             }
 
-            playInFlight.add(win_id);
-            console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`, { requestId: playRequestId });
-
             const existingContext = context[win_id];
             if (existingContext && existingContext.mplayer && existingContext.mplayer.playing) {
                 console.warn(`[Offscreen] Ignoring playFile - macro already playing for window ${win_id}`);
-                playInFlight.delete(win_id);
                 if (sendResponse) {
                     sendResponse({ success: false, error: 'Macro already playing', state: 'playing' });
                 }
                 return;
             }
+
+            if (isDuplicatePlayStart(win_id, filePath, "playFile")) {
+                console.warn(`[Offscreen] Ignoring playFile - duplicate start detected for window ${win_id}`);
+                if (sendResponse) {
+                    sendResponse({ success: false, error: 'Duplicate play request', state: 'starting' });
+                }
+                return false;
+            }
+
+            recordPlayStart(win_id, filePath);
+            playInFlight.add(win_id);
+            console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`, { requestId: playRequestId });
 
             const resolveAbsolutePath = async (path) => {
                 let cleanedPath = path.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
@@ -380,6 +459,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     file_id: absolutePath,
                     times: loops
                 };
+
+                if (!playInFlight.has(win_id)) {
+                    console.warn(`[Offscreen] playFile aborted before start for window ${win_id} (stop requested)`);
+                    return null;
+                }
 
                 const ctx = context[win_id] && context[win_id]._initialized
                     ? context[win_id]
@@ -646,14 +730,17 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             return false;
         }
 
+        if (isDuplicatePlayStart(windowId, macroPath, "runMacroByUrl")) {
+            console.warn(`[iMacros Offscreen] Ignoring runMacroByUrl - duplicate start detected for window ${windowId}`);
+            if (sendResponse) sendResponse({ success: false, error: 'Duplicate runMacroByUrl request', state: 'starting' });
+            return false;
+        }
+
         if (typeof afio === 'undefined') {
             console.error('[iMacros Offscreen] AFIO is not available for runMacroByUrl');
             if (sendResponse) sendResponse({ success: false, error: 'AFIO not available' });
             return false;
         }
-
-        playInFlight.add(windowId);
-        console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
 
         if (!context[windowId]) {
             context[windowId] = {};
@@ -696,6 +783,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             return false;
         }
 
+        recordPlayStart(windowId, macroPath);
+        playInFlight.add(windowId);
+        console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
+
         if (sendResponse) {
             sendResponse({
                 ack: true,
@@ -725,6 +816,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     };
                     if (!context[windowId].mplayer) {
                         context[windowId].mplayer = new MacroPlayer(windowId);
+                    }
+                    if (!playInFlight.has(windowId)) {
+                        console.warn(`[iMacros Offscreen] runMacroByUrl aborted before start for window ${windowId} (stop requested)`, { requestId });
+                        return;
                     }
                     const mplayer = context[windowId].mplayer;
                     const limits = { maxVariables: 'unlimited', loops: 'unlimited' };
