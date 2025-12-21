@@ -221,6 +221,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
         } else if (method === "stop") {
             console.log("[Offscreen] Stopping...");
+            if (win_id) {
+                playInFlight.delete(win_id);
+            }
             const stopContext = (ctx, id) => {
                 let stoppedPlayer = false;
                 let stoppedRecorder = false;
@@ -422,6 +425,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     file_id: absolutePath,
                     times: loops
                 };
+
+                if (!playInFlight.has(win_id)) {
+                    console.warn(`[Offscreen] playFile aborted before start for window ${win_id} (stop requested)`);
+                    return null;
+                }
 
                 const ctx = context[win_id] && context[win_id]._initialized
                     ? context[win_id]
@@ -773,6 +781,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     };
                     if (!context[windowId].mplayer) {
                         context[windowId].mplayer = new MacroPlayer(windowId);
+                    }
+                    if (!playInFlight.has(windowId)) {
+                        console.warn(`[iMacros Offscreen] runMacroByUrl aborted before start for window ${windowId} (stop requested)`, { requestId });
+                        return;
                     }
                     const mplayer = context[windowId].mplayer;
                     const limits = { maxVariables: 'unlimited', loops: 'unlimited' };
