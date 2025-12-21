@@ -51,6 +51,19 @@ function createRequestId() {
     return `off-${OFFSCREEN_INSTANCE_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+function normalizeMacroPathForGuard(path) {
+    if (typeof path !== 'string') return '';
+    let normalized = path.trim();
+    if (!normalized) return '';
+    normalized = normalized.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+    const marker = '/Macros/';
+    const index = normalized.toLowerCase().indexOf(marker.toLowerCase());
+    if (index >= 0) {
+        normalized = `Macros/${normalized.slice(index + marker.length)}`;
+    }
+    return normalized;
+}
+
 function normalizeWinId(value) {
     if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
     if (typeof value === 'string') {
@@ -429,6 +442,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 	                return false;
 	            }
 		            const loops = Math.max(1, parseInt(args[1], 10) || 1);
+		            const guardPath = normalizeMacroPathForGuard(filePath) || filePath;
 		            console.log("[Offscreen] Reading and playing file (original path):", filePath, { requestId: playRequestId });
 		            if (Storage.getBool("debug"))
 		                console.log("[Offscreen] Loop count:", loops, "(should be 1 for normal play, >1 for Play Loop)");
@@ -478,7 +492,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
 
 		            if (playFileStartGuard) {
-                const key = `playFile:${win_id}:${filePath}:${loops}`;
+                const key = `playFile:${win_id}:${guardPath}:${loops}`;
                 const dedupe = playFileStartGuard(key);
                 if (!dedupe.allowed) {
                     console.warn('[Offscreen] Duplicate playFile start ignored', {
@@ -920,6 +934,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 		            ? rawWindowId
 		            : (typeof rawWindowId === 'string' ? parseInt(rawWindowId, 10) : NaN);
 		        const requestId = request.requestId || createRequestId();
+		        const guardPath = normalizeMacroPathForGuard(macroPath) || macroPath;
 
 		        if (!Number.isInteger(windowId)) {
 		            console.warn('[iMacros Offscreen] runMacroByUrl missing/invalid windowId:', rawWindowId, { requestId });
@@ -963,8 +978,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         });
 
         if (request && request.source === 'imacros_url' && imacrosUrlRunGuard) {
-            const tabId = typeof request.tabId === 'number' ? request.tabId : 'na';
-            const key = `imacros-url:${tabId}:${windowId}:${macroPath}`;
+            const tabId = typeof request.tabId === 'number' ? request.tabId : null;
+            const guardWindowId = Number.isInteger(windowId) ? windowId : (Number.isInteger(tabId) ? tabId : 'na');
+            const key = `imacros-url:${guardWindowId}:${guardPath}`;
             const dedupe = imacrosUrlRunGuard(key);
             if (!dedupe.allowed) {
                 console.warn('[iMacros Offscreen] Duplicate imacros_url run suppressed', {

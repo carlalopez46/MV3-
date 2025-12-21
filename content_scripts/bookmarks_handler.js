@@ -8,6 +8,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // connector bridge to be available, but those scripts load later at
 // document_idle. We therefore wait for the dependencies instead of
 // failing immediately at document_start.
+const __imacrosBookmarksGlobal = (typeof globalThis !== 'undefined') ? globalThis : window;
+const __imacrosBookmarksHandlerKey = '__imacros_mv3_bookmarks_handler_initialized__';
+const __imacrosBookmarksHandlerInitialized = !!(__imacrosBookmarksGlobal && __imacrosBookmarksGlobal[__imacrosBookmarksHandlerKey]);
 
 function waitForDependenciesAndInit() {
     // Retry up to 5 seconds (50 attempts * 100 ms) for dependency availability.
@@ -134,7 +137,12 @@ function waitForDependenciesAndInit() {
     }, RETRY_DELAY_MS);
 }
 
-waitForDependenciesAndInit();
+if (!__imacrosBookmarksHandlerInitialized) {
+    if (__imacrosBookmarksGlobal) {
+        __imacrosBookmarksGlobal[__imacrosBookmarksHandlerKey] = true;
+    }
+    waitForDependenciesAndInit();
+}
 
 
 
@@ -211,5 +219,4 @@ function unwrap(line) {
     
     return line;
 }
-
 

@@ -704,6 +704,7 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
         sandbox.Array = Array;
 
         sandbox.crypto = { randomUUID: () => 'test-uuid' };
+        sandbox.__is_full_path = () => false;
 
         sandbox.window = sandbox;
         sandbox.self = sandbox;
@@ -777,9 +778,25 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
         sandbox.notifyPanel = () => {};
 
         sandbox.afio = {
+            getDefaultDir() {
+                return Promise.resolve({
+                    path: 'Macros',
+                    append(part) {
+                        const base = String(this.path || '').replace(/\/$/, '');
+                        this.path = `${base}/${part}`;
+                    }
+                });
+            },
             openNode(filePath) {
                 const leaf = String(filePath || '').split(/[\\/]/).pop();
-                return { leafName: leaf || '', _path: filePath };
+                return {
+                    leafName: leaf || '',
+                    _path: filePath,
+                    path: filePath,
+                    exists() {
+                        return Promise.resolve(true);
+                    }
+                };
             },
             readTextFile() {
                 const deferred = createDeferred();
@@ -816,6 +833,8 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
         sandbox.context = ctxStore;
 
         const contextVm = vm.createContext(sandbox);
+        const guardCode = safeRead('macro_execution_guard.js');
+        vm.runInContext(guardCode, contextVm, { filename: 'macro_execution_guard.js' });
         vm.runInContext(code, contextVm, { filename: 'offscreen_bg.js' });
 
         const listener = runtimeOnMessage._listeners[0];
@@ -1003,9 +1022,9 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
 		        }
 		    });
 
-		    await runCase('offscreen_bg older playFile does not emit macroStopped after newer play takes ownership', async () => {
-		        const harness = createHarness();
-		        const win_id = 1;
+    await runCase('offscreen_bg older playFile does not emit macroStopped after newer play takes ownership', async () => {
+        const harness = createHarness();
+        const win_id = 1;
 
         await harness.dispatch({
             target: 'offscreen',
@@ -1055,6 +1074,90 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
 
         if (harness.mplayerPlayCalls.length !== 1) {
             throw new Error(`Expected mplayer.play to be called once (for B), got ${harness.mplayerPlayCalls.length}`);
+        }
+    });
+
+    await runCase('offscreen_bg dedupes playFile for normalized macro path', async () => {
+        const harness = createHarness();
+        const win_id = 1;
+
+        await harness.dispatch({
+            target: 'offscreen',
+            command: 'CALL_CONTEXT_METHOD',
+            method: 'playFile',
+            win_id,
+            args: ['MV3-1221/Macros/a.iim', 1],
+            requestId: 'reqNormA'
+        });
+
+        if (harness.readDeferreds.length !== 1) {
+            throw new Error(`Expected 1 readTextFile call, got ${harness.readDeferreds.length}`);
+        }
+
+        harness.readDeferreds[0].resolve('CODE');
+        await harness.tick(4);
+
+        const responses = await harness.dispatch({
+            target: 'offscreen',
+            command: 'CALL_CONTEXT_METHOD',
+            method: 'playFile',
+            win_id,
+            args: ['Macros/a.iim', 1],
+            requestId: 'reqNormB'
+        });
+
+        if (harness.readDeferreds.length !== 1) {
+            throw new Error(`Expected duplicate playFile to be ignored, got ${harness.readDeferreds.length} reads`);
+        }
+
+        const ignored = responses.find((payload) => payload && payload.ignored === true);
+        if (!ignored) {
+            throw new Error('Expected normalized duplicate playFile to be ignored');
+        }
+    });
+
+    await runCase('offscreen_bg suppresses duplicate imacros_url across tab ids', async () => {
+        const harness = createHarness();
+        const windowId = 1;
+
+        await harness.context.init(windowId);
+
+        await harness.dispatch({
+            target: 'offscreen',
+            command: 'runMacroByUrl',
+            macroPath: 'Macros/a.iim',
+            windowId,
+            tabId: 123,
+            requestId: 'reqUrlA',
+            requestedAt: Date.now(),
+            source: 'imacros_url'
+        });
+
+        if (harness.readDeferreds.length !== 1) {
+            throw new Error(`Expected 1 readTextFile call, got ${harness.readDeferreds.length}`);
+        }
+
+        harness.readDeferreds[0].resolve('CODE');
+        await harness.tick(4);
+
+        const responses = await harness.dispatch({
+            target: 'offscreen',
+            command: 'runMacroByUrl',
+            macroPath: 'Macros/a.iim',
+            windowId,
+            tabId: 124,
+            requestId: 'reqUrlB',
+            requestedAt: Date.now(),
+            source: 'imacros_url'
+        });
+
+        if (harness.readDeferreds.length !== 1) {
+            throw new Error(`Expected duplicate runMacroByUrl to be ignored, got ${harness.readDeferreds.length} reads`);
+        }
+
+        const ignored = responses.find((payload) => payload && payload.reason === 'duplicate_imacros_url');
+        if (!ignored) {
+            throw new Error('Expected imacros_url duplicate to be ignored');
         }
     });
 

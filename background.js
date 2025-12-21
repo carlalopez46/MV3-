@@ -47,6 +47,19 @@ function createRequestId() {
     return `sw-${SW_INSTANCE_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+function normalizeMacroPathForGuard(path) {
+    if (typeof path !== 'string') return '';
+    let normalized = path.trim();
+    if (!normalized) return '';
+    normalized = normalized.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+    const marker = '/Macros/';
+    const index = normalized.toLowerCase().indexOf(marker.toLowerCase());
+    if (index >= 0) {
+        normalized = `Macros/${normalized.slice(index + marker.length)}`;
+    }
+    return normalized;
+}
+
 console.log('[iMacros SW] Instance ID:', SW_INSTANCE_ID);
 function resetPlaybackStateOnStartup() {
     try {
@@ -300,6 +313,11 @@ const messagingBus = new MessagingBus(chrome.runtime, chrome.tabs, {
     backoffMs: 150,
     ackTimeoutMs: 5000
 });
+
+const PLAY_MACRO_DUPLICATE_WINDOW_MS = 1000;
+const playMacroStartGuard = (typeof createRecentKeyGuard === 'function')
+    ? createRecentKeyGuard({ ttlMs: PLAY_MACRO_DUPLICATE_WINDOW_MS, maxKeys: 200 })
+    : null;
 
 const sessionStorage = chrome.storage ? chrome.storage.session : null;
 const localStorageBackend = chrome.storage ? chrome.storage.local : null;
@@ -2484,15 +2502,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     return;
                 }
 
+                const loopCount = Math.max(1, parseInt(msg.loop, 10) || 1);
+                const guardPath = normalizeMacroPathForGuard(msg.file_path) || msg.file_path;
+
                 console.log("[iMacros SW] Resolved win_id:", win_id, { requestId, swInstanceId: SW_INSTANCE_ID });
-                console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", msg.loop ?? 1, ")");
+                console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", loopCount, ")");
+
+                if (playMacroStartGuard && guardPath) {
+                    const key = `playMacro:${win_id}:${guardPath}:${loopCount}`;
+                    const dedupe = playMacroStartGuard(key);
+                    if (!dedupe.allowed) {
+                        console.warn('[iMacros SW] Duplicate playMacro suppressed', {
+                            win_id,
+                            filePath: msg.file_path,
+                            loop: loopCount,
+                            ageMs: dedupe.ageMs,
+                            ttlMs: dedupe.ttlMs,
+                            requestId
+                        });
+                        sendResponse({
+                            success: true,
+                            ignored: true,
+                            status: 'ignored_duplicate',
+                            message: 'Duplicate play request ignored',
+                            ageMs: dedupe.ageMs,
+                            ttlMs: dedupe.ttlMs
+                        });
+                        return;
+                    }
+                }
 
 	                // Offscreenにファイル読み込みと再生を依頼
 	                sendMessageToOffscreen({
 	                    command: "CALL_CONTEXT_METHOD",
 	                    method: "playFile",
 	                    win_id: win_id,
-	                    args: [msg.file_path, msg.loop ?? 1],
+	                    args: [msg.file_path, loopCount],
 	                    requestId: requestId,
 	                    executionId: executionId,
 	                    requestedAt
@@ -3113,12 +3158,21 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
             } catch (e) {
                 // Ignore decode errors
             }
+            const guardPath = normalizeMacroPathForGuard(macroPath) || macroPath;
 
             // Guard against duplicate firing (some Chrome builds may emit multiple
             // navigation events for a single bookmark activation).
             let shouldRunMacro = true;
+            let windowId = null;
+            try {
+                const tab = await chrome.tabs.get(details.tabId);
+                windowId = tab && tab.windowId;
+            } catch (e) {
+                console.warn('[iMacros SW] Unable to resolve windowId for imacros://run:', e);
+            }
             if (imacrosUrlRunGuard) {
-                const dedupeKey = `imacros-url:${details.tabId}:${macroPath}`;
+                const guardWindowId = Number.isInteger(windowId) ? windowId : details.tabId;
+                const dedupeKey = `imacros-url:${guardWindowId}:${guardPath}`;
                 const check = imacrosUrlRunGuard(dedupeKey);
                 if (!check.allowed) {
                     console.warn('[iMacros SW] Suppressed duplicate imacros://run trigger', {
@@ -3133,15 +3187,6 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
 
             if (shouldRunMacro) {
                 console.log('[iMacros SW] Triggering macro execution:', macroPath);
-
-                // Get the window ID from the tab
-                let windowId = null;
-                try {
-                    const tab = await chrome.tabs.get(details.tabId);
-                    windowId = tab && tab.windowId;
-                } catch (e) {
-                    console.warn('[iMacros SW] Unable to resolve windowId for imacros://run:', e);
-                }
 
                 if (windowId) {
                     // Send message to offscreen to execute the macro
