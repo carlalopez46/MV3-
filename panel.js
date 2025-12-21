@@ -395,6 +395,7 @@ function handlePlayStartResponse(response, failureMessage, noResponseLog, failur
     if (!response) {
         console.warn(`[Panel] ${noResponseLog}`);
         updatePanelState("idle");
+        releaseCommandLock();
         return;
     }
     if (response.status === 'ignored') {
@@ -402,7 +403,7 @@ function handlePlayStartResponse(response, failureMessage, noResponseLog, failur
         const el = ensureStatusLineElement();
         el.textContent = response.message || "Playback request ignored.";
         el.style.color = "#666";
-        updatePanelState("idle");
+        releaseCommandLock();
         return;
     }
     if (response.success === false || (response.error && response.success !== true)) {
@@ -411,6 +412,7 @@ function handlePlayStartResponse(response, failureMessage, noResponseLog, failur
         el.textContent = response.error || failureMessage;
         el.style.color = "#b00020";
         updatePanelState("idle");
+        releaseCommandLock();
     }
 }
 

@@ -64,6 +64,15 @@ function isDuplicatePlayStart(winId, macroPath, sourceLabel) {
     if (typeof last === 'number' && now - last < DUPLICATE_PLAY_START_WINDOW_MS) {
         return true;
     }
+    return false;
+}
+
+function recordPlayStart(winId, macroPath) {
+    if (!winId || !macroPath) {
+        return;
+    }
+    const key = `${winId}:${macroPath}`;
+    const now = Date.now();
     recentPlayStarts.set(key, now);
     if (recentPlayStarts.size > DUPLICATE_PLAY_START_MAX_ENTRIES) {
         for (const [entryKey, timestamp] of recentPlayStarts.entries()) {
@@ -77,7 +86,6 @@ function isDuplicatePlayStart(winId, macroPath, sourceLabel) {
             recentPlayStarts.delete(oldestKey);
         }
     }
-    return false;
 }
 
 async function ensureVirtualFileService() {
@@ -396,14 +404,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             if (Storage.getBool("debug"))
                 console.log("[Offscreen] Loop count:", loops, "(should be 1 for normal play, >1 for Play Loop)");
 
-            if (isDuplicatePlayStart(win_id, filePath, "playFile")) {
-                console.warn(`[Offscreen] Ignoring playFile - duplicate start detected for window ${win_id}`);
-                if (sendResponse) {
-                    sendResponse({ success: false, error: 'Duplicate play request', state: 'starting' });
-                }
-                return false;
-            }
-
             if (playInFlight.has(win_id)) {
                 console.warn(`[Offscreen] Ignoring playFile - a play request is already pending for window ${win_id}`);
                 if (sendResponse) {
@@ -412,18 +412,26 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 return false;
             }
 
-            playInFlight.add(win_id);
-            console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`, { requestId: playRequestId });
-
             const existingContext = context[win_id];
             if (existingContext && existingContext.mplayer && existingContext.mplayer.playing) {
                 console.warn(`[Offscreen] Ignoring playFile - macro already playing for window ${win_id}`);
-                playInFlight.delete(win_id);
                 if (sendResponse) {
                     sendResponse({ success: false, error: 'Macro already playing', state: 'playing' });
                 }
                 return;
             }
+
+            if (isDuplicatePlayStart(win_id, filePath, "playFile")) {
+                console.warn(`[Offscreen] Ignoring playFile - duplicate start detected for window ${win_id}`);
+                if (sendResponse) {
+                    sendResponse({ success: false, error: 'Duplicate play request', state: 'starting' });
+                }
+                return false;
+            }
+
+            recordPlayStart(win_id, filePath);
+            playInFlight.add(win_id);
+            console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`, { requestId: playRequestId });
 
             const resolveAbsolutePath = async (path) => {
                 let cleanedPath = path.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
@@ -717,14 +725,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             offscreenInstanceId: OFFSCREEN_INSTANCE_ID
         });
 
-        if (isDuplicatePlayStart(windowId, macroPath, "runMacroByUrl")) {
-            console.warn(`[iMacros Offscreen] Ignoring runMacroByUrl - duplicate start detected for window ${windowId}`);
-            if (sendResponse) sendResponse({ success: false, error: 'Duplicate runMacroByUrl request', state: 'starting' });
+        if (playInFlight.has(windowId)) {
+            if (sendResponse) sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
             return false;
         }
 
-        if (playInFlight.has(windowId)) {
-            if (sendResponse) sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
+        if (isDuplicatePlayStart(windowId, macroPath, "runMacroByUrl")) {
+            console.warn(`[iMacros Offscreen] Ignoring runMacroByUrl - duplicate start detected for window ${windowId}`);
+            if (sendResponse) sendResponse({ success: false, error: 'Duplicate runMacroByUrl request', state: 'starting' });
             return false;
         }
 
@@ -733,9 +741,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             if (sendResponse) sendResponse({ success: false, error: 'AFIO not available' });
             return false;
         }
-
-        playInFlight.add(windowId);
-        console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
 
         if (!context[windowId]) {
             context[windowId] = {};
@@ -777,6 +782,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
             return false;
         }
+
+        recordPlayStart(windowId, macroPath);
+        playInFlight.add(windowId);
+        console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
 
         if (sendResponse) {
             sendResponse({
