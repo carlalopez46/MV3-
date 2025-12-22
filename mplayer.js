@@ -1628,22 +1628,22 @@ MacroPlayer.prototype.dispatchKeyboardEvent = function (details) {
 };
 
 function get_mouse_button_name(button) {
-    if (button == -1)
+    if (button === -1)
         return "none";
-    else if (button == 0)
+    else if (button === 0)
         return "left";
-    else if (button == 1)
+    else if (button === 1)
         return "middle";
-    else if (button == 2)
+    else if (button === 2)
         return "right";
     else
         return "none"; // TODO: should we handle other buttons as well?
 }
 
 function get_mouse_event_name(type) {
-    if (type == "mousedown")
+    if (type === "mousedown")
         return "mousePressed";
-    else if (type == "mouseup")
+    else if (type === "mouseup")
         return "mouseReleased";
     else
         return "mouseMoved";
