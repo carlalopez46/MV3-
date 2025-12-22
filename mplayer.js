@@ -65,7 +65,11 @@ PlayerVariableManager.prototype.setVar = function (name, value) {
 
 PlayerVariableManager.prototype.resetLocalContext = function () {
     VariableManager.prototype.resetLocalContext.call(this);
-    this.player.currentLoop = this.localContext.LOOP;
+    // Only set currentLoop from localContext.LOOP if it's a valid positive integer
+    // This prevents overwriting the currentLoop set by play() with undefined/0
+    if (typeof this.localContext.LOOP === 'number' && this.localContext.LOOP > 0) {
+        this.player.currentLoop = this.localContext.LOOP;
+    }
 };
 
 PlayerVariableManager.prototype.clearGlobalVars = function () {
@@ -149,7 +153,7 @@ MacroPlayer.prototype._updateFocusGuardTab = function (tabId) {
     } catch (err) {
         console.warn('[MacroPlayer] Focus guard notification threw synchronously:', err);
     }
-  };
+};
 
 /**
  * Build list of candidate macro paths to try when resolving a macro name.
@@ -159,18 +163,18 @@ MacroPlayer.prototype._updateFocusGuardTab = function (tabId) {
  */
 MacroPlayer.prototype._buildMacroCandidates = function (macroPath) {
     if (!macroPath) return [];
-    
+
     // If path already has a known extension, return as-is
     if (/\.\w+$/i.test(macroPath)) {
         return [macroPath];
     }
-    
+
     // Check for hidden files (start with dot but no extension after)
     const lastSegment = macroPath.split(/[\/\\]/).pop();
     if (lastSegment.startsWith('.') && !/\.\w+$/.test(lastSegment)) {
         return [macroPath];
     }
-    
+
     // Try with default .iim extension first, then raw name
     return [macroPath + '.iim', macroPath];
 };
@@ -182,10 +186,10 @@ MacroPlayer.prototype._buildMacroCandidates = function (macroPath) {
 MacroPlayer.prototype.resetVariableStateForNewMacro = function () {
     // Clear legacy VAR array
     this.vars = new Array();
-    
+
     // Clear user variables map
     this.userVars.clear();
-    
+
     // Reset VariableManager if available
     if (this.varManager) {
         this.varManager.clearGlobalVars();
@@ -977,25 +981,25 @@ MacroPlayer.prototype.stopTimer = function (type) {
 MacroPlayer.prototype._popFrame = function () {
     if (this.callStack && this.callStack.length) {
         const frame = this.callStack.pop();
-        
+
         // Restore caller state from the frame
         if (frame) {
             // Restore loop stack if saved
             if (frame.loopStack !== undefined) {
                 this.loopStack = frame.loopStack;
             }
-            
+
             // Restore local context if saved
             if (frame.localContextSnapshot && this.varManager && this.varManager.restoreLocalContext) {
                 this.varManager.restoreLocalContext(frame.localContextSnapshot);
             }
-            
+
             // Restore autoplay suppression state
             if (frame.autoplaySuppressed !== undefined) {
                 this.autoplaySuppressed = frame.autoplaySuppressed;
             }
         }
-        
+
         // Decrement nesting level
         if (this.runNestLevel > 0) {
             this.runNestLevel--;
@@ -2357,8 +2361,8 @@ MacroPlayer.prototype.saveTarget = function (url) {
             // ★Refactor: Consolidated error checking with robust message construction
             if (chrome.runtime.lastError || (response && response.error)) {
                 var errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
-                               (response && response.error) ||
-                               "Unknown download error";
+                    (response && response.error) ||
+                    "Unknown download error";
 
                 this.handleError(new RuntimeError("Download failed: " + errorMsg));
                 return;
@@ -2474,15 +2478,24 @@ MacroPlayer.prototype.ActionTable["prompt"] = function (cmd) {
                 "iMacros Prompt Dialog",
                 { type: "askInput", text: x.text, default: x.defval });
             return p.then(function (result) {
+                console.log('[iMacros PROMPT] Dialog result received:', { result, varnum: x.varnum, varname: x.varname });
                 var retobj = { varnum: x.varnum, varname: x.varname };
                 retobj.value = "";
                 if (!result.canceled) {
                     retobj.value = result.inputValue;
                 }
+                console.log('[iMacros PROMPT] Setting variable:', { varnum: retobj.varnum, varname: retobj.varname, value: retobj.value });
                 if (typeof (retobj.varname) != "undefined") {
                     mplayer.setUserVar(retobj.varname, retobj.value);
                 } else if (typeof (retobj.varnum) != "undefined") {
-                    mplayer.vars[imns.s2i(retobj.varnum)] = retobj.value;
+                    const idx = imns.s2i(retobj.varnum);
+                    console.log('[iMacros PROMPT] Storing in mplayer.vars[' + idx + ']:', retobj.value);
+                    mplayer.vars[idx] = retobj.value;
+                    // Also update varManager if it exists to ensure getVar() returns the correct value
+                    if (mplayer.varManager && typeof mplayer.varManager.setVar === 'function') {
+                        mplayer.varManager.setVar('VAR' + idx, retobj.value);
+                        console.log('[iMacros PROMPT] Also stored in varManager as VAR' + idx);
+                    }
                 }
                 mplayer.next("PROMPT");
                 return
@@ -4133,13 +4146,13 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
 
     // Build list of candidate paths to try (with .iim extension first)
     const candidates = this._buildMacroCandidates(macroPath);
-    
+
     // Increment nesting level
     this.runNestLevel++;
-    
+
     let source = null;
     let resolvedPath = null;
-    
+
     // Try each candidate path in order
     for (const candidate of candidates) {
         resolvedPath = await this.resolveMacroPath(candidate);
@@ -4150,7 +4163,7 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
             source = loaded;
             break;
         }
-        
+
         // Try loading from filesystem
         try {
             source = await this.loadMacroFileFromFs(resolvedPath);
@@ -4159,7 +4172,7 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
             // Continue to next candidate
         }
     }
-    
+
     if (source == null) {
         this.runNestLevel--;
         throw new RuntimeError("Macro '" + macroPath + "' not found", 701);
@@ -4176,12 +4189,12 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
         autoplaySuppressed: this.autoplaySuppressed
     };
     this.callStack.push(callerFrame);
-    
+
     // Clear autoplay suppression for nested execution
     this.autoplaySuppressed = false;
-    
+
     this.play(macro, this.limits);
-    
+
     // Note: runNestLevel is decremented in _popFrame()
 };
 
@@ -4226,8 +4239,7 @@ MacroPlayer.prototype.play = function (macro, limits, callback) {
         this.times = macro.times || 1;
         this.currentLoop = macro.startLoop || 1;
         this.cycledReplay = this.times - this.currentLoop > 0;
-        if (Storage.getBool("debug"))
-            console.log("[MacroPlayer] play() initialized with times:", this.times, "currentLoop:", this.currentLoop, "cycledReplay:", this.cycledReplay);
+        console.log("[MacroPlayer] play() initialized with times:", this.times, "currentLoop:", this.currentLoop, "cycledReplay:", this.cycledReplay, "macro.times:", macro.times);
         // debugger should be attached at least once for every page if there is an
         // event command
         this.debuggerAttached = false;
@@ -4359,6 +4371,7 @@ MacroPlayer.prototype.next = function (caller_id) {
 
 
 MacroPlayer.prototype.playNextAction = function (caller_id) {
+    console.log("[MacroPlayer] playNextAction called from:", caller_id, "action_stack.length:", this.action_stack ? this.action_stack.length : 'undefined', "playing:", this.playing);
     if (!this.playing)
         return;
 
@@ -4418,19 +4431,18 @@ MacroPlayer.prototype.playNextAction = function (caller_id) {
             }
         } else {
             this.afterEachRun();
+            console.log("[MacroPlayer] Action stack empty. currentLoop:", this.currentLoop, "times:", this.times, "check:", this.currentLoop < this.times);
             if (this.currentLoop < this.times) {
                 this.firstLoop = false;
                 this.currentLoop++;
-                if (Storage.getBool("debug"))
-                    console.log("[MacroPlayer] Starting next loop:", this.currentLoop, "of", this.times);
+                console.log("[MacroPlayer] Starting next loop:", this.currentLoop, "of", this.times);
                 notifyPanelLoop(this.win_id, this.currentLoop);
                 this.action_stack = this.actions.slice();
                 this.action_stack.reverse();
                 this.next("new loop");
             } else {
                 // no more actions left
-                if (Storage.getBool("debug"))
-                    console.log("[MacroPlayer] All loops completed (", this.currentLoop, "/", this.times, "), stopping");
+                console.log("[MacroPlayer] All loops completed (", this.currentLoop, "/", this.times, "), calling stop()");
                 this.stop();
             }
         }
@@ -4912,8 +4924,8 @@ MacroPlayer.prototype.showAndAddExtractData = function (str) {
         // ★FIX: Check both runtime.lastError and response.error
         if (chrome.runtime.lastError || (response && response.error)) {
             var errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
-                           (response && response.error) ||
-                           "Unknown error opening dialog";
+                (response && response.error) ||
+                "Unknown error opening dialog";
 
             console.error("[MacroPlayer] Failed to open extract dialog:", errorMsg);
 
@@ -5016,19 +5028,23 @@ MacroPlayer.prototype.getColumnData = function (col) {
 
 // functions to access built-in VARiables
 MacroPlayer.prototype.getVar = function (idx) {
+    console.log('[iMacros getVar] Called with idx:', idx, 'hasVarManager:', !!(this.varManager && typeof this.varManager.getVar === 'function'));
     if (this.varManager && typeof this.varManager.getVar === 'function') {
         let name = idx;
         if (typeof idx !== 'string' || /^\d+$/.test(idx)) {
             name = 'VAR' + imns.s2i(idx);
         }
         const value = this.varManager.getVar(name);
+        console.log('[iMacros getVar] varManager.getVar(' + name + ') returned:', JSON.stringify(value), 'type:', typeof value);
         if (typeof value !== 'undefined') {
             return value === null ? "" : value;
         }
     }
 
     var num = typeof idx === "string" ? imns.s2i(idx) : idx;
-    return this.vars[num] || "";
+    const fallbackValue = this.vars[num] || "";
+    console.log('[iMacros getVar] Fallback to this.vars[' + num + ']:', JSON.stringify(fallbackValue));
+    return fallbackValue;
 };
 
 // functions to access user defined variables
@@ -5122,7 +5138,11 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
     var mplayer = this;
     var handleVariable = function (match_str, var_name) {
         var t = var_name.match(mplayer.limits.varsRe);
-        if (t) return mplayer.getVar(t[1]);
+        if (t) {
+            const value = mplayer.getVar(t[1]);
+            console.log('[iMacros EXPAND] Expanding ' + var_name + ' -> ' + JSON.stringify(value));
+            return value;
+        }
 
         t = var_name.match(/^!extract$/i);
         if (t) return mplayer.getExtractData();
