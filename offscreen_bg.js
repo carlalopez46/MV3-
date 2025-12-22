@@ -1594,6 +1594,16 @@ communicator.registerHandler("run-macro", function (data, tab_id) {
             : context.init(w_id);
 
         contextPromise.then(function (ctx) {
+            // ★修正: マクロ再生中の二重実行を防止
+            if (ctx.mplayer && ctx.mplayer.playing) {
+                console.warn('[iMacros Offscreen] run-macro ignored: macro already playing', { win_id: w_id });
+                return;
+            }
+            if (playInFlight.has(w_id)) {
+                console.warn('[iMacros Offscreen] run-macro ignored: play request in flight', { win_id: w_id });
+                return;
+            }
+
             if (Storage.getBool("before-play-dialog")) {
                 data.win_id = w_id;
                 dialogUtils.openDialog("beforePlay.html", "iMacros", data, { width: 400, height: 140 })
@@ -1626,6 +1636,18 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
             : context.init(win_id);
 
         ctxPromise.then(ctx => {
+            // ★修正: マクロ再生中の二重実行を防止
+            if (ctx.mplayer && ctx.mplayer.playing) {
+                console.warn('[iMacros Offscreen] PLAY_MACRO ignored: macro already playing', { win_id });
+                sendResponse({ success: true, ignored: true, reason: 'already_playing' });
+                return;
+            }
+            if (playInFlight.has(win_id)) {
+                console.warn('[iMacros Offscreen] PLAY_MACRO ignored: play request in flight', { win_id });
+                sendResponse({ success: true, ignored: true, reason: 'in_flight' });
+                return;
+            }
+
             return getLimits().then(
                 limits => asyncRun(function () {
                     try {
@@ -1718,8 +1740,8 @@ globalScope.edit = function (macro, overwrite, line) {
         // ★Refactor: Consolidated error checking with robust message construction
         if (chrome.runtime.lastError || (response && response.success === false)) {
             const errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
-                             (response && response.error) ||
-                             "Unknown error opening editor";
+                (response && response.error) ||
+                "Unknown error opening editor";
 
             console.error("[iMacros Offscreen] Failed to open editor:", errorMsg);
             return;
