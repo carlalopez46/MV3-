@@ -225,6 +225,12 @@
      * Run all regression tests
      */
     function run() {
+        // Reset results to avoid accumulation on multiple runs
+        results.passed = 0;
+        results.failed = 0;
+        results.skipped = 0;
+        testResults.length = 0;
+
         log('================================================================================');
         log('Regression Test Suite');
         log('================================================================================');
