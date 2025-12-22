@@ -4793,10 +4793,6 @@ MacroPlayer.prototype.stop = function () {    // Stop playing
     this.vars = new Array();
     this.userVars.clear();
 
-    // clear stopwatch and extract data to prevent memory leaks
-    this.watchTable = new Object();
-    this.clearExtractData();
-
     context.updateState(this.win_id, "idle");
 
     // restore proxy settings
@@ -4830,6 +4826,10 @@ MacroPlayer.prototype.stop = function () {    // Stop playing
             extra
         );
     }
+
+    // Clear stopwatch and extract data after sending to client to prevent memory leaks
+    this.watchTable = new Object();
+    this.clearExtractData();
 
     if (typeof this.callback == "function") {
         var f = this.callback, self = this;
