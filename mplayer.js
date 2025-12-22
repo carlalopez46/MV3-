@@ -4765,6 +4765,8 @@ MacroPlayer.prototype.stop = function () {    // Stop playing
         clearInterval(this.waitInterval);
         delete this.waitInterval;
     }
+    // Clear retry interval for TAG/EVENT waiting
+    this.clearRetryInterval();
     for (var type of this.timers.keys())
         this.stopTimer(type);
     this.timers.clear();
