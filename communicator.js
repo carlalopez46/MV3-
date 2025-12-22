@@ -21,6 +21,12 @@ Communicator.prototype.addListeners = function () {
         (msg, sender, sendResponse) => {
             // 内部メッセージや他からのメッセージをフィルタリング
             if (!msg || !msg.topic) return;
+            // Skip FORWARD_MESSAGE commands - they are handled by offscreen_bg.js directly.
+            // The message may contain both 'command' and 'topic', but we should only
+            // process it once via the FORWARD_MESSAGE handler in offscreen_bg.js.
+            if (msg.command === 'FORWARD_MESSAGE' || msg.target === 'offscreen') {
+                return;
+            }
             if (inOffscreenDocument && sender && sender.tab) {
                 // Offscreen must only handle content-script topics via SW forwarding.
                 return;
