@@ -413,6 +413,7 @@ function handlePlayStartResponse(response, failureMessage, noResponseLog, failur
         const el = ensureStatusLineElement();
         el.textContent = response.message || "Playback request ignored.";
         el.style.color = "#666";
+        updatePanelState("idle");
         releaseCommandLock();
         return;
     }
