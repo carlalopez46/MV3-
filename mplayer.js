@@ -539,16 +539,21 @@ MacroPlayer.prototype.addListeners = function () {
     communicator.registerHandler("error-occurred",
         this._onScriptError, this.win_id);
 
-    // Only register direct listeners if running in Service Worker (not Offscreen)
-    // In Offscreen, events are forwarded via TAB_UPDATED/TAB_ACTIVATED messages
-    if (typeof chrome.tabs !== 'undefined' && chrome.tabs.onUpdated) {
+    const isOffscreenDocument = (typeof window !== 'undefined'
+        && window.location
+        && typeof window.location.pathname === 'string'
+        && window.location.pathname.endsWith('offscreen.html'));
+
+    // Only register direct listeners if running outside Offscreen.
+    // In Offscreen, events are forwarded via TAB_UPDATED/TAB_ACTIVATED messages.
+    if (!isOffscreenDocument && typeof chrome.tabs !== 'undefined' && chrome.tabs.onUpdated) {
         chrome.tabs.onUpdated.addListener(this._onTabUpdated);
         chrome.tabs.onActivated.addListener(this._onActivated);
     }
 
     // use WebNavigation interface to trace download events
     // Only available in Service Worker, not Offscreen Document
-    if (typeof chrome.webNavigation !== 'undefined' && chrome.webNavigation.onErrorOccurred) {
+    if (!isOffscreenDocument && typeof chrome.webNavigation !== 'undefined' && chrome.webNavigation.onErrorOccurred) {
         // chrome.webNavigation.onBeforeNavigate.addListener(this._onBeforeNavigate);
         // chrome.webNavigation.onCompleted.addListener(this._onCompleted);
         chrome.webNavigation.onErrorOccurred.addListener(this._onErrorOccured);
@@ -2316,8 +2321,15 @@ MacroPlayer.prototype.onDownloadChanged = function (changeInfo) {
     }
 };
 
-// Check if chrome.downloads is available (not in Offscreen Document)
+// Check if chrome.downloads is available for direct use.
+// In MV3 Offscreen Document, we proxy download operations through the Service Worker
+// to preserve correlation (win_id/tab_id) and avoid duplicate event delivery.
 function hasDownloadsAPI() {
+    if (typeof window !== 'undefined' && window.location && typeof window.location.pathname === 'string') {
+        if (window.location.pathname.endsWith('offscreen.html')) {
+            return false;
+        }
+    }
     return typeof chrome !== 'undefined' && chrome.downloads && typeof chrome.downloads.download === 'function';
 }
 

@@ -1860,28 +1860,51 @@ CSPlayer.prototype.onQueryCssSelector = function (args, sendresponse) {
 };
 
 
-// Initialize player when DOM is ready to ensure connector and DOM are accessible
+// Initialize player when DOM is ready to ensure connector and DOM are accessible.
+// MV3: content scripts may be injected multiple times; keep initialization idempotent.
 try {
-    if (document.readyState === "complete" || document.readyState === "interactive") {
-        setTimeout(function () {
-            console.log("[iMacros MV3] Initializing CSPlayer (immediate)");
-            window.player = new CSPlayer();
-        }, 0);
-    } else {
-        window.addEventListener("DOMContentLoaded", function () {
-            console.log("[iMacros MV3] Initializing CSPlayer (DOMContentLoaded)");
-            window.player = new CSPlayer();
-        });
-        window.addEventListener("load", function () {
-            // Fallback in case DOMContentLoaded already fired
-            if (!window.player) {
-                console.log("[iMacros MV3] Initializing CSPlayer (load fallback)");
-                window.player = new CSPlayer();
+    var __imacrosGlobal = (typeof globalThis !== 'undefined') ? globalThis : window;
+    var __imacrosPlayerBootstrapKey = '__imacros_mv3_csplayer_bootstrap__';
+    var __imacrosPlayerBootstrap = (__imacrosGlobal && __imacrosGlobal[__imacrosPlayerBootstrapKey]) || null;
+
+    if (!__imacrosPlayerBootstrap) {
+        __imacrosPlayerBootstrap = { instance: null, scheduled: false };
+        try {
+            if (__imacrosGlobal) {
+                __imacrosGlobal[__imacrosPlayerBootstrapKey] = __imacrosPlayerBootstrap;
             }
-        });
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    if (__imacrosPlayerBootstrap.instance) {
+        window.player = __imacrosPlayerBootstrap.instance;
+    } else if (!__imacrosPlayerBootstrap.scheduled) {
+        __imacrosPlayerBootstrap.scheduled = true;
+
+        var initPlayer = function () {
+            if (__imacrosPlayerBootstrap.instance) {
+                window.player = __imacrosPlayerBootstrap.instance;
+                return;
+            }
+            try {
+                console.log("[iMacros MV3] Initializing CSPlayer");
+                __imacrosPlayerBootstrap.instance = new CSPlayer();
+                window.player = __imacrosPlayerBootstrap.instance;
+            } catch (err) {
+                __imacrosPlayerBootstrap.scheduled = false;
+                console.error("[iMacros MV3] CSPlayer initialization failed:", err);
+            }
+        };
+
+        if (document.readyState === "complete" || document.readyState === "interactive") {
+            setTimeout(initPlayer, 0);
+        } else {
+            window.addEventListener("DOMContentLoaded", initPlayer, { once: true });
+            window.addEventListener("load", initPlayer, { once: true });
+        }
     }
 } catch (e) {
     console.error("[iMacros MV3] Failed to initialize CSPlayer:", e);
 }
-
-

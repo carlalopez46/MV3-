@@ -172,6 +172,16 @@ Connector.prototype.postMessage = function (topic, data, callback) {
                     });
                 }
             }
+
+            if (topic === 'query-state') {
+                var normalized = (response && typeof response === 'object') ? response : {};
+                if (!normalized.state) {
+                    normalized = Object.assign({ state: 'idle', success: false }, normalized);
+                }
+                callback(normalized);
+                return;
+            }
+
             callback(response);
         });
     } else {
@@ -215,4 +225,18 @@ Connector.prototype.sendMessage = function (topic, data) {
     });
 };
 
-var connector = new Connector();
+// MV3: content scripts may be injected multiple times (e.g., when the SW retries
+// after "Receiving end does not exist"). Make initialization idempotent so we
+// don't register duplicate runtime listeners or duplicate handler arrays.
+var __imacrosConnectorGlobal = (typeof globalThis !== 'undefined') ? globalThis : window;
+var __imacrosConnectorKey = '__imacros_mv3_connector_instance__';
+var connector = (__imacrosConnectorGlobal && __imacrosConnectorGlobal[__imacrosConnectorKey])
+    ? __imacrosConnectorGlobal[__imacrosConnectorKey]
+    : new Connector();
+try {
+    if (__imacrosConnectorGlobal) {
+        __imacrosConnectorGlobal[__imacrosConnectorKey] = connector;
+    }
+} catch (e) {
+    // ignore
+}

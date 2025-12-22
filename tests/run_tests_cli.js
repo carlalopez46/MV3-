@@ -9,7 +9,7 @@
  *   node run_tests_cli.js [options]
  *
  * Options:
- *   --suite=<name>  Run specific test suite (fsaccess|afio|vars|macro|compat|all)
+ *   --suite=<name>  Run specific test suite (security|fsaccess|afio|vars|macro|panel|recorder|compat|all)
  *   --verbose       Show detailed output
  *   --watch         Watch for file changes and re-run tests
  */
@@ -134,11 +134,526 @@ function scanManifestForLegacyPaths(rootDir) {
     return issues;
 }
 
+/**
+ * Guard against MV3 "re-injection" issues where the service worker retries
+ * content script injection after seeing "Receiving end does not exist".
+ *
+ * When that happens, connector/recorder/player may be executed multiple times
+ * in the same document. These scripts must be idempotent and must not register
+ * duplicate listeners/handlers.
+ */
+function runContentScriptIdempotenceGuards(rootDir) {
+    const baseDir = rootDir;
+    const errors = [];
+    let passed = 0;
+    let failed = 0;
+
+    const recordFailure = (name, err) => {
+        failed += 1;
+        logError(`${name}: ${err.message || err}`);
+        errors.push({
+            context: 'ContentScriptIdempotenceGuard',
+            message: `${name}: ${err.message || err}`,
+            stack: err && err.stack ? err.stack : ''
+        });
+    };
+
+    const safeRead = (relativePath) => {
+        const fullPath = path.join(baseDir, relativePath);
+        if (!fs.existsSync(fullPath)) {
+            throw new Error(`Missing file: ${relativePath}`);
+        }
+        return fs.readFileSync(fullPath, 'utf8');
+    };
+
+    const guard = (name, fn) => {
+        try {
+            fn();
+            passed += 1;
+            logSuccess(name);
+        } catch (err) {
+            recordFailure(name, err);
+        }
+    };
+
+    guard('content_scripts/connector.js is idempotent', () => {
+        const relPath = path.join('content_scripts', 'connector.js');
+        const code = safeRead(relPath);
+
+        const counters = { onMessageAdd: 0 };
+        const sandbox = Object.create(null);
+        sandbox.console = console;
+        sandbox.Map = Map;
+        sandbox.Set = Set;
+        sandbox.WeakMap = WeakMap;
+        sandbox.WeakSet = WeakSet;
+        sandbox.Date = Date;
+        sandbox.Math = Math;
+        sandbox.String = String;
+        sandbox.Number = Number;
+        sandbox.Boolean = Boolean;
+        sandbox.Error = Error;
+        sandbox.TypeError = TypeError;
+
+        sandbox.location = { href: 'https://example.invalid/' };
+        sandbox.frames = [];
+        sandbox.frameElement = null;
+        sandbox.top = sandbox;
+        sandbox.window = sandbox;
+        sandbox.self = sandbox;
+        sandbox.globalThis = sandbox;
+        sandbox.addEventListener = () => { };
+        sandbox.removeEventListener = () => { };
+
+        sandbox.logWarning = () => { };
+        sandbox.logError = () => { };
+
+        sandbox.chrome = {
+            runtime: {
+                lastError: null,
+                onMessage: {
+                    addListener(fn) {
+                        counters.onMessageAdd += 1;
+                        // Keep a reference so tests can optionally inspect.
+                        sandbox.__imacros_runtime_listener__ = fn;
+                    }
+                },
+                sendMessage(_message, callback) {
+                    if (typeof callback === 'function') callback(undefined);
+                }
+            }
+        };
+
+        const context = vm.createContext(sandbox);
+        vm.runInContext(code, context, { filename: relPath });
+
+        const firstInstance = sandbox.__imacros_mv3_connector_instance__;
+        if (!firstInstance) {
+            throw new Error('Expected __imacros_mv3_connector_instance__ to be set after first load');
+        }
+        if (counters.onMessageAdd !== 1) {
+            throw new Error(`Expected chrome.runtime.onMessage.addListener to be called once, got ${counters.onMessageAdd}`);
+        }
+
+        vm.runInContext(code, context, { filename: relPath });
+        if (counters.onMessageAdd !== 1) {
+            throw new Error(`Expected no additional onMessage listeners on reinjection, got ${counters.onMessageAdd}`);
+        }
+        if (sandbox.__imacros_mv3_connector_instance__ !== firstInstance) {
+            throw new Error('Connector instance changed across reinjection');
+        }
+    });
+
+    guard('content_scripts/recorder.js is idempotent', () => {
+        const relPath = path.join('content_scripts', 'recorder.js');
+        const code = safeRead(relPath);
+
+        const counters = { registerHandler: 0, postMessage: 0 };
+        const sandbox = Object.create(null);
+        sandbox.console = console;
+        sandbox.Map = Map;
+        sandbox.Set = Set;
+        sandbox.WeakMap = WeakMap;
+        sandbox.WeakSet = WeakSet;
+        sandbox.Date = Date;
+        sandbox.Math = Math;
+        sandbox.String = String;
+        sandbox.Number = Number;
+        sandbox.Boolean = Boolean;
+        sandbox.Error = Error;
+        sandbox.TypeError = TypeError;
+        sandbox.parseInt = parseInt;
+        sandbox.isNaN = isNaN;
+
+        sandbox.location = { href: 'https://example.invalid/' };
+        sandbox.window = sandbox;
+        sandbox.self = sandbox;
+        sandbox.globalThis = sandbox;
+        sandbox.globalScope = sandbox;
+        sandbox.document = {
+            getElementById() { return null; }
+        };
+
+        sandbox.imns = Object.create(null);
+        sandbox.logWarning = () => { };
+        sandbox.logInfo = () => { };
+        sandbox.logError = () => { };
+
+        sandbox.connector = {
+            registerHandler(_topic, _handler) {
+                counters.registerHandler += 1;
+            },
+            postMessage(topic, _data, callback) {
+                counters.postMessage += 1;
+                if (typeof callback === 'function') {
+                    if (topic === 'query-state') {
+                        callback({ state: 'idle' });
+                    } else {
+                        callback({});
+                    }
+                }
+            }
+        };
+
+        const context = vm.createContext(sandbox);
+        vm.runInContext(code, context, { filename: relPath });
+
+        if (!sandbox.__imacros_mv3_cs_recorder_instance__) {
+            throw new Error('Expected __imacros_mv3_cs_recorder_instance__ to be set after first load');
+        }
+        if (counters.registerHandler !== 3) {
+            throw new Error(`Expected 3 registerHandler calls on first load, got ${counters.registerHandler}`);
+        }
+        if (counters.postMessage < 1) {
+            throw new Error('Expected query-state postMessage call on first load');
+        }
+
+        vm.runInContext(code, context, { filename: relPath });
+        if (counters.registerHandler !== 3) {
+            throw new Error(`Expected no additional registerHandler calls on reinjection, got ${counters.registerHandler}`);
+        }
+    });
+
+    guard('content_scripts/bookmarks_handler.js is idempotent', () => {
+        const relPath = path.join('content_scripts', 'bookmarks_handler.js');
+        const code = safeRead(relPath);
+
+        const counters = { addEventListener: 0, eventTypes: [] };
+        const sandbox = Object.create(null);
+        sandbox.console = console;
+        sandbox.Map = Map;
+        sandbox.Set = Set;
+        sandbox.Date = Date;
+        sandbox.Math = Math;
+        sandbox.String = String;
+        sandbox.Number = Number;
+        sandbox.Boolean = Boolean;
+        sandbox.Error = Error;
+        sandbox.TypeError = TypeError;
+
+        sandbox.location = { href: 'https://example.invalid/' };
+        sandbox.window = sandbox;
+        sandbox.self = sandbox;
+        sandbox.globalThis = sandbox;
+
+        sandbox.document = {
+            readyState: 'complete',
+            evaluate() {
+                return { iterateNext() { return null; } };
+            },
+            documentElement: {
+                getAttribute() { return ''; }
+            }
+        };
+
+        sandbox.XPathResult = { ORDERED_NODE_ITERATOR_TYPE: 5 };
+        sandbox.CustomEvent = function CustomEvent() { };
+        sandbox.atob = (value) => value;
+        sandbox.btoa = (value) => value;
+        sandbox.decodeURIComponent = decodeURIComponent;
+        sandbox.encodeURIComponent = encodeURIComponent;
+
+        sandbox.connector = {};
+        sandbox.imns = { escapeLine(value) { return value; } };
+
+        sandbox.window.addEventListener = (type) => {
+            counters.addEventListener += 1;
+            counters.eventTypes.push(type);
+        };
+        sandbox.window.dispatchEvent = () => { };
+        sandbox.setInterval = () => 1;
+        sandbox.clearInterval = () => { };
+
+        const context = vm.createContext(sandbox);
+        vm.runInContext(code, context, { filename: relPath });
+
+        if (!sandbox.__imacros_mv3_bookmarks_handler_initialized__) {
+            throw new Error('Expected bookmarks handler guard to be set after first load');
+        }
+        if (counters.addEventListener !== 1 || !counters.eventTypes.includes('iMacrosRunMacro')) {
+            throw new Error(`Expected iMacrosRunMacro listener to be registered once; got ${JSON.stringify(counters.eventTypes)}`);
+        }
+
+        vm.runInContext(code, context, { filename: relPath });
+        if (counters.addEventListener !== 1) {
+            throw new Error(`Expected no additional event listeners on reinjection, got ${counters.addEventListener}`);
+        }
+    });
+
+    guard('content_scripts/player.js is idempotent (bootstrap scheduling)', () => {
+        const relPath = path.join('content_scripts', 'player.js');
+        const code = safeRead(relPath);
+
+        const counters = { addEventListener: 0, eventTypes: [] };
+        const sandbox = Object.create(null);
+        sandbox.console = console;
+        sandbox.Map = Map;
+        sandbox.Set = Set;
+        sandbox.WeakMap = WeakMap;
+        sandbox.WeakSet = WeakSet;
+        sandbox.Date = Date;
+        sandbox.Math = Math;
+        sandbox.String = String;
+        sandbox.Number = Number;
+        sandbox.Boolean = Boolean;
+        sandbox.Error = Error;
+        sandbox.TypeError = TypeError;
+
+        sandbox.location = { href: 'https://example.invalid/' };
+        sandbox.window = sandbox;
+        sandbox.self = sandbox;
+        sandbox.globalThis = sandbox;
+
+        sandbox.Node = { ELEMENT_NODE: 1 };
+        sandbox.document = {
+            readyState: 'loading',
+            querySelectorAll() { return []; },
+            createElement() { return {}; },
+            getElementById() { return null; },
+            body: {
+                style: Object.create(null),
+                scrollWidth: 0,
+                scrollHeight: 0,
+                appendChild() { }
+            },
+            documentElement: {
+                style: { overflow: '' },
+                scrollWidth: 0,
+                scrollHeight: 0
+            }
+        };
+
+        sandbox.addEventListener = (type) => {
+            counters.addEventListener += 1;
+            counters.eventTypes.push(type);
+        };
+
+        sandbox.setTimeout = () => { };
+
+        const context = vm.createContext(sandbox);
+        vm.runInContext(code, context, { filename: relPath });
+
+        if (!sandbox.__imacros_mv3_csplayer_bootstrap__) {
+            throw new Error('Expected __imacros_mv3_csplayer_bootstrap__ to be set after first load');
+        }
+        if (counters.addEventListener !== 2 ||
+            !counters.eventTypes.includes('DOMContentLoaded') ||
+            !counters.eventTypes.includes('load')) {
+            throw new Error(`Expected DOMContentLoaded/load listeners to be registered once; got ${JSON.stringify(counters.eventTypes)}`);
+        }
+
+        vm.runInContext(code, context, { filename: relPath });
+        if (counters.addEventListener !== 2) {
+            throw new Error(`Expected no additional event listeners on reinjection, got ${counters.addEventListener}`);
+        }
+    });
+
+    guard('content_scripts/connector.js query-state fallback returns state', () => {
+        const relPath = path.join('content_scripts', 'connector.js');
+        const code = safeRead(relPath);
+
+        const sandbox = Object.create(null);
+        sandbox.console = console;
+        sandbox.Map = Map;
+        sandbox.Set = Set;
+        sandbox.Date = Date;
+        sandbox.Math = Math;
+        sandbox.String = String;
+        sandbox.Number = Number;
+        sandbox.Boolean = Boolean;
+        sandbox.Error = Error;
+        sandbox.TypeError = TypeError;
+
+        sandbox.location = { href: 'https://example.invalid/' };
+        sandbox.window = sandbox;
+        sandbox.self = sandbox;
+        sandbox.globalThis = sandbox;
+        sandbox.top = sandbox;
+        sandbox.frames = [];
+        sandbox.frameElement = null;
+
+        sandbox.chrome = {
+            runtime: {
+                lastError: null,
+                onMessage: { addListener() { } },
+                sendMessage(_message, callback) {
+                    if (typeof callback === 'function') callback(undefined);
+                }
+            }
+        };
+
+        const context = vm.createContext(sandbox);
+        vm.runInContext(code, context, { filename: relPath });
+
+        let response = null;
+        sandbox.connector.postMessage('query-state', {}, (payload) => {
+            response = payload;
+        });
+
+        if (!response || response.state !== 'idle') {
+            throw new Error(`Expected query-state fallback to provide state, got ${JSON.stringify(response)}`);
+        }
+    });
+
+    guard('utils.js is idempotent (asyncRun message listener)', () => {
+        const relPath = 'utils.js';
+        const code = safeRead(relPath);
+
+        const counters = { addEventListener: 0, types: [] };
+        const sandbox = Object.create(null);
+        sandbox.console = {
+            log() { },
+            info() { },
+            warn() { },
+            error() { },
+            debug() { }
+        };
+
+        sandbox.Map = Map;
+        sandbox.Set = Set;
+        sandbox.WeakMap = WeakMap;
+        sandbox.WeakSet = WeakSet;
+        sandbox.Date = Date;
+        sandbox.Math = Math;
+        sandbox.String = String;
+        sandbox.Number = Number;
+        sandbox.Boolean = Boolean;
+        sandbox.Error = Error;
+        sandbox.TypeError = TypeError;
+        sandbox.Promise = Promise;
+        sandbox.Proxy = Proxy;
+
+        sandbox.navigator = { platform: 'MacIntel' };
+        sandbox.location = { href: 'https://example.invalid/' };
+        sandbox.window = sandbox;
+        sandbox.self = sandbox;
+        sandbox.globalThis = sandbox;
+
+        sandbox.localStorage = {
+            getItem() { return null; },
+            setItem() { },
+            removeItem() { },
+            clear() { },
+            key() { return null; },
+            get length() { return 0; }
+        };
+
+        sandbox.postMessage = () => { };
+        sandbox.addEventListener = (type) => {
+            counters.addEventListener += 1;
+            counters.types.push(type);
+        };
+        sandbox.setTimeout = () => { };
+        sandbox.clearTimeout = () => { };
+
+        sandbox.chrome = {
+            storage: { local: { get(_keys, cb) { if (typeof cb === 'function') cb({}); } } },
+            runtime: { lastError: null }
+        };
+
+        const context = vm.createContext(sandbox);
+        vm.runInContext(code, context, { filename: relPath });
+        const firstAsyncRun = sandbox.asyncRun;
+        if (typeof firstAsyncRun !== 'function') {
+            throw new Error('Expected asyncRun to be defined after first load');
+        }
+        if (counters.addEventListener !== 1 || !counters.types.includes('message')) {
+            throw new Error(`Expected exactly one message listener, got ${JSON.stringify(counters.types)}`);
+        }
+
+        vm.runInContext(code, context, { filename: relPath });
+        if (sandbox.asyncRun !== firstAsyncRun) {
+            throw new Error('Expected asyncRun function identity to remain stable across reinjection');
+        }
+        if (counters.addEventListener !== 1) {
+            throw new Error(`Expected no additional message listeners on reinjection, got ${counters.addEventListener}`);
+        }
+    });
+
+    guard('errorLogger.js is idempotent (global handlers + console wrapper)', () => {
+        const relPath = 'errorLogger.js';
+        const code = safeRead(relPath);
+
+        const counters = { addEventListener: 0, types: [] };
+        const consoleStub = {
+            error() { },
+            warn() { },
+            info() { },
+            log() { },
+            debug() { }
+        };
+        const sandbox = Object.create(null);
+        sandbox.console = consoleStub;
+
+        sandbox.Map = Map;
+        sandbox.Set = Set;
+        sandbox.WeakMap = WeakMap;
+        sandbox.WeakSet = WeakSet;
+        sandbox.Date = Date;
+        sandbox.Math = Math;
+        sandbox.String = String;
+        sandbox.Number = Number;
+        sandbox.Boolean = Boolean;
+        sandbox.Error = Error;
+        sandbox.TypeError = TypeError;
+        sandbox.Promise = Promise;
+        sandbox.JSON = JSON;
+
+        sandbox.window = sandbox;
+        sandbox.self = sandbox;
+        sandbox.globalThis = sandbox;
+        sandbox.addEventListener = (type) => {
+            counters.addEventListener += 1;
+            counters.types.push(type);
+        };
+
+        sandbox.localStorage = {
+            getItem() { return null; },
+            setItem() { },
+            removeItem() { },
+            clear() { },
+            key() { return null; },
+            get length() { return 0; }
+        };
+
+        const context = vm.createContext(sandbox);
+        vm.runInContext(code, context, { filename: relPath });
+
+        const firstLogger = sandbox.ErrorLogger;
+        const firstConsoleError = sandbox.console.error;
+        if (!firstLogger || typeof firstLogger.logError !== 'function') {
+            throw new Error('Expected ErrorLogger singleton to be installed after first load');
+        }
+        if (counters.addEventListener !== 2 ||
+            !counters.types.includes('error') ||
+            !counters.types.includes('unhandledrejection')) {
+            throw new Error(`Expected error/unhandledrejection listeners exactly once, got ${JSON.stringify(counters.types)}`);
+        }
+        if (!firstConsoleError || firstConsoleError.__imacros_errorLoggerWrapped !== true) {
+            throw new Error('Expected console.error to be wrapped (marker missing)');
+        }
+
+        vm.runInContext(code, context, { filename: relPath });
+        if (sandbox.ErrorLogger !== firstLogger) {
+            throw new Error('Expected ErrorLogger singleton to be reused across reinjection');
+        }
+        if (sandbox.console.error !== firstConsoleError) {
+            throw new Error('Expected console.error wrapper to remain stable across reinjection');
+        }
+        if (counters.addEventListener !== 2) {
+            throw new Error(`Expected no additional global handlers on reinjection, got ${counters.addEventListener}`);
+        }
+    });
+
+    return { passed, failed, skipped: 0, errors };
+}
+
 function runCompatibilityGuards(rootDir) {
     logHeader('MV3 Compatibility Guards');
 
     const mv2Findings = scanForMV2BackgroundUsage(rootDir);
     const manifestIssues = scanManifestForLegacyPaths(rootDir);
+    const contentScriptIdempotence = runContentScriptIdempotenceGuards(rootDir);
 
     const errors = [];
     let passed = 0;
@@ -146,6 +661,7 @@ function runCompatibilityGuards(rootDir) {
 
     if (mv2Findings.length === 0) {
         logSuccess('No chrome.*.getBackgroundPage calls detected in shipping assets');
+        passed += 1;
     } else {
         mv2Findings.forEach(finding => {
             logError(`MV2 background API found in ${finding.file}:${finding.line}`);
@@ -160,6 +676,7 @@ function runCompatibilityGuards(rootDir) {
 
     if (manifestIssues.length === 0) {
         logSuccess('manifest.json does not reference archived old_file assets');
+        passed += 1;
     } else {
         manifestIssues.forEach(issue => {
             logError(issue.message);
@@ -172,9 +689,374 @@ function runCompatibilityGuards(rootDir) {
         failed += manifestIssues.length;
     }
 
-    if (failed === 0) {
-        passed = 1; // count guard as a single passed check
+    passed += contentScriptIdempotence.passed || 0;
+    failed += contentScriptIdempotence.failed || 0;
+    if (Array.isArray(contentScriptIdempotence.errors)) {
+        errors.push(...contentScriptIdempotence.errors);
     }
+
+    return { passed, failed, skipped: 0, errors };
+}
+
+/**
+ * Guard against a timing-dependent race where the user presses Stop while a
+ * playFile request is still asynchronously loading the macro source.
+ *
+ * Regression target:
+ * - playFile starts, awaits afio.readTextFile(), user issues stop()
+ * - readTextFile resolves later and must NOT start mplayer.play()
+ * - if a newer play takes ownership after stop, the older request must NOT
+ *   send macroStopped / clear guards for the newer request.
+ */
+async function runOffscreenPlayStopRaceGuards(rootDir) {
+    const baseDir = rootDir;
+    const errors = [];
+    let passed = 0;
+    let failed = 0;
+
+    const recordFailure = (name, err) => {
+        failed += 1;
+        logError(`${name}: ${err && err.message ? err.message : String(err)}`);
+        errors.push({
+            context: 'OffscreenPlayStopRaceGuard',
+            message: `${name}: ${err && err.message ? err.message : String(err)}`,
+            stack: err && err.stack ? err.stack : ''
+        });
+    };
+
+    const safeRead = (relativePath) => {
+        const fullPath = path.join(baseDir, relativePath);
+        if (!fs.existsSync(fullPath)) {
+            throw new Error(`Missing file: ${relativePath}`);
+        }
+        return fs.readFileSync(fullPath, 'utf8');
+    };
+
+    const tick = (times = 1) => new Promise((resolve) => {
+        let remaining = Math.max(1, times);
+        const step = () => {
+            remaining -= 1;
+            if (remaining <= 0) {
+                resolve();
+                return;
+            }
+            setTimeout(step, 0);
+        };
+        setTimeout(step, 0);
+    });
+
+    const runCase = async (name, fn) => {
+        try {
+            await fn();
+            passed += 1;
+            logSuccess(name);
+        } catch (err) {
+            recordFailure(name, err);
+        }
+    };
+
+    const createDeferred = () => {
+        let resolve;
+        let reject;
+        const promise = new Promise((res, rej) => {
+            resolve = res;
+            reject = rej;
+        });
+        return { promise, resolve, reject };
+    };
+
+    const createHarness = () => {
+        const code = safeRead('offscreen_bg.js');
+        const sentMessages = [];
+        const readDeferreds = [];
+        const mplayerPlayCalls = [];
+        const mplayerStopCalls = [];
+
+        const quietConsole = {
+            log() { },
+            info() { },
+            warn() { },
+            error() { },
+            debug() { }
+        };
+
+        const createEvent = () => {
+            const listeners = [];
+            return {
+                addListener(fn) { listeners.push(fn); },
+                dispatch(...args) {
+                    listeners.forEach((fn) => fn(...args));
+                },
+                _listeners: listeners
+            };
+        };
+
+        const runtimeOnMessage = createEvent();
+        const extensionId = 'test-extension';
+        const extensionOrigin = `chrome-extension://${extensionId}/`;
+
+        const sandbox = Object.create(null);
+        sandbox.console = quietConsole;
+        sandbox.setTimeout = setTimeout;
+        sandbox.clearTimeout = clearTimeout;
+        sandbox.Promise = Promise;
+        sandbox.Map = Map;
+        sandbox.Set = Set;
+        sandbox.WeakMap = WeakMap;
+        sandbox.WeakSet = WeakSet;
+        sandbox.Date = Date;
+        sandbox.Math = Math;
+        sandbox.String = String;
+        sandbox.Number = Number;
+        sandbox.Boolean = Boolean;
+        sandbox.Error = Error;
+        sandbox.TypeError = TypeError;
+        sandbox.parseInt = parseInt;
+        sandbox.isNaN = isNaN;
+        sandbox.Object = Object;
+        sandbox.Array = Array;
+
+        sandbox.crypto = { randomUUID: () => 'test-uuid' };
+
+        sandbox.window = sandbox;
+        sandbox.self = sandbox;
+        sandbox.globalThis = sandbox;
+        sandbox.globalScope = sandbox;
+        sandbox.document = {
+            getElementById() { return null; }
+        };
+        sandbox.addEventListener = () => { };
+        sandbox.removeEventListener = () => { };
+
+        sandbox.registerSharedBackgroundHandlers = () => { };
+
+        sandbox.communicator = {
+            handlers: Object.create(null),
+            registerHandler(topic, handler) {
+                this.handlers[topic] = handler;
+            },
+            _execHandlers(msg, tab_id, win_id, sendResponse) {
+                const handler = msg && msg.topic ? this.handlers[msg.topic] : null;
+                if (typeof handler === 'function') {
+                    return handler(msg.data, tab_id, win_id, sendResponse);
+                }
+                if (typeof sendResponse === 'function') {
+                    sendResponse({ success: false, error: 'No handler registered' });
+                }
+                return undefined;
+            }
+        };
+
+        sandbox.nm_connector = {
+            startServer() { }
+        };
+
+        sandbox.chrome = {
+            runtime: {
+                id: extensionId,
+                lastError: null,
+                getURL(pathname = '') {
+                    return extensionOrigin + String(pathname || '');
+                },
+                sendMessage(message) {
+                    sentMessages.push(message);
+                    return Promise.resolve();
+                },
+                onMessage: runtimeOnMessage
+            }
+        };
+
+        sandbox.isPrivilegedSender = (sender, expectedId, origin) => {
+            if (!sender || typeof sender !== 'object') return false;
+            if (sender.id !== expectedId) return false;
+            if (typeof sender.url === 'string' && sender.url.startsWith(origin)) return true;
+            const hasTab = !!(sender.tab && typeof sender.tab === 'object');
+            return !sender.url && !hasTab;
+        };
+
+        sandbox.Storage = {
+            getBool(key) {
+                return key === 'already-installed';
+            },
+            setBool() { },
+            getChar() { return ''; },
+            setChar() { }
+        };
+
+        sandbox.getLimits = () => Promise.resolve({});
+
+        sandbox.notifyPanelStatLine = () => { };
+        sandbox.showNotification = () => { };
+        sandbox.notifyPanel = () => { };
+
+        sandbox.__is_full_path = () => false;
+
+        sandbox.afio = {
+            getDefaultDir() {
+                return Promise.resolve({
+                    path: 'Macros',
+                    append(segment) {
+                        const cleanSegment = String(segment || '').replace(/^[\\/]+/, '');
+                        this.path = cleanSegment ? `Macros/${cleanSegment}` : 'Macros';
+                    }
+                });
+            },
+            openNode(filePath) {
+                const leaf = String(filePath || '').split(/[\\/]/).pop();
+                return {
+                    leafName: leaf || '',
+                    _path: filePath,
+                    exists() { return Promise.resolve(true); }
+                };
+            },
+            readTextFile() {
+                const deferred = createDeferred();
+                readDeferreds.push(deferred);
+                return deferred.promise;
+            }
+        };
+
+        const ctxStore = Object.create(null);
+        ctxStore.init = (id) => {
+            const key = typeof id === 'number' ? id : parseInt(id, 10);
+            const ctx = ctxStore[key] || Object.create(null);
+            ctx._initialized = true;
+            if (!ctx.mplayer) {
+                ctx.mplayer = {
+                    playing: false,
+                    play(macro, limits, callback) {
+                        mplayerPlayCalls.push({ macro, limits });
+                        setTimeout(() => {
+                            if (typeof callback === 'function') callback({});
+                        }, 0);
+                    },
+                    stop() {
+                        mplayerStopCalls.push(key);
+                    }
+                };
+            }
+            if (!ctx.recorder) {
+                ctx.recorder = { recording: false, stop() { } };
+            }
+            ctxStore[key] = ctx;
+            return Promise.resolve(ctx);
+        };
+        sandbox.context = ctxStore;
+
+        const contextVm = vm.createContext(sandbox);
+        const guardCode = safeRead('macro_execution_guard.js');
+        vm.runInContext(guardCode, contextVm, { filename: 'macro_execution_guard.js' });
+        vm.runInContext(code, contextVm, { filename: 'offscreen_bg.js' });
+
+        const listener = runtimeOnMessage._listeners[0];
+        if (typeof listener !== 'function') {
+            throw new Error('Expected offscreen_bg.js to register chrome.runtime.onMessage listener');
+        }
+
+        const sender = {
+            id: extensionId,
+            url: extensionOrigin + 'offscreen.html'
+        };
+
+        const dispatch = async (message) => {
+            const responses = [];
+            listener(message, sender, (payload) => {
+                responses.push(payload);
+            });
+            await tick(2);
+            return responses;
+        };
+
+        const dispatchAll = async (message) => {
+            const responses = [];
+            runtimeOnMessage._listeners.forEach((handler) => {
+                handler(message, sender, (payload) => {
+                    responses.push(payload);
+                });
+            });
+            await tick(2);
+            return responses;
+        };
+
+        return {
+            dispatch,
+            dispatchAll,
+            tick,
+            context: ctxStore,
+            sentMessages,
+            readDeferreds,
+            mplayerPlayCalls,
+            mplayerStopCalls
+        };
+    };
+
+    logHeader('Offscreen play/stop race guards');
+
+    await runCase('offscreen_bg playFile aborts when stop called during file load', async () => {
+        const harness = createHarness();
+        const win_id = 1;
+
+        await harness.dispatch({
+            target: 'offscreen',
+            command: 'CALL_CONTEXT_METHOD',
+            method: 'playFile',
+            win_id,
+            args: ['Macros/a.iim', 1],
+            requestId: 'reqA'
+        });
+
+        if (harness.readDeferreds.length !== 1) {
+            throw new Error(`Expected exactly 1 readTextFile call, got ${harness.readDeferreds.length}`);
+        }
+
+        await harness.dispatch({
+            target: 'offscreen',
+            command: 'CALL_CONTEXT_METHOD',
+            method: 'stop',
+            win_id,
+            args: []
+        });
+
+        harness.readDeferreds[0].resolve('CODE');
+        await harness.tick(4);
+
+        if (harness.mplayerPlayCalls.length !== 0) {
+            throw new Error(`Expected mplayer.play not to be called, got ${harness.mplayerPlayCalls.length}`);
+        }
+    });
+
+    await runCase('offscreen_bg playFile aborts when win_id is string and stop uses number', async () => {
+        const harness = createHarness();
+        const win_id = '1';
+
+        await harness.dispatch({
+            target: 'offscreen',
+            command: 'CALL_CONTEXT_METHOD',
+            method: 'playFile',
+            win_id,
+            args: ['Macros/a.iim', 1],
+            requestId: 'reqStr'
+        });
+
+        if (harness.readDeferreds.length !== 1) {
+            throw new Error(`Expected exactly 1 readTextFile call, got ${harness.readDeferreds.length}`);
+        }
+
+        await harness.dispatch({
+            target: 'offscreen',
+            command: 'CALL_CONTEXT_METHOD',
+            method: 'stop',
+            win_id: 1,
+            args: []
+        });
+
+        harness.readDeferreds[0].resolve('CODE');
+        await harness.tick(4);
+
+        if (harness.mplayerPlayCalls.length !== 0) {
+            throw new Error(`Expected mplayer.play not to be called, got ${harness.mplayerPlayCalls.length}`);
+        }
+    });
 
     return { passed, failed, skipped: 0, errors };
 }
@@ -322,6 +1204,91 @@ function setupBrowserEnvironment() {
         userAgent: 'Node.js Test Environment',
         platform: 'Win32',
         language: 'en-US'
+    };
+
+    // Minimal chrome.* mock used for offscreen/background message handlers.
+    // Individual suites may override this for scenario-specific behavior.
+    function createEvent() {
+        const listeners = new Set();
+        return {
+            addListener(fn) { listeners.add(fn); },
+            removeListener(fn) { listeners.delete(fn); },
+            hasListener(fn) { return listeners.has(fn); },
+            dispatch(...args) {
+                listeners.forEach((fn) => {
+                    try {
+                        fn(...args);
+                    } catch (err) {
+                        console.error('Error in chrome event listener:', err);
+                    }
+                });
+            },
+            _listeners: listeners
+        };
+    }
+
+    const runtimeOnMessage = createEvent();
+    const extensionId = 'test-extension';
+    const extensionOrigin = `chrome-extension://${extensionId}/`;
+    const storageLocalData = Object.create(null);
+
+    sharedSandbox.chrome = {
+        runtime: {
+            id: extensionId,
+            lastError: null,
+            getURL(pathname = '') {
+                const normalized = String(pathname || '').replace(/^\/+/, '');
+                return extensionOrigin + normalized;
+            },
+            onMessage: runtimeOnMessage,
+            sendMessage(_message, callback) {
+                if (typeof callback === 'function') callback(undefined);
+            }
+        },
+        storage: {
+            local: {
+                get(keys, callback) {
+                    const result = {};
+                    if (keys == null) {
+                        Object.assign(result, storageLocalData);
+                    } else if (Array.isArray(keys)) {
+                        keys.forEach((key) => {
+                            if (Object.prototype.hasOwnProperty.call(storageLocalData, key)) {
+                                result[key] = storageLocalData[key];
+                            }
+                        });
+                    } else if (typeof keys === 'string') {
+                        if (Object.prototype.hasOwnProperty.call(storageLocalData, keys)) {
+                            result[keys] = storageLocalData[keys];
+                        }
+                    } else if (keys && typeof keys === 'object') {
+                        Object.keys(keys).forEach((key) => {
+                            if (Object.prototype.hasOwnProperty.call(storageLocalData, key)) {
+                                result[key] = storageLocalData[key];
+                            } else {
+                                result[key] = keys[key];
+                            }
+                        });
+                    }
+                    if (typeof callback === 'function') callback(result);
+                },
+                set(items, callback) {
+                    if (items && typeof items === 'object') {
+                        Object.keys(items).forEach((key) => {
+                            storageLocalData[key] = items[key];
+                        });
+                    }
+                    if (typeof callback === 'function') callback();
+                },
+                remove(keys, callback) {
+                    const keyList = Array.isArray(keys) ? keys : [keys];
+                    keyList.forEach((key) => {
+                        delete storageLocalData[key];
+                    });
+                    if (typeof callback === 'function') callback();
+                }
+            }
+        }
     };
 
     // IndexedDB mock (minimal, in-memory)
@@ -474,6 +1441,9 @@ function loadSourceFiles() {
     const baseDir = path.join(__dirname, '..');
     const sourceFiles = [
         'utils.js',
+        'macro_execution_guard.js',
+        'security_utils.js',
+        'download_correlation.js',
         'GlobalErrorLogger.js',
         'VirtualFileService.js',
         'WindowsPathMappingService.js',
@@ -481,7 +1451,10 @@ function loadSourceFiles() {
         'FileSyncBridge.js',
         'AsyncFileIO.js',
         'variable-manager.js',
-        'mplayer.js'
+        'mplayer.js',
+        'mrecorder.js',
+        'panel.js',
+        'offscreen.js'
     ];
 
     logInfo('Loading source files...');
@@ -560,6 +1533,12 @@ function loadTestSuites() {
         'filesystem_access_test_suite.js',
         'afio_test_suite.js',
         'variable_expansion_test_suite.js',
+        'security_utils_test_suite.js',
+        'offscreen_security_test_suite.js',
+        'dedup_guard_test_suite.js',
+        'download_correlation_test_suite.js',
+        'recorder_event_forwarding_test_suite.js',
+        'panel_play_response_test_suite.js',
         'macro_run_test_suite.js'
     ];
 
@@ -589,7 +1568,18 @@ function loadTestSuites() {
 
     // Expose suites placed on the simulated window to the shared sandbox so
     // the CLI runner (executing in the Node context) can access them.
-    const suiteGlobals = ['FileSystemAccessTestSuite', 'AfioTestSuite', 'MacroRunTestSuite'];
+    const suiteGlobals = [
+        'FileSystemAccessTestSuite',
+        'AfioTestSuite',
+        'VariableExpansionTestSuite',
+        'SecurityUtilsTestSuite',
+        'OffscreenSecurityTestSuite',
+        'MacroRunTestSuite',
+        'DedupGuardTestSuite',
+        'DownloadCorrelationTestSuite',
+        'RecorderEventForwardingTestSuite',
+        'PanelPlayResponseTestSuite'
+    ];
     suiteGlobals.forEach(name => {
         if (sharedSandbox.window && typeof sharedSandbox.window[name] !== 'undefined') {
             sharedSandbox[name] = sharedSandbox.window[name];
@@ -634,7 +1624,18 @@ async function runTests() {
     loadSourceFiles();
     loadTestSuites();
 
-    const { FileSystemAccessTestSuite, AfioTestSuite, VariableExpansionTestSuite, MacroRunTestSuite } = sharedSandbox;
+    const {
+        FileSystemAccessTestSuite,
+        AfioTestSuite,
+        VariableExpansionTestSuite,
+        SecurityUtilsTestSuite,
+        OffscreenSecurityTestSuite,
+        MacroRunTestSuite,
+        DedupGuardTestSuite,
+        DownloadCorrelationTestSuite,
+        RecorderEventForwardingTestSuite,
+        PanelPlayResponseTestSuite
+    } = sharedSandbox;
 
     function normalizeSuiteResult(rawResult, suiteName) {
         const defaultResults = { passed: 0, failed: 0, skipped: 0 };
@@ -653,6 +1654,49 @@ async function runTests() {
     }
 
     try {
+        // Run security utils tests
+        if (options.suite === 'all' || options.suite === 'security') {
+            logHeader('Security Utils Tests');
+
+            if (typeof SecurityUtilsTestSuite !== 'undefined') {
+                try {
+                    const securityResult = normalizeSuiteResult(await SecurityUtilsTestSuite.run(), 'SecurityUtilsTestSuite');
+                    results.passed += securityResult.results.passed || 0;
+                    results.failed += securityResult.results.failed || 0;
+                    results.skipped += securityResult.results.skipped || 0;
+                    results.errors.push(...securityResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Security Utils tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'SecurityUtilsTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('SecurityUtilsTestSuite not available');
+            }
+
+            if (typeof OffscreenSecurityTestSuite !== 'undefined') {
+                try {
+                    const offscreenResult = normalizeSuiteResult(await OffscreenSecurityTestSuite.run(), 'OffscreenSecurityTestSuite');
+                    results.passed += offscreenResult.results.passed || 0;
+                    results.failed += offscreenResult.results.failed || 0;
+                    results.skipped += offscreenResult.results.skipped || 0;
+                    results.errors.push(...offscreenResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Offscreen Security tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'OffscreenSecurityTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('OffscreenSecurityTestSuite not available');
+            }
+        }
+
         // Run variable expansion tests
         if (options.suite === 'all' || options.suite === 'vars') {
             logHeader('Variable Expansion Tests');
@@ -679,6 +1723,33 @@ async function runTests() {
 
         // Run RUN/macro chaining tests
         if (options.suite === 'all' || options.suite === 'macro') {
+            const raceResult = await runOffscreenPlayStopRaceGuards(path.resolve(__dirname, '..'));
+            results.passed += raceResult.passed || 0;
+            results.failed += raceResult.failed || 0;
+            results.skipped += raceResult.skipped || 0;
+            results.errors.push(...(raceResult.errors || []));
+
+            logHeader('Deduplication Guard Tests');
+
+            if (typeof DedupGuardTestSuite !== 'undefined') {
+                try {
+                    const guardResult = normalizeSuiteResult(await DedupGuardTestSuite.run(), 'DedupGuardTestSuite');
+                    results.passed += guardResult.results.passed || 0;
+                    results.failed += guardResult.results.failed || 0;
+                    results.skipped += guardResult.results.skipped || 0;
+                    results.errors.push(...guardResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Dedup Guard tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'DedupGuardTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('DedupGuardTestSuite not available');
+            }
+
             logHeader('Macro RUN Command Tests');
 
             if (typeof MacroRunTestSuite !== 'undefined') {
@@ -698,6 +1769,75 @@ async function runTests() {
                 }
             } else {
                 logWarning('MacroRunTestSuite not available');
+            }
+        }
+
+        // Run Panel play response tests (keeps UI from getting stuck on error-only responses)
+        if (options.suite === 'all' || options.suite === 'panel') {
+            logHeader('Panel Play Response Tests');
+
+            if (typeof PanelPlayResponseTestSuite !== 'undefined') {
+                try {
+                    const panelResult = normalizeSuiteResult(await PanelPlayResponseTestSuite.run(), 'PanelPlayResponseTestSuite');
+                    results.passed += panelResult.results.passed || 0;
+                    results.failed += panelResult.results.failed || 0;
+                    results.skipped += panelResult.results.skipped || 0;
+                    results.errors.push(...panelResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Panel play response tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'PanelPlayResponseTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('PanelPlayResponseTestSuite not available');
+            }
+        }
+
+        // Run Recorder forwarded-event tests (prevents duplicate recording and restores ONDOWNLOAD)
+        if (options.suite === 'all' || options.suite === 'recorder') {
+            logHeader('Download Correlation Tests');
+
+            if (typeof DownloadCorrelationTestSuite !== 'undefined') {
+                try {
+                    const corrResult = normalizeSuiteResult(await DownloadCorrelationTestSuite.run(), 'DownloadCorrelationTestSuite');
+                    results.passed += corrResult.results.passed || 0;
+                    results.failed += corrResult.results.failed || 0;
+                    results.skipped += corrResult.results.skipped || 0;
+                    results.errors.push(...corrResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Download correlation tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'DownloadCorrelationTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('DownloadCorrelationTestSuite not available');
+            }
+
+            logHeader('Recorder Event Forwarding Tests');
+
+            if (typeof RecorderEventForwardingTestSuite !== 'undefined') {
+                try {
+                    const recorderResult = normalizeSuiteResult(await RecorderEventForwardingTestSuite.run(), 'RecorderEventForwardingTestSuite');
+                    results.passed += recorderResult.results.passed || 0;
+                    results.failed += recorderResult.results.failed || 0;
+                    results.skipped += recorderResult.results.skipped || 0;
+                    results.errors.push(...recorderResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Recorder forwarding tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'RecorderEventForwardingTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('RecorderEventForwardingTestSuite not available');
             }
         }
 

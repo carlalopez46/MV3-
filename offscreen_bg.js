@@ -576,7 +576,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     }
 
     if (request.type === 'QUERY_STATE') {
-        const winId = request.win_id;
+        const winId = (typeof request.win_id === 'string') ? parseInt(request.win_id, 10) : request.win_id;
         const ctx = (typeof context !== 'undefined' && context) ? context[winId] : null;
         let state = 'idle';
         const response = { state, success: true };
@@ -716,7 +716,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
     if (request.command === 'runMacroByUrl') {
         const macroPath = request.macroPath;
-        const windowId = request.windowId;
+        const windowId = (typeof request.windowId === 'string') ? parseInt(request.windowId, 10) : request.windowId;
         const requestId = request.requestId || createRequestId();
 
         console.log('[iMacros Offscreen] runMacroByUrl:', macroPath, {
@@ -899,7 +899,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
 
         if (request.type === 'CALL_CONTEXT_METHOD') {
-            const win_id = request.win_id;
+            const win_id = (typeof request.win_id === 'string') ? parseInt(request.win_id, 10) : request.win_id;
             const objectPath = request.objectPath;
             const methodName = request.methodName;
             const args = request.args || [];
@@ -933,9 +933,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             return true;
         }
 
-        // ★追加: command形式のCALL_CONTEXT_METHOD処理
         if (request.command === 'CALL_CONTEXT_METHOD') {
-            const win_id = request.win_id;
+            const win_id = (typeof request.win_id === 'string') ? parseInt(request.win_id, 10) : request.win_id;
             const method = request.method;
             try {
                 if (!context[win_id]) {
@@ -1718,8 +1717,8 @@ globalScope.edit = function (macro, overwrite, line) {
         // ★Refactor: Consolidated error checking with robust message construction
         if (chrome.runtime.lastError || (response && response.success === false)) {
             const errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
-                             (response && response.error) ||
-                             "Unknown error opening editor";
+                (response && response.error) ||
+                "Unknown error opening editor";
 
             console.error("[iMacros Offscreen] Failed to open editor:", errorMsg);
             return;
