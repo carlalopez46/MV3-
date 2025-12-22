@@ -122,10 +122,10 @@
 
             // There should be add calls for playFile and runMacroByUrl (2 legitimate paths)
             // The fix ensures add() is called immediately after the has() check
-            if (addMatches.length >= 1) {
+            if (addMatches.length >= 2) {
                 pass(testName, `playInFlight.add() calls found (${addMatches.length} paths)`);
             } else {
-                fail(testName, 'No playInFlight.add() calls found');
+                fail(testName, `Expected at least 2 playInFlight.add() calls, found ${addMatches.length}`);
             }
         } catch (e) {
             if (e.code === 'MODULE_NOT_FOUND' || e.code === 'ENOENT') {
