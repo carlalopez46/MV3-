@@ -1712,7 +1712,6 @@ CSPlayer.prototype.onHideScrollbars = function (args, callback) {
 }
 
 // get offset of the current window relative to topmost frame
-// get offset of the current window relative to topmost frame
 function getXYOffset(w) {
     if (w === window.top) {
         try {
