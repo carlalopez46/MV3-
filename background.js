@@ -2699,14 +2699,56 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // Content Scripts use connector.postMessage which sends { topic: "...", data: ... }
     // These need to be forwarded to Offscreen where the backend logic (communicator handlers) resides.
     if (msg.topic && !msg.command && !msg.type && !msg.keepAlive) {
+        const tabId = sender.tab ? sender.tab.id : null;
+        const winId = sender.tab ? sender.tab.windowId : null;
+
+        if (msg.topic === 'run-macro' && runMacroStartGuard) {
+            const guardKey = buildRunMacroGuardKey(winId, msg.data);
+            const dedupe = runMacroStartGuard(guardKey);
+            if (!dedupe.allowed) {
+                console.warn('[iMacros SW] Duplicate run-macro suppressed', {
+                    winId,
+                    macroName: msg.data && msg.data.name,
+                    ageMs: dedupe.ageMs,
+                    ttlMs: dedupe.ttlMs
+                });
+                sendResponse({
+                    success: true,
+                    ignored: true,
+                    status: 'ignored',
+                    reason: 'duplicate',
+                    state: 'idle'
+                });
+                return true;
+            }
+        }
+
+        // query-state expects a { state } response; route it directly to QUERY_STATE.
+        if (msg.topic === 'query-state') {
+            sendMessageToOffscreen({
+                type: 'QUERY_STATE',
+                tab_id: tabId,
+                win_id: winId
+            }).then(response => {
+                sendResponse(response || { state: 'idle' });
+            }).catch(error => {
+                sendResponse({
+                    state: 'idle',
+                    success: false,
+                    error: error ? error.message : 'Forwarding failed'
+                });
+            });
+            return true;
+        }
+
         // Forward to Offscreen Document via FORWARD_MESSAGE command
         // This maps to Offscreen's onMessage -> FORWARD_MESSAGE -> communicator._execHandlers
         forwardToOffscreen({
             command: 'FORWARD_MESSAGE',
             topic: msg.topic,
             data: msg.data,
-            tab_id: sender.tab ? sender.tab.id : null,
-            win_id: sender.tab ? sender.tab.windowId : null
+            tab_id: tabId,
+            win_id: winId
         }).then(response => {
             sendResponse(response);
         }).catch(error => {
@@ -3114,6 +3156,10 @@ const IMACROS_URL_DUPLICATE_WINDOW_MS = 1000;
 const imacrosUrlRunGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: IMACROS_URL_DUPLICATE_WINDOW_MS, maxKeys: 200 })
     : null;
+const RUN_MACRO_DUPLICATE_WINDOW_MS = 1000;
+const runMacroStartGuard = (typeof createRecentKeyGuard === 'function')
+    ? createRecentKeyGuard({ ttlMs: RUN_MACRO_DUPLICATE_WINDOW_MS, maxKeys: 300 })
+    : null;
 const PLAY_MACRO_DUPLICATE_WINDOW_MS = 1000;
 const playMacroStartGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: PLAY_MACRO_DUPLICATE_WINDOW_MS, maxKeys: 500 })
@@ -3144,6 +3190,24 @@ function normalizeMacroPathForGuard(value) {
         return '';
     }
     return path;
+}
+
+function hashString(value) {
+    const str = typeof value === 'string' ? value : String(value || '');
+    let hash = 0;
+    for (let i = 0; i < str.length; i += 1) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash |= 0;
+    }
+    return (hash >>> 0).toString(36);
+}
+
+function buildRunMacroGuardKey(winId, macro) {
+    const macroName = macro && typeof macro.name === 'string' ? macro.name.trim() : '';
+    const source = macro && typeof macro.source === 'string' ? macro.source : '';
+    const fingerprint = source ? hashString(source) : '';
+    const safeWinId = Number.isInteger(winId) ? winId : 'na';
+    return `run-macro:${safeWinId}:${macroName}:${fingerprint}`;
 }
 
 function parseImacrosRunMacroPath(urlString) {

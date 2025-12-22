@@ -314,6 +314,72 @@ function runContentScriptIdempotenceGuards(rootDir) {
         }
     });
 
+    guard('content_scripts/bookmarks_handler.js is idempotent', () => {
+        const relPath = path.join('content_scripts', 'bookmarks_handler.js');
+        const code = safeRead(relPath);
+
+        const counters = { addEventListener: 0, eventTypes: [] };
+        const sandbox = Object.create(null);
+        sandbox.console = console;
+        sandbox.Map = Map;
+        sandbox.Set = Set;
+        sandbox.Date = Date;
+        sandbox.Math = Math;
+        sandbox.String = String;
+        sandbox.Number = Number;
+        sandbox.Boolean = Boolean;
+        sandbox.Error = Error;
+        sandbox.TypeError = TypeError;
+
+        sandbox.location = { href: 'https://example.invalid/' };
+        sandbox.window = sandbox;
+        sandbox.self = sandbox;
+        sandbox.globalThis = sandbox;
+
+        sandbox.document = {
+            readyState: 'complete',
+            evaluate() {
+                return { iterateNext() { return null; } };
+            },
+            documentElement: {
+                getAttribute() { return ''; }
+            }
+        };
+
+        sandbox.XPathResult = { ORDERED_NODE_ITERATOR_TYPE: 5 };
+        sandbox.CustomEvent = function CustomEvent() {};
+        sandbox.atob = (value) => value;
+        sandbox.btoa = (value) => value;
+        sandbox.decodeURIComponent = decodeURIComponent;
+        sandbox.encodeURIComponent = encodeURIComponent;
+
+        sandbox.connector = {};
+        sandbox.imns = { escapeLine(value) { return value; } };
+
+        sandbox.window.addEventListener = (type) => {
+            counters.addEventListener += 1;
+            counters.eventTypes.push(type);
+        };
+        sandbox.window.dispatchEvent = () => {};
+        sandbox.setInterval = () => 1;
+        sandbox.clearInterval = () => {};
+
+        const context = vm.createContext(sandbox);
+        vm.runInContext(code, context, { filename: relPath });
+
+        if (!sandbox.__imacros_mv3_bookmarks_handler_initialized__) {
+            throw new Error('Expected bookmarks handler guard to be set after first load');
+        }
+        if (counters.addEventListener !== 1 || !counters.eventTypes.includes('iMacrosRunMacro')) {
+            throw new Error(`Expected iMacrosRunMacro listener to be registered once; got ${JSON.stringify(counters.eventTypes)}`);
+        }
+
+        vm.runInContext(code, context, { filename: relPath });
+        if (counters.addEventListener !== 1) {
+            throw new Error(`Expected no additional event listeners on reinjection, got ${counters.addEventListener}`);
+        }
+    });
+
     guard('content_scripts/player.js is idempotent (bootstrap scheduling)', () => {
         const relPath = path.join('content_scripts', 'player.js');
         const code = safeRead(relPath);
@@ -379,6 +445,53 @@ function runContentScriptIdempotenceGuards(rootDir) {
         vm.runInContext(code, context, { filename: relPath });
         if (counters.addEventListener !== 2) {
             throw new Error(`Expected no additional event listeners on reinjection, got ${counters.addEventListener}`);
+        }
+    });
+
+    guard('content_scripts/connector.js query-state fallback returns state', () => {
+        const relPath = path.join('content_scripts', 'connector.js');
+        const code = safeRead(relPath);
+
+        const sandbox = Object.create(null);
+        sandbox.console = console;
+        sandbox.Map = Map;
+        sandbox.Set = Set;
+        sandbox.Date = Date;
+        sandbox.Math = Math;
+        sandbox.String = String;
+        sandbox.Number = Number;
+        sandbox.Boolean = Boolean;
+        sandbox.Error = Error;
+        sandbox.TypeError = TypeError;
+
+        sandbox.location = { href: 'https://example.invalid/' };
+        sandbox.window = sandbox;
+        sandbox.self = sandbox;
+        sandbox.globalThis = sandbox;
+        sandbox.top = sandbox;
+        sandbox.frames = [];
+        sandbox.frameElement = null;
+
+        sandbox.chrome = {
+            runtime: {
+                lastError: null,
+                onMessage: { addListener() {} },
+                sendMessage(_message, callback) {
+                    if (typeof callback === 'function') callback(undefined);
+                }
+            }
+        };
+
+        const context = vm.createContext(sandbox);
+        vm.runInContext(code, context, { filename: relPath });
+
+        let response = null;
+        sandbox.connector.postMessage('query-state', {}, (payload) => {
+            response = payload;
+        });
+
+        if (!response || response.state !== 'idle') {
+            throw new Error(`Expected query-state fallback to provide state, got ${JSON.stringify(response)}`);
         }
     });
 

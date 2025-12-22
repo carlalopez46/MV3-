@@ -172,6 +172,16 @@ Connector.prototype.postMessage = function (topic, data, callback) {
                     });
                 }
             }
+
+            if (topic === 'query-state') {
+                var normalized = (response && typeof response === 'object') ? response : {};
+                if (!normalized.state) {
+                    normalized = Object.assign({ state: 'idle', success: false }, normalized);
+                }
+                callback(normalized);
+                return;
+            }
+
             callback(response);
         });
     } else {
