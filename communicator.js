@@ -8,13 +8,23 @@ function Communicator() {
     this.addListeners();
 }
 
+function isOffscreenDocument() {
+    if (typeof location === 'undefined' || !location || typeof location.href !== 'string') return false;
+    return location.href.endsWith('/offscreen.html');
+}
+
 // add listener for extension events
 Communicator.prototype.addListeners = function () {
+    const inOffscreenDocument = isOffscreenDocument();
     // MV3対応: chrome.extension.onRequest -> chrome.runtime.onMessage
     chrome.runtime.onMessage.addListener(
         (msg, sender, sendResponse) => {
             // 内部メッセージや他からのメッセージをフィルタリング
             if (!msg || !msg.topic) return;
+            if (inOffscreenDocument && sender && sender.tab) {
+                // Offscreen must only handle content-script topics via SW forwarding.
+                return;
+            }
 
             // sender.tab がない場合はバックグラウンド/ポップアップからのメッセージの可能性がある
             // タブIDがない場合は -1 などを割り当てるか、ハンドラ側で対応

@@ -28,6 +28,10 @@ const IMACROS_URL_DUPLICATE_WINDOW_MS = 1000;
 const imacrosUrlRunGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: IMACROS_URL_DUPLICATE_WINDOW_MS, maxKeys: 200 })
     : null;
+const RUN_MACRO_DUPLICATE_WINDOW_MS = 1000;
+const runMacroStartGuard = (typeof createRecentKeyGuard === 'function')
+    ? createRecentKeyGuard({ ttlMs: RUN_MACRO_DUPLICATE_WINDOW_MS, maxKeys: 300 })
+    : null;
 const playMacroMessageGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: 10000, maxKeys: 500 })
     : null;
@@ -51,19 +55,6 @@ function createRequestId() {
     return `off-${OFFSCREEN_INSTANCE_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
-function normalizeMacroPathForGuard(path) {
-    if (typeof path !== 'string') return '';
-    let normalized = path.trim();
-    if (!normalized) return '';
-    normalized = normalized.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
-    const marker = '/Macros/';
-    const index = normalized.toLowerCase().indexOf(marker.toLowerCase());
-    if (index >= 0) {
-        normalized = `Macros/${normalized.slice(index + marker.length)}`;
-    }
-    return normalized;
-}
-
 function normalizeWinId(value) {
     if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
     if (typeof value === 'string') {
@@ -73,6 +64,46 @@ function normalizeWinId(value) {
         if (Number.isInteger(parsed) && parsed > 0) return parsed;
     }
     return null;
+}
+
+function hashString(value) {
+    const str = typeof value === 'string' ? value : String(value || '');
+    let hash = 0;
+    for (let i = 0; i < str.length; i += 1) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash |= 0;
+    }
+    return (hash >>> 0).toString(36);
+}
+
+function normalizeMacroPathForGuard(value) {
+    if (typeof value !== 'string') return '';
+    let path = value.trim();
+    if (!path) return '';
+    path = path.replace(/\\/g, '/');
+    path = path.replace(/^\.\//, '');
+    const lower = path.toLowerCase();
+    const marker = '/macros/';
+    const idx = lower.lastIndexOf(marker);
+    if (idx >= 0) {
+        path = path.slice(idx + 1);
+    }
+    path = path.replace(/\/{2,}/g, '/');
+    try {
+        if (typeof sanitizeMacroFilePath === 'function') {
+            path = sanitizeMacroFilePath(path);
+        }
+    } catch (e) {
+        return '';
+    }
+    return path;
+}
+
+function buildRunMacroGuardKey(winId, macro) {
+    const macroName = macro && typeof macro.name === 'string' ? macro.name.trim() : '';
+    const source = macro && typeof macro.source === 'string' ? macro.source : '';
+    const fingerprint = source ? hashString(source) : '';
+    return `run-macro:${winId}:${macroName}:${fingerprint}`;
 }
 
 console.log('[iMacros Offscreen] Instance ID:', OFFSCREEN_INSTANCE_ID);
@@ -442,7 +473,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 	                return false;
 	            }
 		            const loops = Math.max(1, parseInt(args[1], 10) || 1);
-		            const guardPath = normalizeMacroPathForGuard(filePath) || filePath;
 		            console.log("[Offscreen] Reading and playing file (original path):", filePath, { requestId: playRequestId });
 		            if (Storage.getBool("debug"))
 		                console.log("[Offscreen] Loop count:", loops, "(should be 1 for normal play, >1 for Play Loop)");
@@ -492,12 +522,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
 
 		            if (playFileStartGuard) {
+                const guardPath = normalizeMacroPathForGuard(filePath) || filePath;
                 const key = `playFile:${win_id}:${guardPath}:${loops}`;
                 const dedupe = playFileStartGuard(key);
                 if (!dedupe.allowed) {
                     console.warn('[Offscreen] Duplicate playFile start ignored', {
                         win_id,
                         filePath,
+                        guardPath,
                         loops,
                         ageMs: dedupe.ageMs,
                         ttlMs: dedupe.ttlMs,
@@ -934,7 +966,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 		            ? rawWindowId
 		            : (typeof rawWindowId === 'string' ? parseInt(rawWindowId, 10) : NaN);
 		        const requestId = request.requestId || createRequestId();
-		        const guardPath = normalizeMacroPathForGuard(macroPath) || macroPath;
 
 		        if (!Number.isInteger(windowId)) {
 		            console.warn('[iMacros Offscreen] runMacroByUrl missing/invalid windowId:', rawWindowId, { requestId });
@@ -978,9 +1009,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         });
 
         if (request && request.source === 'imacros_url' && imacrosUrlRunGuard) {
-            const tabId = typeof request.tabId === 'number' ? request.tabId : null;
-            const guardWindowId = Number.isInteger(windowId) ? windowId : (Number.isInteger(tabId) ? tabId : 'na');
-            const key = `imacros-url:${guardWindowId}:${guardPath}`;
+            const tabId = typeof request.tabId === 'number' ? request.tabId : 'na';
+            const guardPath = normalizeMacroPathForGuard(macroPath) || macroPath;
+            const key = `imacros-url:${tabId}:${windowId}:${guardPath}`;
             const dedupe = imacrosUrlRunGuard(key);
             if (!dedupe.allowed) {
                 console.warn('[iMacros Offscreen] Duplicate imacros_url run suppressed', {
@@ -988,6 +1019,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     tabId,
                     windowId,
                     macroPath,
+                    guardPath,
                     ageMs: dedupe.ageMs
                 });
                 if (sendResponse) {
@@ -1878,6 +1910,20 @@ communicator.registerHandler("run-macro", function (data, tab_id) {
             return;
         }
         var w_id = t.windowId;
+        const macroData = data && typeof data === 'object' ? data : {};
+        if (runMacroStartGuard) {
+            const guardKey = buildRunMacroGuardKey(w_id, macroData);
+            const dedupe = runMacroStartGuard(guardKey);
+            if (!dedupe.allowed) {
+                console.warn('[iMacros Offscreen] Duplicate run-macro ignored', {
+                    windowId: w_id,
+                    macroName: macroData.name,
+                    ageMs: dedupe.ageMs,
+                    ttlMs: dedupe.ttlMs
+                });
+                return;
+            }
+        }
 
         // Ensure context is initialized before processing
         var contextPromise = context[w_id] && context[w_id]._initialized
@@ -2478,6 +2524,9 @@ if (typeof XMLDocument !== 'undefined' && !XMLDocument.prototype.createAttribute
 
 // Add message listener for panel requests
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
+    if (!request || request.target !== 'offscreen') {
+        return false;
+    }
     if (request && (request.type === 'CHECK_MPLAYER_PAUSED' || request.type === 'PANEL_LOADED' || request.type === 'PANEL_CLOSING')) {
         if (!isOffscreenPrivilegedSender(sender)) {
             console.warn('[iMacros Offscreen] Blocked panel request from unprivileged sender:', {

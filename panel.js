@@ -154,7 +154,7 @@ function sendCommand(command, payload = {}) {
         const message = {
             ...payload,
             command: command,
-            target: 'offscreen',
+            target: 'background',
             win_id: payload.win_id || currentWindowId
         };
         console.log(`[Panel] Sending command: ${command}`, message);
@@ -185,6 +185,7 @@ function sendContextMethod(objectPath, methodName, args = []) {
         }
         const message = {
             type: 'CALL_CONTEXT_METHOD',
+            target: 'background',
             win_id: currentWindowId,
             objectPath: objectPath,
             methodName: methodName,
@@ -219,6 +220,7 @@ function notifyPanelLoaded() {
         if (panelId === null) return;
         chrome.runtime.sendMessage({
             type: 'PANEL_LOADED',
+            target: 'background',
             panelWindowId: panelId
         }, (response) => {
             if (chrome.runtime.lastError) {
@@ -239,6 +241,7 @@ function notifyPanelClosing(panelBox) {
     const winId = currentWindowId !== null ? currentWindowId : getMainWindowIdFromUrl();
     const payload = {
         type: 'PANEL_CLOSING',
+        target: 'background',
         panelBox: panelBox
     };
     if (winId !== null) payload.win_id = winId;

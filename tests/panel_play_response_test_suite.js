@@ -467,6 +467,7 @@
                 try {
                     await notifyPanelLoaded();
                     assert(lastMessage && lastMessage.type === 'PANEL_LOADED', 'PANEL_LOADED should be sent');
+                    assertEqual(lastMessage.target, 'background', 'PANEL_LOADED should target background');
                     assertEqual(lastMessage.panelWindowId, 55, 'panelWindowId should come from getCurrent');
                     assertEqual(currentWindowId, 7, 'currentWindowId should be set from response');
                 } finally {
@@ -510,6 +511,7 @@
 
                     assertEqual(sendCount, 1, 'PANEL_CLOSING should be sent once');
                     assert(lastMessage && lastMessage.type === 'PANEL_CLOSING', 'PANEL_CLOSING should be sent');
+                    assertEqual(lastMessage.target, 'background', 'PANEL_CLOSING should target background');
                     assertEqual(lastMessage.win_id, 12, 'win_id should be attached');
                     assertEqual(lastMessage.panelWindowId, 99, 'panelWindowId should be attached');
                     assertEqual(lastMessage.panelBox.width, 3, 'panelBox should be attached');
