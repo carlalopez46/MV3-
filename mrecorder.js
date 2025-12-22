@@ -270,6 +270,12 @@ Recorder.prototype.stop = function () {
         chrome.storage.session.remove("recorder_state_" + this.win_id);
     }
     this.removeListeners();
+
+    // Clear state variables to prevent memory leaks between recording sessions
+    this.actions = [];
+    this.lastTabUrls.clear();
+    delete this.prevTarget;
+
     // remove text from badge
     badge.clearText(this.win_id);
     // MV3: Send message to panel

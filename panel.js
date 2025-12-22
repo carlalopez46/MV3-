@@ -1039,6 +1039,14 @@ if (isTopFrame) {
     if (event.data.type === "playMacro") {
         play();
     }
+    if (event.data.type === "editMacro") {
+        edit();
+    }
+    if (event.data.type === "convertMacro") {
+        // Convert between bookmark and file storage
+        // TODO: Implement MV3 compatible convert functionality
+        alert("Convert functionality is not yet implemented in MV3.");
+    }
     });
 
 // --- Extension Reload Detection ---
@@ -1155,41 +1163,6 @@ function connectToLifecycle() {
 
     if (message.type === "PANEL_HIGHLIGHT_LINE") {
         handlePanelHighlightLine(message.data);
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
-
-    // ★追加: mrecorder.jsから送信されるメッセージのハンドラ
-    if (message.type === "PANEL_ADD_LINE") {
-        // 録画中にマクロ行を追加
-        const txt = message.data && message.data.txt;
-        if (txt) {
-            const displayArea = document.getElementById("macro-display-area");
-            if (displayArea) {
-                const line = document.createElement("div");
-                line.className = "macro-line";
-                line.textContent = txt;
-                displayArea.appendChild(line);
-                displayArea.scrollTop = displayArea.scrollHeight;
-            }
-        }
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
-
-    if (message.type === "PANEL_REMOVE_LAST_LINE") {
-        // 録画中に最後のマクロ行を削除
-        const displayArea = document.getElementById("macro-display-area");
-        if (displayArea && displayArea.lastChild) {
-            displayArea.removeChild(displayArea.lastChild);
-        }
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
-
-    if (message.type === "PANEL_SHOW_MACRO_TREE") {
-        // 録画停止後にマクロツリーを表示
-        refreshTreeView();
         sendResponse && sendResponse({ success: true });
         return true;
     }
