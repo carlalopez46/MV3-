@@ -8,13 +8,23 @@ function Communicator() {
     this.addListeners();
 }
 
+function isOffscreenDocument() {
+    if (typeof location === 'undefined' || !location || typeof location.href !== 'string') return false;
+    return location.href.endsWith('/offscreen.html');
+}
+
 // add listener for extension events
 Communicator.prototype.addListeners = function () {
+    const inOffscreenDocument = isOffscreenDocument();
     // MV3対応: chrome.extension.onRequest -> chrome.runtime.onMessage
     chrome.runtime.onMessage.addListener(
         (msg, sender, sendResponse) => {
             // 内部メッセージや他からのメッセージをフィルタリング
             if (!msg || !msg.topic) return;
+            if (inOffscreenDocument && sender && sender.tab) {
+                // Offscreen must only handle content-script topics via SW forwarding.
+                return;
+            }
 
             // sender.tab がない場合はバックグラウンド/ポップアップからのメッセージの可能性がある
             // タブIDがない場合は -1 などを割り当てるか、ハンドラ側で対応
@@ -95,17 +105,42 @@ Communicator.prototype._execHandlers = function (msg, tab_id, win_id, sendRespon
         if (sendResponse) sendResponse({ error: 'No handlers for topic', state: 'idle' });
         return;
     }
+    // Normalize win_id to number for consistent comparison
+    const normalizedWinId = (win_id !== null && win_id !== undefined) ? Number(win_id) : null;
+
     let handled = false;
     for (const x of this.handlers[msg.topic]) {
-        if (x.win_id && win_id && x.win_id == win_id) {
+        // Normalize handler's win_id as well
+        const handlerWinId = (x.win_id !== null && x.win_id !== undefined) ? Number(x.win_id) : null;
+
+        if (handlerWinId && normalizedWinId && handlerWinId === normalizedWinId) {
+            // Exact window match
             handled = true;
             x.handler(msg.data, tab_id, sendResponse);
             // Continue to allow multiple handlers to process the message
-        } else if (!x.win_id) {
-            // browser-wide message handler
+        } else if (!handlerWinId) {
+            // browser-wide message handler (no specific window)
             handled = true;
             x.handler(msg.data, tab_id, sendResponse);
             // Continue to allow multiple handlers to process the message
+        } else if (!normalizedWinId && handlerWinId && (msg.topic === 'record-action' || msg.topic === 'password-element-focused')) {
+            // Special case for recording-related messages: if win_id is not provided,
+            // try to route to any registered recorder. This can happen when
+            // messages come from iframes or when tab info is unavailable.
+
+            // Check if context and recorder exist and are recording
+            // This prevents routing to an idle recorder which would reject the action
+            let isActive = true;
+            if (typeof context !== 'undefined' && context[handlerWinId] && context[handlerWinId].recorder) {
+                if (!context[handlerWinId].recorder.recording) {
+                    isActive = false;
+                }
+            }
+
+            if (isActive) {
+                handled = true;
+                x.handler(msg.data, tab_id, sendResponse);
+            }
         }
     }
     // If no handler matched (e.g., win_id mismatch), still send a response to close the channel
@@ -120,7 +155,7 @@ Communicator.prototype._execHandlers = function (msg, tab_id, win_id, sendRespon
         // query-state is frequently sent to check recorder state, don't warn for it
         // as it's expected that handlers from different windows won't match
         if (msg.topic !== 'query-state') {
-            console.warn("[Communicator] No handler matched for topic:", msg.topic, "Debug:", debugInfo);
+            console.warn("[Communicator] No handler matched for topic:", msg.topic, "Debug:", JSON.stringify(debugInfo));
         }
 
         sendResponse({

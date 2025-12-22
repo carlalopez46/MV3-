@@ -23,6 +23,42 @@ function getTab(tabId) {
     });
 }
 
+function isOffscreenDocument() {
+    try {
+        const pathname = (typeof location !== 'undefined' && location && location.pathname) ||
+            (typeof document !== 'undefined' && document.location && document.location.pathname) ||
+            '';
+        return /(^|\/)offscreen\.html$/.test(String(pathname));
+    } catch (err) {
+        return false;
+    }
+}
+
+function queryActiveTabInWindow(winId) {
+    return new Promise((resolve, reject) => {
+        if (chrome.tabs && chrome.tabs.query) {
+            chrome.tabs.query({ active: true, windowId: winId }, (tabs) => {
+                if (chrome.runtime.lastError) {
+                    reject(chrome.runtime.lastError);
+                } else {
+                    resolve(tabs && tabs.length ? tabs[0] : null);
+                }
+            });
+            return;
+        }
+
+        chrome.runtime.sendMessage({ command: 'get_active_tab', win_id: winId }, (response) => {
+            if (chrome.runtime.lastError) {
+                reject(chrome.runtime.lastError);
+            } else if (response && response.error) {
+                reject(new Error(response.error));
+            } else {
+                resolve(response && response.tab ? response.tab : null);
+            }
+        });
+    });
+}
+
 // An object to encapsulate all recording operations
 // on extension side
 function Recorder(win_id) {
@@ -103,12 +139,12 @@ Recorder.prototype.start = function () {
         chrome.runtime.sendMessage({
             type: 'PANEL_SHOW_LINES',
             panelWindowId: context[this.win_id].panelId,
-            data: { code: null } // Clear lines or show empty
+            data: { source: "", currentMacro: "" } // Clear existing lines
         });
         chrome.runtime.sendMessage({
             type: 'PANEL_SET_STAT_LINE',
             panelWindowId: context[this.win_id].panelId,
-            data: { txt: "Recording...", type: "info" }
+            data: { text: "Recording...", level: "info" }
         });
     } catch (e) { /* ignore */ }
     // create array to store recorded actions
@@ -158,7 +194,7 @@ Recorder.prototype.start = function () {
                     chrome.runtime.sendMessage({
                         type: 'PANEL_SET_STAT_LINE',
                         panelWindowId: context[recorder.win_id].panelId,
-                        data: { txt: "Recording failed: No active tab found", type: "error" }
+                        data: { text: "Recording failed: No active tab found", level: "error" }
                     });
                 } catch (e) { /* ignore */ }
             }
@@ -210,7 +246,7 @@ Recorder.prototype.start = function () {
                 chrome.runtime.sendMessage({
                     type: 'PANEL_SET_STAT_LINE',
                     panelWindowId: context[recorder.win_id].panelId,
-                    data: { txt: "Recording failed: Cannot access active tab", type: "error" }
+                    data: { text: "Recording failed: Cannot access active tab", level: "error" }
                 });
             } catch (e) { /* ignore */ }
         }
@@ -298,7 +334,7 @@ Recorder.prototype.recordAction = function (cmd) {
         chrome.runtime.sendMessage({
             type: 'PANEL_ADD_LINE',
             panelWindowId: context[this.win_id].panelId,
-            data: { txt: cmd }
+            data: { text: cmd }
         });
     } catch (e) { /* ignore */ }
     this.actions.push(cmd);
@@ -803,9 +839,18 @@ Recorder.prototype.onQueryState = function (data, tab_id, callback) {
 // Add listeners for recording events
 // tab selection
 Recorder.prototype.onTabActivated = function (activeInfo) {
-    console.log("[DEBUG-REC] onTabActivated:", activeInfo);
+    // Offscreen receives TAB_ACTIVATED for *all* windows via SW forwarding.
+    // Only act (and log) while actively recording in our target window.
+    if (!this.recording) {
+        return;
+    }
+    if (Storage.getBool("debug")) {
+        console.log("[DEBUG-REC] onTabActivated:", activeInfo);
+    }
     if (this.win_id != activeInfo.windowId) {
-        console.warn("[DEBUG-REC] Window ID mismatch. Recorder:", this.win_id, "Event:", activeInfo.windowId, " - Ignored");
+        if (Storage.getBool("debug")) {
+            console.warn("[DEBUG-REC] Window ID mismatch. Recorder:", this.win_id, "Event:", activeInfo.windowId, " - Ignored");
+        }
         return;
     }
     var recorder = this;
@@ -815,13 +860,17 @@ Recorder.prototype.onTabActivated = function (activeInfo) {
             return;
         }
 
-        console.log("[DEBUG-REC] Tab info:", { index: tab.index, startIndex: recorder.startTabIndex, url: tab.url });
+        if (Storage.getBool("debug")) {
+            console.log("[DEBUG-REC] Tab info:", { index: tab.index, startIndex: recorder.startTabIndex, url: tab.url });
+        }
 
         // Use absolute tab index instead of relative to start tab
         var cur = tab.index;
 
         var cmd = "TAB T=" + (cur + 1);
-        console.log("[DEBUG-REC] Recording command:", cmd);
+        if (Storage.getBool("debug")) {
+            console.log("[DEBUG-REC] Recording command:", cmd);
+        }
         if (recorder.recording) {
             recorder.recordAction(cmd);
         }
@@ -946,11 +995,7 @@ Recorder.prototype.onTabAttached = function (tab_id, obj) {
 
     console.log("[iMacros MV3 Recorder] onTabAttached: tabId=" + tab_id);
     var recorder = this;
-    chrome.tabs.get(tab_id, function (tab) {
-        if (chrome.runtime.lastError) {
-            logError("Failed to get tab in onTabAttached: " + chrome.runtime.lastError.message, { tab_id: tab_id });
-            return;
-        }
+    getTab(tab_id).then(function (tab) {
         if (!tab || tab.windowId != recorder.win_id)
             return;
 
@@ -965,6 +1010,8 @@ Recorder.prototype.onTabAttached = function (tab_id, obj) {
             console.log("[iMacros MV3 Recorder] Recording URL GOTO=" + tab.url + " (attached tab)");
             recorder.recordAction("URL GOTO=" + tab.url);
         }
+    }).catch(function (err) {
+        logError("Failed to get tab in onTabAttached: " + (err && err.message ? err.message : String(err)), { tab_id: tab_id });
     });
 };
 
@@ -980,28 +1027,60 @@ Recorder.prototype.onTabDetached = function (tab_id, obj) {
 };
 
 
-Recorder.prototype.onDownloadCreated = function (dl) {
-    var self = this;
-    chrome.tabs.query({ active: true, windowId: this.win_id }, function (tabs) {
-        if (chrome.runtime.lastError) {
-            logError("Failed to query tabs in onDownloadCreated: " + chrome.runtime.lastError.message, { win_id: self.win_id });
-            return;
-        }
-        if (!tabs || tabs.length === 0) {
-            logWarning("No active tabs in onDownloadCreated", { win_id: self.win_id });
-            return;
-        }
-        if (dl.referrer != tabs[0].url)
-            return;
-        var prev_rec = self.popLastAction()
-        var rec = "ONDOWNLOAD FOLDER=*" +
+Recorder.prototype.onDownloadCreated = function (downloadItem, meta) {
+    if (!this.recording || !this.actions) {
+        return;
+    }
+
+    const recorder = this;
+    const metaObj = meta && typeof meta === 'object' ? meta : {};
+    const correlatedWinId = typeof metaObj.win_id === 'number' ? metaObj.win_id : null;
+    const correlatedTabId = typeof metaObj.tab_id === 'number' ? metaObj.tab_id : null;
+
+    if (correlatedWinId && correlatedWinId !== recorder.win_id) {
+        return;
+    }
+
+    const recordDownload = () => {
+        const prev_rec = recorder.popLastAction();
+        const rec = "ONDOWNLOAD FOLDER=*" +
             " FILE=+_{{!NOW:yyyymmdd_hhnnss}}" +
             " WAIT=YES";
-        self.recordAction(rec);
+        recorder.recordAction(rec);
         if (prev_rec) {
-            self.recordAction(prev_rec);
+            recorder.recordAction(prev_rec);
         }
-    });
+    };
+
+    // Prefer explicit correlation from the Service Worker, then fall back to
+    // downloadItem.tabId when present.
+    const tabId = (typeof correlatedTabId === 'number' && correlatedTabId >= 0) ?
+        correlatedTabId :
+        (downloadItem && typeof downloadItem.tabId === 'number' && downloadItem.tabId >= 0 ? downloadItem.tabId : null);
+
+    if (typeof tabId === 'number' && tabId >= 0) {
+        getTab(tabId).then((tab) => {
+            if (tab && typeof tab.windowId === 'number' && tab.windowId === recorder.win_id) {
+                recordDownload();
+            }
+        }).catch(() => {
+            // If we cannot resolve the tab, still record while actively recording
+            // to avoid missing ONDOWNLOAD in MV3 environments.
+            recordDownload();
+        });
+        return;
+    }
+
+    // Fallback: tie to current window's active tab, and only suppress when
+    // the referrer is explicitly known and clearly mismatched.
+    queryActiveTabInWindow(recorder.win_id).then((tab) => {
+        if (downloadItem && typeof downloadItem.referrer === 'string' && downloadItem.referrer.length > 0 && tab && tab.url) {
+            if (downloadItem.referrer !== tab.url) {
+                return;
+            }
+        }
+        recordDownload();
+    }).catch(() => recordDownload());
 };
 
 
@@ -1009,44 +1088,52 @@ Recorder.prototype.onContextMenu = function (info, tab) {
     if (!tab || this.win_id != tab.windowId)
         return;
 
-    var self = this;
     communicator.postMessage(
         "on-rclick",
         { linkUrl: info.linkUrl, frameUrl: info.frameUrl },
         tab.id,
-        function (data) {
+        (data) => {
             var fail_msg = "' Element corresponding to right click action" +
                 " was not found.";
             if (!data.found) {
-                self.recordAction(fail_msg);
+                this.recordAction(fail_msg);
                 return;
             }
-            self.checkForFrameChange(data._frame);
+            this.checkForFrameChange(data._frame);
             var rec = "ONDOWNLOAD FOLDER=*" +
                 " FILE=+_{{!NOW:yyyymmdd_hhnnss}}" +
                 " WAIT=YES";
-            self.recordAction(rec);
-            self.recordAction(data.action);
+            this.recordAction(rec);
+            this.recordAction(data.action);
         },
         { number: 0 });
 };
 
 Recorder.prototype.onNavigation = function (details) {
     var recorder = this;
-    console.log("[DEBUG-REC] onNavigation:", {
-        tabId: details.tabId,
-        transitionType: details.transitionType,
-        qualifiers: details.transitionQualifiers,
-        url: details.url
-    });
+    if (!recorder.recording) {
+        return;
+    }
+    if (Storage.getBool("debug")) {
+        console.log("[DEBUG-REC] onNavigation:", {
+            tabId: details.tabId,
+            transitionType: details.transitionType,
+            qualifiers: details.transitionQualifiers,
+            url: details.url
+        });
+    }
 
     getTab(details.tabId).then(function (tab) {
         if (!tab) {
-            console.log("[DEBUG-REC] onNavigation: tab not found");
+            if (Storage.getBool("debug")) {
+                console.log("[DEBUG-REC] onNavigation: tab not found");
+            }
             return;
         }
         if (tab.windowId != recorder.win_id) {
-            console.warn(`[DEBUG-REC] onNavigation: Window ID mismatch (Recorder: ${recorder.win_id}, Tab: ${tab.windowId}). Mismatch ignored.`);
+            if (Storage.getBool("debug")) {
+                console.warn(`[DEBUG-REC] onNavigation: Window ID mismatch (Recorder: ${recorder.win_id}, Tab: ${tab.windowId}). Mismatch ignored.`);
+            }
             return;
         }
 
@@ -1056,19 +1143,38 @@ Recorder.prototype.onNavigation = function (details) {
             // Both actions report the same "forward_back" qualifier. Since we can't determine
             // which button was pressed and there's no FORWARD command in iMacros syntax,
             // we always record BACK for both cases. This is a known limitation.
-            console.log("[DEBUG-REC] Recording BACK command");
+            //
+            // MV3: Suppress/replace any just-recorded URL GOTO for the same URL so we don't
+            // emit both "URL GOTO=..." and "BACK" for a single navigation. Also prime
+            // lastTabUrls so onTabUpdated can dedupe regardless of event ordering.
+            if (typeof details.url === "string" && details.url) {
+                recorder.lastTabUrls.set(details.tabId, details.url);
+                const expected = "URL GOTO=" + details.url;
+                if (typeof recorder.peekLastAction === "function" &&
+                    typeof recorder.popLastAction === "function" &&
+                    recorder.peekLastAction() === expected) {
+                    recorder.popLastAction();
+                }
+            }
+            if (Storage.getBool("debug")) {
+                console.log("[DEBUG-REC] Recording BACK command");
+            }
             recorder.recordAction("BACK");
         } else {
             const recordAddressBarGoto = function (reason) {
                 const lastRecorded = recorder.lastTabUrls.get(details.tabId);
 
                 if (lastRecorded === details.url) {
-                    console.log(`[DEBUG-REC] Skipping duplicate URL GOTO for ${reason}:`, details.url);
+                    if (Storage.getBool("debug")) {
+                        console.log(`[DEBUG-REC] Skipping duplicate URL GOTO for ${reason}:`, details.url);
+                    }
                     return;
                 }
 
                 recorder.lastTabUrls.set(details.tabId, details.url);
-                console.log(`[DEBUG-REC] Recording URL GOTO=${details.url} (${reason})`);
+                if (Storage.getBool("debug")) {
+                    console.log(`[DEBUG-REC] Recording URL GOTO=${details.url} (${reason})`);
+                }
                 recorder.recordAction("URL GOTO=" + details.url);
             };
 
@@ -1081,15 +1187,21 @@ Recorder.prototype.onNavigation = function (details) {
                         details.transitionQualifiers[0] == "from_address_bar") {
                         recordAddressBarGoto("from address bar");
                     } else {
-                        console.log("[DEBUG-REC] Ignoring link/generated transition without from_address_bar");
+                        if (Storage.getBool("debug")) {
+                            console.log("[DEBUG-REC] Ignoring link/generated transition without from_address_bar");
+                        }
                     }
                     break;
                 case "reload":
-                    console.log("[DEBUG-REC] Recording REFRESH command");
+                    if (Storage.getBool("debug")) {
+                        console.log("[DEBUG-REC] Recording REFRESH command");
+                    }
                     recorder.recordAction("REFRESH");
                     break;
                 default:
-                    console.log("[DEBUG-REC] Ignoring transition type:", details.transitionType);
+                    if (Storage.getBool("debug")) {
+                        console.log("[DEBUG-REC] Ignoring transition type:", details.transitionType);
+                    }
             }
         }
     }).catch(function (err) {
@@ -1274,8 +1386,14 @@ Recorder.prototype.onSendHeaders = function (details) {
 
 
 Recorder.prototype.addListeners = function () {
-    // In Offscreen Document, chrome.tabs is not available
-    if (chrome.tabs && chrome.tabs.onActivated) {
+    const debug = typeof Storage !== 'undefined' && typeof Storage.getBool === 'function' && Storage.getBool("debug");
+    const isOffscreen = isOffscreenDocument();
+    const skipNativeTabListeners = isOffscreen;
+    const skipNativeDownloadListeners = isOffscreen;
+    const skipNativeWebNavigationListeners = isOffscreen;
+
+    // In MV3 Offscreen Document, tab events are forwarded from the Service Worker.
+    if (!skipNativeTabListeners && chrome.tabs && chrome.tabs.onActivated) {
         chrome.tabs.onActivated.addListener(this.onActivated);
         chrome.tabs.onCreated.addListener(this.onCreated);
         chrome.tabs.onUpdated.addListener(this.onUpdated);
@@ -1283,12 +1401,23 @@ Recorder.prototype.addListeners = function () {
         chrome.tabs.onMoved.addListener(this.onMoved);
         chrome.tabs.onAttached.addListener(this.onAttached);
         chrome.tabs.onDetached.addListener(this.onDetached);
+    } else if (skipNativeTabListeners) {
+        if (debug) {
+            console.log('[Recorder] Using SW-forwarded tab events - skipping native tab listeners');
+        }
     } else {
-        console.log('[Recorder] chrome.tabs not available - skipping tab event listeners');
+        if (debug) {
+            console.log('[Recorder] chrome.tabs not available - skipping tab event listeners');
+        }
     }
 
-    if (chrome.downloads && chrome.downloads.onCreated) {
+    // In MV3 Offscreen Document, download events are forwarded from the Service Worker.
+    if (!skipNativeDownloadListeners && chrome.downloads && chrome.downloads.onCreated) {
         chrome.downloads.onCreated.addListener(this._onDownloadCreated);
+    } else if (skipNativeDownloadListeners) {
+        if (debug) {
+            console.log('[Recorder] Using SW-forwarded download events - skipping native download listener');
+        }
     }
 
     if (chrome.contextMenus && chrome.contextMenus.onClicked) {
@@ -1323,9 +1452,14 @@ Recorder.prototype.addListeners = function () {
         );
     }
 
-    // network events
-    if (chrome.webNavigation && chrome.webNavigation.onCommitted) {
+    // Network/navigation events
+    // In MV3 Offscreen Document, navigation events are forwarded from the Service Worker to avoid duplicate recording.
+    if (!skipNativeWebNavigationListeners && chrome.webNavigation && chrome.webNavigation.onCommitted) {
         chrome.webNavigation.onCommitted.addListener(this.onCommitted);
+    } else if (skipNativeWebNavigationListeners) {
+        if (debug) {
+            console.log('[Recorder] Using SW-forwarded webNavigation events - skipping native webNavigation listener');
+        }
     }
     if (chrome.webRequest && chrome.webRequest.onAuthRequired) {
         chrome.webRequest.onAuthRequired.addListener(

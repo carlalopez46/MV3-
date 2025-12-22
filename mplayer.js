@@ -65,7 +65,11 @@ PlayerVariableManager.prototype.setVar = function (name, value) {
 
 PlayerVariableManager.prototype.resetLocalContext = function () {
     VariableManager.prototype.resetLocalContext.call(this);
-    this.player.currentLoop = this.localContext.LOOP;
+    // Only set currentLoop from localContext.LOOP if it's a valid positive integer
+    // This prevents overwriting the currentLoop set by play() with undefined/0
+    if (typeof this.localContext.LOOP === 'number' && this.localContext.LOOP > 0) {
+        this.player.currentLoop = this.localContext.LOOP;
+    }
 };
 
 PlayerVariableManager.prototype.clearGlobalVars = function () {
@@ -149,7 +153,7 @@ MacroPlayer.prototype._updateFocusGuardTab = function (tabId) {
     } catch (err) {
         console.warn('[MacroPlayer] Focus guard notification threw synchronously:', err);
     }
-  };
+};
 
 /**
  * Build list of candidate macro paths to try when resolving a macro name.
@@ -159,18 +163,18 @@ MacroPlayer.prototype._updateFocusGuardTab = function (tabId) {
  */
 MacroPlayer.prototype._buildMacroCandidates = function (macroPath) {
     if (!macroPath) return [];
-    
+
     // If path already has a known extension, return as-is
     if (/\.\w+$/i.test(macroPath)) {
         return [macroPath];
     }
-    
+
     // Check for hidden files (start with dot but no extension after)
     const lastSegment = macroPath.split(/[\/\\]/).pop();
     if (lastSegment.startsWith('.') && !/\.\w+$/.test(lastSegment)) {
         return [macroPath];
     }
-    
+
     // Try with default .iim extension first, then raw name
     return [macroPath + '.iim', macroPath];
 };
@@ -182,10 +186,10 @@ MacroPlayer.prototype._buildMacroCandidates = function (macroPath) {
 MacroPlayer.prototype.resetVariableStateForNewMacro = function () {
     // Clear legacy VAR array
     this.vars = new Array();
-    
+
     // Clear user variables map
     this.userVars.clear();
-    
+
     // Reset VariableManager if available
     if (this.varManager) {
         this.varManager.clearGlobalVars();
@@ -539,16 +543,21 @@ MacroPlayer.prototype.addListeners = function () {
     communicator.registerHandler("error-occurred",
         this._onScriptError, this.win_id);
 
-    // Only register direct listeners if running in Service Worker (not Offscreen)
-    // In Offscreen, events are forwarded via TAB_UPDATED/TAB_ACTIVATED messages
-    if (typeof chrome.tabs !== 'undefined' && chrome.tabs.onUpdated) {
+    const isOffscreenDocument = (typeof window !== 'undefined'
+        && window.location
+        && typeof window.location.pathname === 'string'
+        && window.location.pathname.endsWith('offscreen.html'));
+
+    // Only register direct listeners if running outside Offscreen.
+    // In Offscreen, events are forwarded via TAB_UPDATED/TAB_ACTIVATED messages.
+    if (!isOffscreenDocument && typeof chrome.tabs !== 'undefined' && chrome.tabs.onUpdated) {
         chrome.tabs.onUpdated.addListener(this._onTabUpdated);
         chrome.tabs.onActivated.addListener(this._onActivated);
     }
 
     // use WebNavigation interface to trace download events
     // Only available in Service Worker, not Offscreen Document
-    if (typeof chrome.webNavigation !== 'undefined' && chrome.webNavigation.onErrorOccurred) {
+    if (!isOffscreenDocument && typeof chrome.webNavigation !== 'undefined' && chrome.webNavigation.onErrorOccurred) {
         // chrome.webNavigation.onBeforeNavigate.addListener(this._onBeforeNavigate);
         // chrome.webNavigation.onCompleted.addListener(this._onCompleted);
         chrome.webNavigation.onErrorOccurred.addListener(this._onErrorOccured);
@@ -972,25 +981,25 @@ MacroPlayer.prototype.stopTimer = function (type) {
 MacroPlayer.prototype._popFrame = function () {
     if (this.callStack && this.callStack.length) {
         const frame = this.callStack.pop();
-        
+
         // Restore caller state from the frame
         if (frame) {
             // Restore loop stack if saved
             if (frame.loopStack !== undefined) {
                 this.loopStack = frame.loopStack;
             }
-            
+
             // Restore local context if saved
             if (frame.localContextSnapshot && this.varManager && this.varManager.restoreLocalContext) {
                 this.varManager.restoreLocalContext(frame.localContextSnapshot);
             }
-            
+
             // Restore autoplay suppression state
             if (frame.autoplaySuppressed !== undefined) {
                 this.autoplaySuppressed = frame.autoplaySuppressed;
             }
         }
-        
+
         // Decrement nesting level
         if (this.runNestLevel > 0) {
             this.runNestLevel--;
@@ -1960,10 +1969,9 @@ MacroPlayer.prototype.RegExpTable["frame"] =
 
 MacroPlayer.prototype.onFrameComplete = function (data) {
     if (!data.frame) {
-        var self = this;
-        this.retry(function () {
-            self.currentFrame = { number: 0 };
-            throw new RuntimeError("frame " + self.requestedFrameParam + " not found", 722);
+        this.retry(() => {
+            this.currentFrame = { number: 0 };
+            throw new RuntimeError("frame " + this.requestedFrameParam + " not found", 722);
         }, "Frame waiting... ", "onFrameComplete", this.timeout_tag);
     } else {
         this.clearRetryInterval();
@@ -1995,8 +2003,6 @@ MacroPlayer.prototype.ActionTable["frame"] = function (cmd) {
         frame_data.number = param;
     else if (type == "name")
         frame_data.name = param;
-
-    var self = this;
 
     communicator.postMessage("frame-command", frame_data, this.tab_id,
         this.onFrameComplete.bind(this),
@@ -2319,19 +2325,24 @@ MacroPlayer.prototype.onDownloadChanged = function (changeInfo) {
     }
 };
 
-// Check if chrome.downloads is available (not in Offscreen Document)
+// Check if chrome.downloads is available for direct use.
+// In MV3 Offscreen Document, we proxy download operations through the Service Worker
+// to preserve correlation (win_id/tab_id) and avoid duplicate event delivery.
 function hasDownloadsAPI() {
+    if (typeof window !== 'undefined' && window.location && typeof window.location.pathname === 'string') {
+        if (window.location.pathname.endsWith('offscreen.html')) {
+            return false;
+        }
+    }
     return typeof chrome !== 'undefined' && chrome.downloads && typeof chrome.downloads.download === 'function';
 }
 
 MacroPlayer.prototype.saveTarget = function (url) {
-    var self = this;
-
     if (hasDownloadsAPI()) {
         // Direct access (Service Worker context)
-        chrome.downloads.download({ url: url }, function (dl_id) {
+        chrome.downloads.download({ url: url }, (dl_id) => {
             if (chrome.runtime.lastError) {
-                self.handleError(new RuntimeError(
+                this.handleError(new RuntimeError(
                     "Download failed: " + chrome.runtime.lastError.message
                 ));
                 return;
@@ -2344,19 +2355,16 @@ MacroPlayer.prototype.saveTarget = function (url) {
         chrome.runtime.sendMessage({
             command: 'DOWNLOADS_DOWNLOAD',
             options: { url: url },
-            win_id: self.win_id,
-            tab_id: self.tab_id
-        }, function (response) {
-            if (chrome.runtime.lastError) {
-                self.handleError(new RuntimeError(
-                    "Download failed: " + chrome.runtime.lastError.message
-                ));
-                return;
-            }
-            if (response && response.error) {
-                self.handleError(new RuntimeError(
-                    "Download failed: " + response.error
-                ));
+            win_id: this.win_id,
+            tab_id: this.tab_id
+        }, (response) => {
+            // ★Refactor: Consolidated error checking with robust message construction
+            if (chrome.runtime.lastError || (response && response.error)) {
+                var errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
+                    (response && response.error) ||
+                    "Unknown download error";
+
+                this.handleError(new RuntimeError("Download failed: " + errorMsg));
                 return;
             }
             // Download started, events will be forwarded
@@ -2478,7 +2486,12 @@ MacroPlayer.prototype.ActionTable["prompt"] = function (cmd) {
                 if (typeof (retobj.varname) != "undefined") {
                     mplayer.setUserVar(retobj.varname, retobj.value);
                 } else if (typeof (retobj.varnum) != "undefined") {
-                    mplayer.vars[imns.s2i(retobj.varnum)] = retobj.value;
+                    const idx = imns.s2i(retobj.varnum);
+                    mplayer.vars[idx] = retobj.value;
+                    // Also update varManager if it exists to ensure getVar() returns the correct value
+                    if (mplayer.varManager && typeof mplayer.varManager.setVar === 'function') {
+                        mplayer.varManager.setVar('VAR' + idx, retobj.value);
+                    }
                 }
                 mplayer.next("PROMPT");
                 return
@@ -4129,13 +4142,13 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
 
     // Build list of candidate paths to try (with .iim extension first)
     const candidates = this._buildMacroCandidates(macroPath);
-    
+
     // Increment nesting level
     this.runNestLevel++;
-    
+
     let source = null;
     let resolvedPath = null;
-    
+
     // Try each candidate path in order
     for (const candidate of candidates) {
         resolvedPath = await this.resolveMacroPath(candidate);
@@ -4146,7 +4159,7 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
             source = loaded;
             break;
         }
-        
+
         // Try loading from filesystem
         try {
             source = await this.loadMacroFileFromFs(resolvedPath);
@@ -4155,7 +4168,7 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
             // Continue to next candidate
         }
     }
-    
+
     if (source == null) {
         this.runNestLevel--;
         throw new RuntimeError("Macro '" + macroPath + "' not found", 701);
@@ -4172,12 +4185,12 @@ MacroPlayer.prototype.ActionTable["run"] = async function (cmd) {
         autoplaySuppressed: this.autoplaySuppressed
     };
     this.callStack.push(callerFrame);
-    
+
     // Clear autoplay suppression for nested execution
     this.autoplaySuppressed = false;
-    
+
     this.play(macro, this.limits);
-    
+
     // Note: runNestLevel is decremented in _popFrame()
 };
 
@@ -4222,6 +4235,8 @@ MacroPlayer.prototype.play = function (macro, limits, callback) {
         this.times = macro.times || 1;
         this.currentLoop = macro.startLoop || 1;
         this.cycledReplay = this.times - this.currentLoop > 0;
+        if (Storage.getBool("debug"))
+            console.log("[MacroPlayer] play() initialized with times:", this.times, "currentLoop:", this.currentLoop, "cycledReplay:", this.cycledReplay, "macro.times:", macro.times);
         // debugger should be attached at least once for every page if there is an
         // event command
         this.debuggerAttached = false;
@@ -4412,15 +4427,18 @@ MacroPlayer.prototype.playNextAction = function (caller_id) {
             }
         } else {
             this.afterEachRun();
+            console.log("[MacroPlayer] Action stack empty. currentLoop:", this.currentLoop, "times:", this.times, "check:", this.currentLoop < this.times);
             if (this.currentLoop < this.times) {
                 this.firstLoop = false;
                 this.currentLoop++;
+                console.log("[MacroPlayer] Starting next loop:", this.currentLoop, "of", this.times);
                 notifyPanelLoop(this.win_id, this.currentLoop);
                 this.action_stack = this.actions.slice();
                 this.action_stack.reverse();
                 this.next("new loop");
             } else {
                 // no more actions left
+                console.log("[MacroPlayer] All loops completed (", this.currentLoop, "/", this.times, "), calling stop()");
                 this.stop();
             }
         }
@@ -4881,15 +4899,43 @@ MacroPlayer.prototype.showAndAddExtractData = function (str) {
     if (!this.shouldPopupExtract)
         return;
     this.waitingForExtract = true;
-    var features = "titlebar=no,menubar=no,location=no," +
-        "resizable=yes,scrollbars=yes,status=no," +
-        "width=430,height=380";
-    var win = window.open("extractDialog.html",
-        null, features);
-    win.args = {
+
+    // ★FIX: Use Service Worker to open the dialog window
+    // Offscreen から window.open は不可視またはブロックされるため
+
+    // ダイアログに渡すデータ
+    var dialogArgs = {
         data: str,
-        mplayer: this
+        win_id: this.win_id
+        // 注意: this (mplayerインスタンス) は送れないので、必要なIDだけ渡す
     };
+
+    // SW にウィンドウ作成を依頼
+    chrome.runtime.sendMessage({
+        command: "openDialog",
+        url: "extractDialog.html",
+        pos: { width: 430, height: 380 },
+        args: dialogArgs // SW側で一時的にキャッシュされる
+    }, (response) => { // Use arrow function to preserve 'this' context
+        // ★FIX: Check both runtime.lastError and response.error
+        if (chrome.runtime.lastError || (response && response.error)) {
+            var errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
+                (response && response.error) ||
+                "Unknown error opening dialog";
+
+            console.error("[MacroPlayer] Failed to open extract dialog:", errorMsg);
+
+            // ★CRITICAL: Reset waiting flag to prevent hang
+            this.waitingForExtract = false;
+
+            // Terminate run cleanly with error
+            this.handleError(new RuntimeError("Failed to open extract dialog: " + errorMsg, 999));
+            return;
+        }
+
+        // ダイアログが正常に開かれた場合は、ダイアログが閉じられるまで待機
+        console.log("[MacroPlayer] Extract dialog opened successfully");
+    });
 };
 
 
@@ -4990,7 +5036,8 @@ MacroPlayer.prototype.getVar = function (idx) {
     }
 
     var num = typeof idx === "string" ? imns.s2i(idx) : idx;
-    return this.vars[num] || "";
+    const fallbackValue = this.vars[num] || "";
+    return fallbackValue;
 };
 
 // functions to access user defined variables
@@ -5084,7 +5131,10 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
     var mplayer = this;
     var handleVariable = function (match_str, var_name) {
         var t = var_name.match(mplayer.limits.varsRe);
-        if (t) return mplayer.getVar(t[1]);
+        if (t) {
+            const value = mplayer.getVar(t[1]);
+            return value;
+        }
 
         t = var_name.match(/^!extract$/i);
         if (t) return mplayer.getExtractData();

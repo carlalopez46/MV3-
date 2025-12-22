@@ -158,6 +158,17 @@ if (_needsLocalStoragePolyfill) {
 (function () {
     const globalScope = typeof self !== 'undefined' ? self : window;
 
+    // In MV3 the service worker may re-inject content scripts after a
+    // "Receiving end does not exist" error. utils.js must be safe to evaluate
+    // multiple times in the same document. Guard against re-registering the
+    // asyncRun message listener (and re-defining asyncRun) on reinjection.
+    if (globalScope && globalScope.__imacros_asyncRun_installed) {
+        return;
+    }
+    if (globalScope) {
+        globalScope.__imacros_asyncRun_installed = true;
+    }
+
     if (typeof window !== 'undefined' && window.postMessage) {
         const timers = [];
         const onMessage = function (event) {
@@ -674,16 +685,42 @@ var imns = {
         _writeClipboardFallback: function (str) {
             var self = this;
 
-            // If in Offscreen Document, proxy through Service Worker -> Content Script
-            // This is necessary because Offscreen Documents don't have focus and clipboard operations fail
+            // If in Offscreen Document, first try execCommand('copy') directly
+            // This avoids SW proxy which can cause focus changes and other side effects
             if (self._isOffscreenContext()) {
-                console.log("[iMacros] Clipboard write: proxying through content script (offscreen context detected)");
+                var textarea = null;
+                try {
+                    textarea = document.createElement('textarea');
+                    textarea.setAttribute('readonly', '');
+                    textarea.style.position = 'fixed';
+                    textarea.style.opacity = '0';
+                    textarea.style.left = '-9999px';
+                    document.body.appendChild(textarea);
+                    textarea.value = str;
+                    textarea.focus();
+                    textarea.select();
+                    var ok = document.execCommand('copy');
+                    if (ok) {
+                        console.log('[iMacros] Clipboard write successful via execCommand in offscreen');
+                        return Promise.resolve();
+                    }
+                    console.warn('[iMacros] offscreen execCommand(copy) returned false, falling back to SW proxy');
+                } catch (e) {
+                    console.warn('[iMacros] offscreen clipboard write error, falling back to SW proxy:', e);
+                } finally {
+                    if (textarea && textarea.parentNode) {
+                        document.body.removeChild(textarea);
+                    }
+                }
+
+                // Fallback: proxy through Service Worker -> Content Script
+                console.log("[iMacros] Clipboard write: proxying through Service Worker (offscreen fallback)");
                 return new Promise(function (resolve, reject) {
                     try {
                         chrome.runtime.sendMessage({
                             command: 'CLIPBOARD_WRITE',
                             text: str
-                        }, function (response) {
+                        }, (response) => {
                             if (chrome.runtime.lastError) {
                                 console.warn("[iMacros] Clipboard write proxy failed:", chrome.runtime.lastError.message);
                                 // Don't fail the macro - clipboard is non-critical
@@ -708,7 +745,7 @@ var imns = {
 
             // Try Clipboard API first if available (modern browsers)
             if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
-                return navigator.clipboard.writeText(str).catch(function (err) {
+                return navigator.clipboard.writeText(str).catch((err) => {
                     console.error("[iMacros] Clipboard write failed:", err);
                     // Don't throw - return resolved promise (clipboard is non-critical)
                     return Promise.resolve();
@@ -718,7 +755,7 @@ var imns = {
             // Fallback to DOM method if available (content scripts, popups)
             if (typeof document !== 'undefined' && document.body) {
                 try {
-                    var x = self._check_area();
+                    var x = this._check_area();
                     x.value = str;
                     x.focus();
                     x.select();
@@ -736,45 +773,76 @@ var imns = {
         },
 
         _readClipboardFallback: function () {
-            var self = this;
-
-            // If in Offscreen Document, proxy through Service Worker -> Content Script
-            if (self._isOffscreenContext()) {
-                console.log("[iMacros] Clipboard read: proxying through content script (offscreen context detected)");
-                return new Promise(function (resolve, reject) {
+            // Helper to proxy through Service Worker -> Content Script
+            const proxyThroughServiceWorker = () => {
+                return new Promise((resolve, reject) => {
                     try {
                         chrome.runtime.sendMessage({
                             command: 'CLIPBOARD_READ'
-                        }, function (response) {
+                        }, (response) => {
                             if (chrome.runtime.lastError) {
                                 console.warn("[iMacros] Clipboard read proxy failed:", chrome.runtime.lastError.message);
-                                // Return cached value only if still within TTL, otherwise empty string
-                                resolve((Date.now() - self._cacheTimestamp) < self._CACHE_TTL_MS ? self._cachedValue : "");
+                                resolve((Date.now() - this._cacheTimestamp) < this._CACHE_TTL_MS ? this._cachedValue : "");
                                 return;
                             }
                             if (response && response.success) {
                                 console.log("[iMacros] Clipboard read successful via content script proxy");
-                                // Update cache
-                                self._cachedValue = response.text || "";
-                                self._cacheTimestamp = Date.now();
-                                resolve(self._cachedValue);
+                                this._cachedValue = response.text || "";
+                                this._cacheTimestamp = Date.now();
+                                resolve(this._cachedValue);
                             } else {
                                 console.warn("[iMacros] Clipboard read failed:", response && response.error);
-                                // Return cached value only if still within TTL, otherwise empty string
-                                resolve((Date.now() - self._cacheTimestamp) < self._CACHE_TTL_MS ? self._cachedValue : "");
+                                resolve((Date.now() - this._cacheTimestamp) < this._CACHE_TTL_MS ? this._cachedValue : "");
                             }
                         });
                     } catch (e) {
                         console.error("[iMacros] Clipboard read proxy exception:", e);
-                        // Return cached value only if still within TTL, otherwise empty string
-                        resolve((Date.now() - self._cacheTimestamp) < self._CACHE_TTL_MS ? self._cachedValue : "");
+                        resolve((Date.now() - this._cacheTimestamp) < this._CACHE_TTL_MS ? this._cachedValue : "");
                     }
                 });
+            };
+
+            // In Offscreen Document, use execCommand('paste') directly
+            // Offscreen documents created with 'CLIPBOARD' reason support this legacy API
+            // navigator.clipboard API won't work due to lack of focus
+            if (this._isOffscreenContext()) {
+                console.log("[iMacros] Clipboard read: using execCommand in offscreen context");
+                var textarea = null;
+                try {
+                    if (!document.body) {
+                        console.warn('[iMacros] document.body not available in offscreen context, using SW proxy');
+                        // Fall through to Service Worker proxy
+                    } else {
+                        textarea = document.createElement("textarea");
+                        textarea.style.position = "fixed";
+                        textarea.style.opacity = "0";
+                        document.body.appendChild(textarea);
+                        textarea.focus();
+                        var result = document.execCommand("paste");
+                        var text = textarea.value;
+                        if (result && text !== undefined) {
+                            console.log("[iMacros] Clipboard read successful via execCommand in offscreen");
+                            this._cachedValue = text;
+                            this._cacheTimestamp = Date.now();
+                            return Promise.resolve(text);
+                        } else {
+                            console.warn("[iMacros] execCommand('paste') returned false, trying proxy");
+                        }
+                    }
+                } catch (e) {
+                    console.warn("[iMacros] Clipboard read error in offscreen:", e);
+                } finally {
+                    if (textarea && textarea.parentNode && document.body) {
+                        document.body.removeChild(textarea);
+                    }
+                }
+                // Fallback to proxy only if execCommand fails
+                return proxyThroughServiceWorker();
             }
 
             // Try Clipboard API first if available (modern browsers)
             if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.readText) {
-                return navigator.clipboard.readText().catch(function (err) {
+                return navigator.clipboard.readText().catch((err) => {
                     console.error("[iMacros] Clipboard read failed:", err);
                     // Don't throw - return rejected promise for caller to handle
                     return Promise.reject(new Error("Clipboard read failed: " + err.message));
@@ -825,16 +893,14 @@ var imns = {
          * Uses offscreen document in Service Worker, Clipboard API or DOM in other contexts
          */
         putString: function (str) {
-            var self = this;
-
             // Service Worker context: use offscreen document
-            if (self._isServiceWorker()) {
-                return self._ensureOffscreenDocument().then(function () {
-                    return new Promise(function (resolve, reject) {
+            if (this._isServiceWorker()) {
+                return this._ensureOffscreenDocument().then(() => {
+                    return new Promise((resolve, reject) => {
                         chrome.runtime.sendMessage({
                             type: 'clipboard_write',
                             text: str
-                        }, function (response) {
+                        }, (response) => {
                             if (chrome.runtime.lastError) {
                                 console.error("[iMacros] Offscreen clipboard write error:", chrome.runtime.lastError);
                                 reject(new Error(chrome.runtime.lastError.message));
@@ -848,17 +914,17 @@ var imns = {
                             }
                         });
                     });
-                }).catch(function (err) {
+                }).catch((err) => {
                     if (err && err.code === 'OFFSCREEN_UNAVAILABLE') {
                         console.warn("[iMacros] Offscreen API unavailable, falling back to direct clipboard access");
-                        return self._writeClipboardFallback(str);
+                        return this._writeClipboardFallback(str);
                     }
                     console.error("[iMacros] Failed to setup offscreen document:", err);
                     return Promise.reject(err);
                 });
             }
 
-            return self._writeClipboardFallback(str);
+            return this._writeClipboardFallback(str);
         },
 
         /**
@@ -867,49 +933,47 @@ var imns = {
          * In Offscreen Document context, triggers async update for next read
          */
         getStringSync: function () {
-            var self = this;
-
             // Check if cache is still valid
-            if (Date.now() - self._cacheTimestamp < self._CACHE_TTL_MS) {
-                return self._cachedValue;
+            if (Date.now() - this._cacheTimestamp < this._CACHE_TTL_MS) {
+                return this._cachedValue;
             }
 
             // In Offscreen Document, we can't read synchronously - trigger async update and return cache
-            if (self._isOffscreenContext()) {
+            if (this._isOffscreenContext()) {
                 // Trigger async cache update for future reads (fire and forget)
-                self._readClipboardFallback().then(function(value) {
-                    self._cachedValue = value || "";
-                    self._cacheTimestamp = Date.now();
-                }).catch(function(err) {
+                this._readClipboardFallback().then((value) => {
+                    this._cachedValue = value || "";
+                    this._cacheTimestamp = Date.now();
+                }).catch((err) => {
                     // Ignore errors in background update, but log for debugging
                     console.debug("[iMacros] Background clipboard cache update failed in offscreen context:", err && err.message ? err.message : err);
                 });
                 // Return cached value immediately
-                return self._cachedValue;
+                return this._cachedValue;
             }
 
             // Try synchronous DOM read in non-Service Worker contexts
-            if (!self._isServiceWorker() && typeof document !== 'undefined' && document.body) {
+            if (!this._isServiceWorker() && typeof document !== 'undefined' && document.body) {
                 try {
-                    var x = self._check_area();
+                    var x = this._check_area();
                     x.value = '';
                     x.select();
                     x.focus();
                     document.execCommand("Paste");
                     var value = x.value;
                     // Update cache
-                    self._cachedValue = value;
-                    self._cacheTimestamp = Date.now();
+                    this._cachedValue = value;
+                    this._cacheTimestamp = Date.now();
                     return value;
                 } catch (e) {
                     console.warn("[iMacros] Synchronous clipboard read failed:", e.message);
                     // Return cached value on error
-                    return self._cachedValue;
+                    return this._cachedValue;
                 }
             }
 
             // Return cached value if no sync read available
-            return self._cachedValue;
+            return this._cachedValue;
         },
 
         /**
@@ -917,14 +981,13 @@ var imns = {
          * Call this before macro execution to ensure cache is up to date
          */
         refreshCache: function () {
-            var self = this;
-            return self._readClipboardFallback().then(function(value) {
-                self._cachedValue = value || "";
-                self._cacheTimestamp = Date.now();
-                return self._cachedValue;
-            }).catch(function(err) {
+            return this._readClipboardFallback().then((value) => {
+                this._cachedValue = value || "";
+                this._cacheTimestamp = Date.now();
+                return this._cachedValue;
+            }).catch((err) => {
                 console.warn("[iMacros] Clipboard cache refresh failed:", err);
-                return self._cachedValue;
+                return this._cachedValue;
             });
         },
 
@@ -933,24 +996,22 @@ var imns = {
          * Uses offscreen document in Service Worker, Clipboard API or DOM in other contexts
          */
         getString: function () {
-            var self = this;
-
             // Service Worker context: use offscreen document
-            if (self._isServiceWorker()) {
-                return self._ensureOffscreenDocument().then(function () {
-                    return new Promise(function (resolve, reject) {
+            if (this._isServiceWorker()) {
+                return this._ensureOffscreenDocument().then(() => {
+                    return new Promise((resolve, reject) => {
                         chrome.runtime.sendMessage({
                             type: 'clipboard_read'
-                        }, function (response) {
+                        }, (response) => {
                             if (chrome.runtime.lastError) {
                                 console.error("[iMacros] Offscreen clipboard read error:", chrome.runtime.lastError);
                                 reject(new Error(chrome.runtime.lastError.message));
                             } else if (response && response.success) {
                                 console.log("[iMacros] Clipboard read successful via offscreen");
                                 // Update cache
-                                self._cachedValue = response.text || "";
-                                self._cacheTimestamp = Date.now();
-                                resolve(self._cachedValue);
+                                this._cachedValue = response.text || "";
+                                this._cacheTimestamp = Date.now();
+                                resolve(this._cachedValue);
                             } else {
                                 var errorMsg = response && response.error ? response.error : "Unknown error";
                                 console.error("[iMacros] Offscreen clipboard read failed:", errorMsg);
@@ -958,21 +1019,21 @@ var imns = {
                             }
                         });
                     });
-                }).catch(function (err) {
+                }).catch((err) => {
                     if (err && err.code === 'OFFSCREEN_UNAVAILABLE') {
                         console.warn("[iMacros] Offscreen API unavailable, falling back to direct clipboard access");
-                        return self._readClipboardFallback();
+                        return this._readClipboardFallback();
                     }
                     console.error("[iMacros] Failed to setup offscreen document:", err);
                     return Promise.reject(err);
                 });
             }
 
-            return self._readClipboardFallback().then(function (value) {
+            return this._readClipboardFallback().then((value) => {
                 // Update cache
-                self._cachedValue = value || "";
-                self._cacheTimestamp = Date.now();
-                return self._cachedValue;
+                this._cachedValue = value || "";
+                this._cacheTimestamp = Date.now();
+                return this._cachedValue;
             });
         }
     }
@@ -1488,7 +1549,8 @@ var dialogUtils = (function () {
 // Allow utils.js to be evaluated multiple times (e.g., across MV3 contexts)
 // without throwing a SyntaxError for redeclaring the cached version variable.
 // Preserve any cached value that may already live on the global scope.
-const _cachedManifestGlobal = typeof globalThis !== 'undefined'
+// eslint-disable-next-line no-var
+var _cachedManifestGlobal = typeof globalThis !== 'undefined'
     ? globalThis
     : (typeof self !== 'undefined' ? self : window);
 if (typeof _cachedManifestGlobal.cachedManifestVersion === 'undefined') {

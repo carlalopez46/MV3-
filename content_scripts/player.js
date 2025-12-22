@@ -1714,19 +1714,42 @@ CSPlayer.prototype.onHideScrollbars = function (args, callback) {
 // get offset of the current window relative to topmost frame
 function getXYOffset(w) {
     if (w === window.top) {
-        let style = w.getComputedStyle(w.document.body)
-        return {
-            x_offset: parseInt(style.marginLeft),
-            y_offset: parseInt(style.marginTop)
+        try {
+            let style = w.getComputedStyle(w.document.body);
+            return {
+                x_offset: parseInt(style.marginLeft) || 0,
+                y_offset: parseInt(style.marginTop) || 0
+            };
+        } catch (e) {
+            console.warn("[iMacros] Error getting body style in top frame:", e);
+            return { x_offset: 0, y_offset: 0 };
         }
     }
 
-    let { x_offset, y_offset } = getXYOffset(w.parent)
-    let style = w.parent.getComputedStyle(w.frameElement)
-    let rect = w.frameElement.getBoundingClientRect()
-    return {
-        x_offset: rect.left + x_offset + parseInt(style.borderLeftWidth),
-        y_offset: rect.top + y_offset + parseInt(style.borderTopWidth)
+    try {
+        // Check for cross-origin access before attempting to access w.frameElement or w.parent
+        // Accessing w.frameElement property throws SecurityError if cross-origin
+        const frameElement = w.frameElement;
+
+        if (!frameElement) {
+            // Cannot access frameElement or it's null
+            return { x_offset: 0, y_offset: 0 };
+        }
+
+        let { x_offset, y_offset } = getXYOffset(w.parent);
+
+        let style = w.parent.getComputedStyle(frameElement);
+        let rect = frameElement.getBoundingClientRect();
+
+        return {
+            x_offset: rect.left + x_offset + (parseInt(style.borderLeftWidth) || 0),
+            y_offset: rect.top + y_offset + (parseInt(style.borderTopWidth) || 0)
+        };
+    } catch (e) {
+        // Suppress errors for cross-origin frames
+        // This is expected when running in iframes on different domains
+        // console.warn("[iMacros] Cross-origin access blocked in getXYOffset:", e);
+        return { x_offset: 0, y_offset: 0 };
     }
 }
 
@@ -1860,28 +1883,51 @@ CSPlayer.prototype.onQueryCssSelector = function (args, sendresponse) {
 };
 
 
-// Initialize player when DOM is ready to ensure connector and DOM are accessible
+// Initialize player when DOM is ready to ensure connector and DOM are accessible.
+// MV3: content scripts may be injected multiple times; keep initialization idempotent.
 try {
-    if (document.readyState === "complete" || document.readyState === "interactive") {
-        setTimeout(function () {
-            console.log("[iMacros MV3] Initializing CSPlayer (immediate)");
-            window.player = new CSPlayer();
-        }, 0);
-    } else {
-        window.addEventListener("DOMContentLoaded", function () {
-            console.log("[iMacros MV3] Initializing CSPlayer (DOMContentLoaded)");
-            window.player = new CSPlayer();
-        });
-        window.addEventListener("load", function () {
-            // Fallback in case DOMContentLoaded already fired
-            if (!window.player) {
-                console.log("[iMacros MV3] Initializing CSPlayer (load fallback)");
-                window.player = new CSPlayer();
+    var __imacrosGlobal = (typeof globalThis !== 'undefined') ? globalThis : window;
+    var __imacrosPlayerBootstrapKey = '__imacros_mv3_csplayer_bootstrap__';
+    var __imacrosPlayerBootstrap = (__imacrosGlobal && __imacrosGlobal[__imacrosPlayerBootstrapKey]) || null;
+
+    if (!__imacrosPlayerBootstrap) {
+        __imacrosPlayerBootstrap = { instance: null, scheduled: false };
+        try {
+            if (__imacrosGlobal) {
+                __imacrosGlobal[__imacrosPlayerBootstrapKey] = __imacrosPlayerBootstrap;
             }
-        });
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    if (__imacrosPlayerBootstrap.instance) {
+        window.player = __imacrosPlayerBootstrap.instance;
+    } else if (!__imacrosPlayerBootstrap.scheduled) {
+        __imacrosPlayerBootstrap.scheduled = true;
+
+        var initPlayer = function () {
+            if (__imacrosPlayerBootstrap.instance) {
+                window.player = __imacrosPlayerBootstrap.instance;
+                return;
+            }
+            try {
+                console.log("[iMacros MV3] Initializing CSPlayer");
+                __imacrosPlayerBootstrap.instance = new CSPlayer();
+                window.player = __imacrosPlayerBootstrap.instance;
+            } catch (err) {
+                __imacrosPlayerBootstrap.scheduled = false;
+                console.error("[iMacros MV3] CSPlayer initialization failed:", err);
+            }
+        };
+
+        if (document.readyState === "complete" || document.readyState === "interactive") {
+            setTimeout(initPlayer, 0);
+        } else {
+            window.addEventListener("DOMContentLoaded", initPlayer, { once: true });
+            window.addEventListener("load", initPlayer, { once: true });
+        }
     }
 } catch (e) {
     console.error("[iMacros MV3] Failed to initialize CSPlayer:", e);
 }
-
-

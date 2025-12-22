@@ -7,23 +7,6 @@ const SW_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
 let lastProcessedExecutionId = null;
 let executionIdRestorePromise = null;
 let executionIdRestoreComplete = false;
-const recentPlayRequests = new Map();
-const DUPLICATE_PLAY_WINDOW_MS = 800;
-const DUPLICATE_PLAY_MAX_ENTRIES = 200;
-const DUPLICATE_PLAY_PRUNE_AGE_MS = DUPLICATE_PLAY_WINDOW_MS * 4;
-let duplicatePlayBlockedCount = 0;
-const inFlightPlayByWindow = new Map();
-const INFLIGHT_PLAY_CLEANUP_MS = 5 * 60 * 1000;
-const recentPanelPlayRequests = new Map();
-const DUPLICATE_PANEL_PLAY_WINDOW_MS = 800;
-const DUPLICATE_PANEL_PLAY_MAX_ENTRIES = 200;
-const DUPLICATE_PANEL_PLAY_PRUNE_AGE_MS = DUPLICATE_PANEL_PLAY_WINDOW_MS * 4;
-let duplicatePanelPlayBlockedCount = 0;
-const recentRunByUrlRequests = new Map();
-const DUPLICATE_RUN_BY_URL_WINDOW_MS = 1000;
-const DUPLICATE_RUN_BY_URL_MAX_ENTRIES = 200;
-const DUPLICATE_RUN_BY_URL_PRUNE_AGE_MS = DUPLICATE_RUN_BY_URL_WINDOW_MS * 4;
-let duplicateRunByUrlBlockedCount = 0;
 
 function restoreExecutionIdFromStorage() {
     if (executionIdRestorePromise) {
@@ -80,98 +63,6 @@ function resetPlaybackStateOnStartup() {
 }
 
 resetPlaybackStateOnStartup();
-
-function isDuplicateRequest(cache, windowMs, maxEntries, pruneAgeMs, key, debugLabel, debugContext) {
-    if (!key) {
-        console.debug(`[iMacros SW] ${debugLabel} guard skipped due to missing context`, debugContext);
-        return false;
-    }
-    const now = Date.now();
-    const last = cache.get(key);
-    cache.set(key, now);
-    if (typeof last === 'number' && now - last < windowMs) {
-        return true;
-    }
-    if (cache.size > maxEntries) {
-        for (const [entryKey, timestamp] of cache.entries()) {
-            if (typeof timestamp !== 'number' || now - timestamp > pruneAgeMs) {
-                cache.delete(entryKey);
-            }
-        }
-        while (cache.size > maxEntries) {
-            const oldestKey = cache.keys().next().value;
-            if (!oldestKey) break;
-            cache.delete(oldestKey);
-        }
-    }
-    return false;
-}
-
-function markPlayInFlight(winId, requestId) {
-    if (!winId) return;
-    inFlightPlayByWindow.set(winId, {
-        requestId: requestId || null,
-        startedAt: Date.now()
-    });
-}
-
-function clearPlayInFlight(winId) {
-    if (!winId) return;
-    inFlightPlayByWindow.delete(winId);
-}
-
-function hasPlayInFlight(winId) {
-    if (!winId) return false;
-    const entry = inFlightPlayByWindow.get(winId);
-    if (!entry) return false;
-    if (Date.now() - entry.startedAt > INFLIGHT_PLAY_CLEANUP_MS) {
-        inFlightPlayByWindow.delete(winId);
-        return false;
-    }
-    return true;
-}
-
-function isDuplicatePlayRequest(winId, filePath) {
-    const hasKey = winId && filePath;
-    const key = hasKey ? `${winId}:${filePath}` : '';
-    return isDuplicateRequest(
-        recentPlayRequests,
-        DUPLICATE_PLAY_WINDOW_MS,
-        DUPLICATE_PLAY_MAX_ENTRIES,
-        DUPLICATE_PLAY_PRUNE_AGE_MS,
-        key,
-        'Duplicate play',
-        { winId, filePath }
-    );
-}
-
-function isDuplicatePanelPlayRequest(panelWinId, filePath) {
-    const hasKey = panelWinId && filePath;
-    const key = hasKey ? `${panelWinId}:${filePath}` : '';
-    return isDuplicateRequest(
-        recentPanelPlayRequests,
-        DUPLICATE_PANEL_PLAY_WINDOW_MS,
-        DUPLICATE_PANEL_PLAY_MAX_ENTRIES,
-        DUPLICATE_PANEL_PLAY_PRUNE_AGE_MS,
-        key,
-        'Duplicate panel play',
-        { panelWinId, filePath }
-    );
-}
-
-function isDuplicateRunByUrlRequest(winId, macroPath) {
-    const hasKey = winId && macroPath;
-    const key = hasKey ? `${winId}:${macroPath}` : '';
-    return isDuplicateRequest(
-        recentRunByUrlRequests,
-        DUPLICATE_RUN_BY_URL_WINDOW_MS,
-        DUPLICATE_RUN_BY_URL_MAX_ENTRIES,
-        DUPLICATE_RUN_BY_URL_PRUNE_AGE_MS,
-        key,
-        'Duplicate run-by-url',
-        { winId, macroPath }
-    );
-}
 
 function isExtensionIframeSender(sender) {
     const senderUrl = sender && typeof sender.url === 'string' ? sender.url : null;
@@ -840,8 +731,7 @@ function findUsableTabForClipboard(tabs) {
 
 async function executeClipboardWrite(tab, text, sendResponse) {
     // Skip restricted URLs - return success since clipboard is non-critical
-    // Note: Keep this in sync with isUsableTabForClipboard() checks
-    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:') || tab.url.startsWith('devtools://')) {
+    if (!isUsableTabForClipboard(tab)) {
         console.warn('[iMacros SW] Cannot write clipboard on restricted URL:', tab.url);
         sendResponse({ success: true, warning: 'Restricted URL skipped' });
         return;
@@ -901,15 +791,14 @@ async function executeClipboardWrite(tab, text, sendResponse) {
         }
     } catch (err) {
         console.error('[iMacros SW] executeScript failed for clipboard:', err);
-        sendResponse({ success: false, error: err.message });
+        sendResponse({ success: false, error: (err && err.message) || String(err) });
     }
 }
 
 // Execute clipboard read operation in the context of a web page tab
 async function executeClipboardRead(tab, sendResponse) {
     // Skip restricted URLs - return empty string since clipboard is non-critical
-    // Note: Keep this in sync with isUsableTabForClipboard() checks
-    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:') || tab.url.startsWith('devtools://')) {
+    if (!isUsableTabForClipboard(tab)) {
         console.warn('[iMacros SW] Cannot read clipboard on restricted URL:', tab.url);
         sendResponse({ success: true, text: '', warning: 'Restricted URL skipped' });
         return;
@@ -977,7 +866,7 @@ async function executeClipboardRead(tab, sendResponse) {
         }
     } catch (err) {
         console.error('[iMacros SW] executeScript failed for clipboard read:', err);
-        sendResponse({ success: false, error: err.message });
+        sendResponse({ success: false, error: (err && err.message) || String(err) });
     }
 }
 
@@ -1037,10 +926,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // Handle panel tree refresh request from options or other extension pages
     if (msg.type === 'UPDATE_PANEL_VIEWS') {
         return handleUpdatePanelViews(sendResponse);
-    }
-
-    if (msg.type === "macroStopped" && msg.win_id) {
-        clearPlayInFlight(msg.win_id);
     }
 
     if (msg.command === 'UPDATE_EXECUTION_STATE' && typeof msg.state === 'string') {
@@ -1237,115 +1122,72 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (!obj || !obj._path) return null;
             return afio.openNode(obj._path);
         };
-        /*
-         * AFIO proxy resilience note:
-         * We return safe defaults (false/empty/no-op) when node reconstruction fails to
-         * keep messaging robust across malformed payloads and SW/offscreen lifecycle
-         * boundaries. This favors availability over strict correctness; callers that
-         * need hard failures must validate inputs and handle null/empty responses.
-         * Primary callers include the AsyncFileIO AFIO_CALL proxy path and offscreen
-         * consumers of AFIO methods; adjust call sites/tests if stricter handling is
-         * required for specific flows.
-         */
+        const requireNode = (value, label) => {
+            if (!value) {
+                throw new Error(`AFIO ${method}: ${label} is missing`);
+            }
+            return value;
+        };
 
         (async () => {
             try {
                 let result = {};
                 // Reconstruct nodes if present in payload
-                const node = getNode(payload.node);
-                const src = getNode(payload.src);
-                const dst = getNode(payload.dst);
-                const warnNullNode = (action, nodeRef) => {
-                    const path = nodeRef && nodeRef._path ? nodeRef._path : undefined;
-                    console.warn(`[iMacros SW] AFIO ${action}: null node, returning safe default`, { path });
-                };
+                let node = getNode(payload.node);
+                let src = getNode(payload.src);
+                let dst = getNode(payload.dst);
 
                 switch (method) {
                     case 'node_exists':
-                        if (!node) warnNullNode('node_exists', payload.node);
-                        result = { exists: node ? await node.exists() : false };
+                        result = { exists: await requireNode(node, 'node').exists() };
                         break;
                     case 'node_isDir':
-                        if (!node) warnNullNode('node_isDir', payload.node);
-                        result = { isDir: node ? await node.isDir() : false };
+                        result = { isDir: await requireNode(node, 'node').isDir() };
                         break;
                     case 'node_isWritable':
-                        if (!node) warnNullNode('node_isWritable', payload.node);
-                        result = { isWritable: node ? await node.isWritable() : false };
+                        result = { isWritable: await requireNode(node, 'node').isWritable() };
                         break;
                     case 'node_isReadable':
-                        if (!node) warnNullNode('node_isReadable', payload.node);
-                        result = { isReadable: node ? await node.isReadable() : false };
+                        result = { isReadable: await requireNode(node, 'node').isReadable() };
                         break;
                     case 'node_copyTo':
-                        if (src && dst) {
-                            await src.copyTo(dst);
-                        } else {
-                            warnNullNode('node_copyTo', payload.src || payload.dst);
-                        }
+                        await requireNode(src, 'src').copyTo(requireNode(dst, 'dst'));
                         break;
                     case 'node_moveTo':
-                        if (src && dst) {
-                            await src.moveTo(dst);
-                        } else {
-                            warnNullNode('node_moveTo', payload.src || payload.dst);
-                        }
+                        await requireNode(src, 'src').moveTo(requireNode(dst, 'dst'));
                         break;
                     case 'node_remove':
-                        if (node) {
-                            await node.remove();
-                        } else {
-                            warnNullNode('node_remove', payload.node);
-                        }
+                        await requireNode(node, 'node').remove();
                         break;
                     case 'readTextFile':
-                        if (!node) warnNullNode('readTextFile', payload.node);
-                        result = { data: node ? await afio.readTextFile(node) : "" };
+                        result = { data: await afio.readTextFile(requireNode(node, 'node')) };
                         break;
                     case 'writeTextFile':
-                        if (node) {
-                            await afio.writeTextFile(node, payload.data);
-                        } else {
-                            warnNullNode('writeTextFile', payload.node);
-                        }
+                        await afio.writeTextFile(requireNode(node, 'node'), payload.data);
                         break;
                     case 'appendTextFile':
-                        if (node) {
-                            await afio.appendTextFile(node, payload.data);
-                        } else {
-                            warnNullNode('appendTextFile', payload.node);
-                        }
+                        await afio.appendTextFile(requireNode(node, 'node'), payload.data);
                         break;
-                    case 'getNodesInDir':
-                        if (node) {
-                            const nodes = await afio.getNodesInDir(node, payload.filter);
-                            result = { nodes: nodes.map(n => ({ _path: n.path, _is_dir_int: n.is_dir })) };
-                        } else {
-                            warnNullNode('getNodesInDir', payload.node);
-                            result = { nodes: [] };
-                        }
+                    case 'getNodesInDir': {
+                        const nodes = await afio.getNodesInDir(requireNode(node, 'node'), payload.filter);
+                        result = { nodes: nodes.map(n => ({ _path: n.path, _is_dir_int: n.is_dir })) };
                         break;
-                    case 'getLogicalDrives':
+                    }
+                    case 'getLogicalDrives': {
                         const drives = await afio.getLogicalDrives();
                         result = { nodes: drives.map(n => ({ _path: n.path, _is_dir_int: n.is_dir })) };
                         break;
-                    case 'getDefaultDir':
+                    }
+                    case 'getDefaultDir': {
                         const defDir = await afio.getDefaultDir(payload.name);
                         result = { node: { _path: defDir.path, _is_dir_int: defDir.is_dir } };
                         break;
+                    }
                     case 'makeDirectory':
-                        if (node) {
-                            await node.createDirectory();
-                        } else {
-                            warnNullNode('makeDirectory', payload.node);
-                        }
+                        await requireNode(node, 'node').createDirectory();
                         break;
                     case 'writeImageToFile':
-                        if (node) {
-                            await afio.writeImageToFile(node, payload.imageData);
-                        } else {
-                            warnNullNode('writeImageToFile', payload.node);
-                        }
+                        await afio.writeImageToFile(requireNode(node, 'node'), payload.imageData);
                         break;
                     case 'queryLimits':
                         result = await afio.queryLimits();
@@ -1583,7 +1425,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                     // Generate a unique property name to store the result
                     var resultProp = '__imacros_eval_result_' + Math.random().toString(36).substr(2, 9);
                     // Wrap the code to capture its result and any errors
-                    var wrappedCode = 'try { window["' + resultProp + '"] = (function(){ return (' + code + '); })(); } catch(e) { window["' + resultProp + '_error"] = e && (e.message || String(e)); }';
+                    var wrappedCode = 'try { window["' + resultProp + '"] = (0, eval)(' + JSON.stringify(String(code)) + '); } catch(e) { window["' + resultProp + '_error"] = e && (e.message || String(e)); }';
 
                     // Create a script element to execute the code
                     var script = document.createElement('script');
@@ -2232,10 +2074,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 }
 
                 if (!targetWindowId) {
-                    // Fall back to last focused window
                     try {
-                        const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
-                        if (win) targetWindowId = win.id;
+                        const windows = await chrome.windows.getAll({ windowTypes: ['normal'] });
+                        const focusedWindow = windows.find((window) => window.focused) || windows[0];
+                        if (focusedWindow) targetWindowId = focusedWindow.id;
                     } catch (e) { /* ignore */ }
                 }
 
@@ -2270,7 +2112,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 }
             } catch (err) {
                 console.error("[iMacros SW] GET_ACTIVE_TAB error:", err);
-                sendResponse({ error: err.message });
+                sendResponse({ error: (err && err.message) || String(err) });
             }
         })();
 
@@ -2278,7 +2120,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     // --- Helper: パネルウィンドウIDから親ウィンドウIDを解決 ---
-async function resolveTargetWindowId(msgWinId, sender) {
+    async function resolveTargetWindowId(msgWinId, sender) {
         // 1. メッセージに含まれるwin_idをチェック
         if (msgWinId) {
             // パネルウィンドウのIDの場合、親ウィンドウを探す
@@ -2294,6 +2136,10 @@ async function resolveTargetWindowId(msgWinId, sender) {
             for (const [key, value] of Object.entries(sessionData)) {
                 if (key.startsWith('panel_') && value === msgWinId) {
                     const parentWinId = parseInt(key.replace('panel_', ''), 10);
+                    if (Number.isNaN(parentWinId)) {
+                        console.warn('[iMacros SW] Invalid parent window ID in panel mapping:', key);
+                        continue;
+                    }
                     console.log(`[iMacros SW] Panel ${msgWinId} mapped to parent window ${parentWinId}`);
                     return parentWinId;
                 }
@@ -2349,8 +2195,14 @@ async function resolveTargetWindowId(msgWinId, sender) {
 
     // --- 再生 (playMacro) ---
     if (msg.command === "playMacro") {
-        // Ensure stored execution ID (from prior SW sessions) is restored before checking duplicates
-        restoreExecutionIdFromStorage().then(() => {
+        (async () => {
+            try {
+                // Ensure stored execution ID (from prior SW sessions) is restored before checking duplicates
+                await restoreExecutionIdFromStorage();
+            } catch (error) {
+                console.warn('[iMacros SW] Failed to restore execution ID before playMacro check:', error);
+            }
+
             const requestId = msg.requestId || createRequestId();
             const executionId = msg.executionId;
             const isValidExecutionId = executionId && typeof executionId === 'string' && executionId.trim().length > 0;
@@ -2377,18 +2229,6 @@ async function resolveTargetWindowId(msgWinId, sender) {
                 });
             }
 
-            if (isDuplicatePanelPlayRequest(msg.win_id, msg.file_path)) {
-                duplicatePanelPlayBlockedCount += 1;
-                console.warn("[iMacros SW] Duplicate panel play request detected (guarded). Ignoring.", {
-                    win_id: msg.win_id,
-                    file_path: msg.file_path,
-                    requestId,
-                    blockedCount: duplicatePanelPlayBlockedCount
-                });
-                sendResponse({ status: 'ignored', message: 'Duplicate panel play request' });
-                return;
-            }
-
             // win_idを取得（パネルウィンドウIDから親ウィンドウIDを解決）
             resolveTargetWindowId(msg.win_id, sender).then(win_id => {
                 if (!win_id) {
@@ -2400,28 +2240,6 @@ async function resolveTargetWindowId(msgWinId, sender) {
                 console.log("[iMacros SW] Resolved win_id:", win_id, { requestId, swInstanceId: SW_INSTANCE_ID });
                 console.log("[iMacros SW] Loop parameter from panel:", msg.loop, "(will use", msg.loop ?? 1, ")");
 
-                if (hasPlayInFlight(win_id)) {
-                    console.warn("[iMacros SW] Play request ignored - macro already running for window", {
-                        win_id,
-                        requestId
-                    });
-                    sendResponse({ status: 'ignored', message: 'Macro already running' });
-                    return;
-                }
-
-                if (isDuplicatePlayRequest(win_id, msg.file_path)) {
-                    duplicatePlayBlockedCount += 1;
-                    console.warn("[iMacros SW] Duplicate play request detected (guarded). Ignoring.", {
-                        win_id,
-                        file_path: msg.file_path,
-                        requestId,
-                        blockedCount: duplicatePlayBlockedCount
-                    });
-                    sendResponse({ status: 'ignored', message: 'Duplicate play request' });
-                    return;
-                }
-
-                markPlayInFlight(win_id, requestId);
                 // Offscreenにファイル読み込みと再生を依頼
                 sendMessageToOffscreen({
                     command: "CALL_CONTEXT_METHOD",
@@ -2436,27 +2254,20 @@ async function resolveTargetWindowId(msgWinId, sender) {
                     if (result && (result.ack === true || result.started === true)) {
                         // マクロ開始のACK - パネルに成功を通知
                         sendResponse({ success: true, started: true });
-                    } else if (result && result.success === false) {
-                        clearPlayInFlight(win_id);
-                        sendResponse(result);
                     } else if (result && typeof result.success !== 'undefined') {
                         sendResponse(result);
                     } else {
                         sendResponse({ success: true });
                     }
-        }).catch(err => {
-            console.error("[iMacros SW] playFile error:", err);
-            clearPlayInFlight(win_id);
-            sendResponse({ success: false, error: (err && err.message) || String(err) });
-        });
-        });
-    }).catch((error) => {
-        console.warn('[iMacros SW] Failed to restore execution ID before playMacro check:', error);
-        sendResponse({ success: false, error: 'Failed to restore execution ID', details: (error && error.message) || String(error) });
-    });
+                }).catch(err => {
+                    console.error("[iMacros SW] playFile error:", err);
+                    sendResponse({ success: false, error: (err && err.message) || String(err) });
+                });
+            });
+        })();
 
-    return true;
-}
+        return true;
+    }
 
     // --- 編集 (editMacro) ---
     if (msg.command === "editMacro") {
@@ -2550,14 +2361,10 @@ async function resolveTargetWindowId(msgWinId, sender) {
             type: 'QUERY_STATE',
             win_id: targetWin
         }).then((response) => {
-            if (!response || typeof response.state === 'undefined') {
-                sendResponse(Object.assign({ state: 'idle', ok: false }, response || {}));
-                return;
-            }
-            sendResponse(response);
+            sendResponse(response || { ok: false });
         }).catch((error) => {
             console.warn('[iMacros SW] Failed to retrieve state from Offscreen:', error);
-            sendResponse({ state: 'idle', ok: false, error: error && error.message });
+            sendResponse({ ok: false, error: error && error.message });
         });
         return true;
     }
@@ -2656,7 +2463,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse(result || { success: true });
         }).catch(err => {
             console.error('[iMacros SW] SET_DIALOG_RESULT error:', err);
-            sendResponse({ success: false, error: err.message });
+            sendResponse({ success: false, error: (err && err.message) || String(err) });
         });
         return true;
     }
@@ -2680,7 +2487,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             sendResponse(result || { success: false, error: 'No response from offscreen' });
         }).catch(err => {
             console.error('[iMacros SW] GET_DIALOG_ARGS error:', err);
-            sendResponse({ success: false, error: err.message });
+            sendResponse({ success: false, error: (err && err.message) || String(err) });
         });
         return true;
     }
@@ -2696,12 +2503,12 @@ async function sendMessageToOffscreen(msg) {
     const payload = { target: 'offscreen', ...msg };
 
     await ensureOffscreenDocument();
+    const options = { expectAck: true };
+    if (msg.command === 'CALL_CONTEXT_METHOD' && msg.method === 'playFile') {
+        options.maxRetries = 0;
+        options.ackTimeoutMs = 10000;
+    }
     try {
-        const options = { expectAck: true };
-        if (msg.command === 'CALL_CONTEXT_METHOD' && msg.method === 'playFile') {
-            options.maxRetries = 0;
-            options.ackTimeoutMs = 10000;
-        }
         return await messagingBus.sendRuntime(payload, options);
     } catch (err) {
         const genericPatterns = ['No ack received on channel', 'Ack timeout'];
@@ -2992,9 +2799,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
     // Check if this is an imacros:// URL
     if (details.url && details.url.startsWith('imacros://')) {
-        if (details.frameId !== 0) {
-            return;
-        }
         console.log('[iMacros SW] Intercepted imacros:// URL:', details.url);
 
         // Parse the imacros URL
@@ -3014,26 +2818,16 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
             const tab = await chrome.tabs.get(details.tabId);
             const windowId = tab.windowId;
 
-            const isDuplicate = isDuplicateRunByUrlRequest(windowId, macroPath);
-            if (isDuplicate) {
-                duplicateRunByUrlBlockedCount += 1;
-                console.warn('[iMacros SW] Duplicate run-by-url request detected (guarded). Ignoring.', {
-                    windowId,
-                    macroPath,
-                    blockedCount: duplicateRunByUrlBlockedCount
+            // Send message to offscreen to execute the macro
+            try {
+                await sendMessageToOffscreen({
+                    command: 'runMacroByUrl',
+                    macroPath: macroPath,
+                    windowId: windowId,
+                    tabId: details.tabId
                 });
-            } else {
-                // Send message to offscreen to execute the macro
-                try {
-                    await sendMessageToOffscreen({
-                        command: 'runMacroByUrl',
-                        macroPath: macroPath,
-                        windowId: windowId,
-                        tabId: details.tabId
-                    });
-                } catch (error) {
-                    console.error('[iMacros SW] Failed to trigger macro from imacros:// URL:', error);
-                }
+            } catch (error) {
+                console.error('[iMacros SW] Failed to trigger macro from imacros:// URL:', error);
             }
 
             // Navigate back or to a blank page to prevent the error page
@@ -3064,16 +2858,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     if (msg.command === 'runMacroByUrl' && msg.target === 'background') {
-        if (isDuplicateRunByUrlRequest(msg.windowId || msg.win_id, msg.macroPath)) {
-            duplicateRunByUrlBlockedCount += 1;
-            console.warn('[iMacros SW] Duplicate run-by-url request detected (guarded). Ignoring.', {
-                windowId: msg.windowId || msg.win_id,
-                macroPath: msg.macroPath,
-                blockedCount: duplicateRunByUrlBlockedCount
-            });
-            sendResponse({ status: 'ignored', message: 'Duplicate run-by-url request' });
-            return true;
-        }
         // Forward to offscreen document
         sendMessageToOffscreen({
             command: 'runMacroByUrl',

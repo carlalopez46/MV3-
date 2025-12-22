@@ -3,12 +3,36 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 */
 
 var args = null;
+let playRequestSent = false;
+
+function disableDialogButtons() {
+    ["play-button", "cancel-button"].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.pointerEvents = "none";
+        el.style.opacity = "0.6";
+        el.setAttribute("disabled", "true");
+    });
+}
+
+function generateExecutionId() {
+    return (typeof crypto !== "undefined" && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
 
 async function play() {
     if (!args) {
         window.close();
         return;
     }
+
+    if (playRequestSent) {
+        console.warn('[iMacros] beforePlay: duplicate Play click ignored');
+        return;
+    }
+    playRequestSent = true;
+    disableDialogButtons();
 
     var m = {
         source: args.source,
@@ -17,6 +41,7 @@ async function play() {
     };
     var win_id = args.win_id;
     var showAgain = document.getElementById("checkbox").checked;
+    var executionId = generateExecutionId();
 
     try {
         await chrome.runtime.sendMessage({
@@ -28,7 +53,8 @@ async function play() {
         await chrome.runtime.sendMessage({
             type: 'PLAY_MACRO',
             macro: m,
-            win_id: win_id
+            win_id: win_id,
+            executionId: executionId
         });
     } catch (err) {
         console.error('[iMacros] Failed to send message:', err);

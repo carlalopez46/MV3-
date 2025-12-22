@@ -8,60 +8,13 @@ let selectedMacro = null;
 let panelState = {
     isRecording: false,
     isPlaying: false,
-    isPaused: false,
     currentMacro: null
 };
-
-// Guard against overlapping start commands (rapid clicks / duplicate triggers)
-let pendingCommand = null;
-let commandLockTimeoutId = null;
-const COMMAND_LOCK_TIMEOUT_MS = 10000;
-let lastPlayRequestAt = 0;
-const PLAY_DEBOUNCE_MS = 800;
-let lastPlaySignature = null;
-let lastPlaySignatureAt = 0;
-const PLAY_DUPLICATE_WINDOW_MS = 2000;
-
-function acquireCommandLock(command) {
-    if (pendingCommand) {
-        console.log(`[Panel] Ignoring ${command} request - command pending (${pendingCommand})`);
-        return false;
-    }
-    pendingCommand = command;
-    if (commandLockTimeoutId) {
-        clearTimeout(commandLockTimeoutId);
-    }
-    commandLockTimeoutId = setTimeout(() => {
-        console.warn("[Panel] Command lock timed out; releasing");
-        updatePanelState("idle");
-        releaseCommandLock();
-    }, COMMAND_LOCK_TIMEOUT_MS);
-    return true;
-}
-
-function releaseCommandLock() {
-    pendingCommand = null;
-    if (commandLockTimeoutId) {
-        clearTimeout(commandLockTimeoutId);
-        commandLockTimeoutId = null;
-    }
-}
 
 function generateExecutionId() {
     return (typeof crypto !== "undefined" && crypto.randomUUID)
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function isDuplicatePlaySignature(signature) {
-    if (!signature) return false;
-    const now = Date.now();
-    if (signature === lastPlaySignature && (now - lastPlaySignatureAt) < PLAY_DUPLICATE_WINDOW_MS) {
-        return true;
-    }
-    lastPlaySignature = signature;
-    lastPlaySignatureAt = now;
-    return false;
 }
 const isTopFrame = window.top === window;
 
@@ -91,8 +44,6 @@ function getMacroPathAndName(macro) {
 
 // パネルのウィンドウIDを保持
 let currentWindowId = null;
-let panelWindowId = null;
-let panelWindowIdReadyPromise = null;
 
 // ウィンドウIDを取得
 function initWindowId() {
@@ -103,13 +54,14 @@ function initWindowId() {
 
         if (winIdParam) {
             // 安全のため基数10を指定 (Main側の記述を採用)
-            const parsed = parseInt(winIdParam, 10);
-            if (!isNaN(parsed)) {
-                currentWindowId = parsed;
+            const parsedWinId = parseInt(winIdParam, 10);
+            if (!Number.isNaN(parsedWinId)) {
+                currentWindowId = parsedWinId;
                 console.log("[Panel] Current window ID from URL:", currentWindowId);
                 resolve(currentWindowId);
                 return;
             }
+            console.warn("[Panel] Ignoring invalid window ID from URL:", winIdParam);
         }
 
         // Fallback to getCurrent if no URL param (e.g. sidebar or direct open)
@@ -127,34 +79,6 @@ function initWindowId() {
 }
 
 let windowIdReadyPromise = null;
-
-function initPanelWindowId() {
-    return new Promise((resolve) => {
-        if (!chrome.windows || !chrome.windows.getCurrent) {
-            resolve(null);
-            return;
-        }
-        chrome.windows.getCurrent((win) => {
-            if (chrome.runtime.lastError) {
-                console.warn("[Panel] Failed to get panel window ID:", chrome.runtime.lastError);
-                resolve(null);
-            } else {
-                panelWindowId = win.id;
-                resolve(win.id);
-            }
-        });
-    });
-}
-
-function ensurePanelWindowId() {
-    if (panelWindowId !== null) {
-        return Promise.resolve(panelWindowId);
-    }
-    if (!panelWindowIdReadyPromise) {
-        panelWindowIdReadyPromise = initPanelWindowId();
-    }
-    return panelWindowIdReadyPromise;
-}
 
 // 通信機能: バックグラウンドへメッセージを送る
 function ensureWindowId() {
@@ -178,13 +102,13 @@ function sendCommand(command, payload = {}) {
         if (currentWindowId === null) {
             console.warn(`[Panel] Skipping command ${command}: window ID unavailable`);
             handleMissingWindowId("Unable to determine window context. Command not sent.");
-            return undefined;
+            return Promise.reject(new Error("Window ID unavailable"));
         }
         // 自動的にウィンドウIDを追加
         const message = {
             ...payload,
             command: command,
-            target: 'background',
+            target: 'offscreen',
             win_id: payload.win_id || currentWindowId
         };
         console.log(`[Panel] Sending command: ${command}`, message);
@@ -205,91 +129,6 @@ function sendCommand(command, payload = {}) {
             }
         });
     });
-}
-
-function sendContextMethod(objectPath, methodName, args = []) {
-    return ensureWindowId().then(() => {
-        if (currentWindowId === null) {
-            handleMissingWindowId("Unable to determine window context. Command not sent.");
-            return Promise.reject(new Error("Window ID unavailable"));
-        }
-        const message = {
-            type: 'CALL_CONTEXT_METHOD',
-            target: 'background',
-            win_id: currentWindowId,
-            objectPath: objectPath,
-            methodName: methodName,
-            args: Array.isArray(args) ? args : []
-        };
-        return new Promise((resolve, reject) => {
-            try {
-                chrome.runtime.sendMessage(message, (response) => {
-                    if (chrome.runtime.lastError) {
-                        reject(chrome.runtime.lastError);
-                    } else {
-                        resolve(response);
-                    }
-                });
-            } catch (e) {
-                reject(e);
-            }
-        });
-    });
-}
-
-function getMainWindowIdFromUrl() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const winIdParam = urlParams.get('win_id');
-    if (!winIdParam) return null;
-    const parsed = parseInt(winIdParam, 10);
-    return Number.isNaN(parsed) ? null : parsed;
-}
-
-function notifyPanelLoaded() {
-    return ensurePanelWindowId().then((panelId) => {
-        if (panelId === null) return;
-        chrome.runtime.sendMessage({
-            type: 'PANEL_LOADED',
-            target: 'background',
-            panelWindowId: panelId
-        }, (response) => {
-            if (chrome.runtime.lastError) {
-                console.warn("[Panel] PANEL_LOADED failed:", chrome.runtime.lastError.message);
-                return;
-            }
-            if (response && response.win_id && currentWindowId === null) {
-                currentWindowId = response.win_id;
-            }
-        });
-    });
-}
-
-let panelClosingSent = false;
-function notifyPanelClosing(panelBox) {
-    if (panelClosingSent) return;
-    panelClosingSent = true;
-    const winId = currentWindowId !== null ? currentWindowId : getMainWindowIdFromUrl();
-    const payload = {
-        type: 'PANEL_CLOSING',
-        target: 'background',
-        panelBox: panelBox
-    };
-    if (winId !== null) payload.win_id = winId;
-    if (panelWindowId !== null) payload.panelWindowId = panelWindowId;
-    try {
-        chrome.runtime.sendMessage(payload, () => {});
-    } catch (e) {
-        console.warn("[Panel] Failed to notify PANEL_CLOSING:", e);
-    }
-}
-
-function getPanelBoxSnapshot() {
-    return {
-        left: typeof window.screenX === "number" ? window.screenX : 0,
-        top: typeof window.screenY === "number" ? window.screenY : 0,
-        width: typeof window.outerWidth === "number" ? window.outerWidth : window.innerWidth,
-        height: typeof window.outerHeight === "number" ? window.outerHeight : window.innerHeight
-    };
 }
 
 function requestStateUpdate() {
@@ -323,31 +162,13 @@ function requestStateUpdate() {
 function play() {
     console.log("[Panel] Play button clicked");
 
-    const now = Date.now();
-    if (now - lastPlayRequestAt < PLAY_DEBOUNCE_MS) {
-        console.log("[Panel] Ignoring play request - debounce");
-        return;
-    }
-    lastPlayRequestAt = now;
-
-    if (panelState.isPaused) {
-        console.log("[Panel] Unpause requested");
-        if (!acquireCommandLock("unpause")) {
-            return;
-        }
-        sendCommand("unpause")
-            .catch((error) => {
-                console.error("[Panel] Unpause failed:", error);
-            })
-            .finally(() => {
-                releaseCommandLock();
-            });
-        return;
-    }
-
     // Guard against double execution - ignore if already playing
     if (panelState.isPlaying) {
         console.log("[Panel] Ignoring play request - already playing");
+        return;
+    }
+    if (panelState.isRecording) {
+        console.log("[Panel] Ignoring play request - currently recording");
         return;
     }
 
@@ -359,16 +180,6 @@ function play() {
     const { filePath, macroName, macro } = getMacroPathAndName(selectedMacro);
     if (!filePath) {
         alert("Unable to play: no macro path found.");
-        return;
-    }
-
-    const playSignature = `${filePath}:1`;
-    if (isDuplicatePlaySignature(playSignature)) {
-        console.log("[Panel] Ignoring play request - duplicate signature");
-        return;
-    }
-
-    if (!acquireCommandLock("play")) {
         return;
     }
 
@@ -393,11 +204,9 @@ function play() {
                 "Playback failed to start"
             );
         })
-        .catch(() => {
+        .catch((error) => {
+            console.error("[Panel] Play command failed:", error);
             updatePanelState("idle");
-        })
-        .finally(() => {
-            releaseCommandLock();
         });
 }
 
@@ -413,84 +222,48 @@ function record() {
         console.log("[Panel] Ignoring record request - currently playing");
         return;
     }
-    if (panelState.isPaused) {
-        console.log("[Panel] Ignoring record request - currently paused");
-        return;
-    }
 
-    if (!acquireCommandLock("record")) {
+    if (!selectedMacro || selectedMacro.type !== "macro") {
+        alert("Please select a macro first.");
         return;
     }
     // UIを即時更新してストップボタンを有効化
-    const macroForState = (selectedMacro && selectedMacro.type === "macro") ? selectedMacro : null;
-    updatePanelState({ isRecording: true, isPlaying: false, currentMacro: macroForState });
-    sendCommand("startRecording")
-        .then((response) => {
-            if (!response || response.success === false) {
-                updatePanelState("idle");
-            }
-        })
-        .catch(() => {
-            updatePanelState("idle");
-        })
-        .finally(() => {
-            releaseCommandLock();
-        });
+    updatePanelState({ isRecording: true, isPlaying: false, currentMacro: selectedMacro });
+    sendCommand("startRecording").catch((error) => {
+        console.error("[Panel] Record command failed:", error);
+        updatePanelState("idle");
+    });
 }
 
 function stop() {
     console.log("[Panel] Stop button clicked");
-    if (!panelState.isPlaying && !panelState.isRecording && !panelState.isPaused) {
+    if (!panelState.isPlaying && !panelState.isRecording) {
+        console.log("[Panel] Ignoring stop request - already idle");
         return;
     }
     sendCommand("stop")
-        .catch((error) => {
-            console.warn("[Panel] Stop failed:", error);
+        .then(() => {
+            updatePanelState("idle");
         })
-        .finally(() => {
+        .catch(() => {
             // Even if stop fails, reset the UI so the user can retry
             updatePanelState("idle");
-            releaseCommandLock();
         });
 }
 
 function pause() {
     console.log("[Panel] Pause button clicked");
     if (!panelState.isPlaying) {
+        console.log("[Panel] Ignoring pause request - not playing");
         return;
     }
-    sendCommand("pause");
-}
-
-function saveAs() {
-    const el = document.getElementById("saveas-button");
-    if (!el || el.getAttribute("disabled") === "true" || !panelState.isRecording) {
-        return;
-    }
-    sendContextMethod("recorder", "saveAs").catch((error) => {
-        console.error("[Panel] SaveAs failed:", error);
-    });
-}
-
-function capture() {
-    const el = document.getElementById("capture-button");
-    if (!el || el.getAttribute("disabled") === "true" || !panelState.isRecording) {
-        return;
-    }
-    sendContextMethod("recorder", "capture").catch((error) => {
-        console.error("[Panel] Capture failed:", error);
+    sendCommand("pause").catch((error) => {
+        console.error("[Panel] Pause command failed:", error);
     });
 }
 
 function playLoop() {
     console.log("[Panel] Loop button clicked");
-
-    const now = Date.now();
-    if (now - lastPlayRequestAt < PLAY_DEBOUNCE_MS) {
-        console.log("[Panel] Ignoring loop request - debounce");
-        return;
-    }
-    lastPlayRequestAt = now;
 
     // Guard against double execution - ignore if already playing or recording
     if (panelState.isPlaying) {
@@ -499,10 +272,6 @@ function playLoop() {
     }
     if (panelState.isRecording) {
         console.log("[Panel] Ignoring playLoop request - currently recording");
-        return;
-    }
-    if (panelState.isPaused) {
-        console.log("[Panel] Ignoring playLoop request - currently paused");
         return;
     }
 
@@ -520,16 +289,6 @@ function playLoop() {
     const { filePath, macroName, macro } = getMacroPathAndName(selectedMacro);
     if (!filePath) {
         alert("Unable to play: no macro path found.");
-        return;
-    }
-
-    const playSignature = `${filePath}:${max}`;
-    if (isDuplicatePlaySignature(playSignature)) {
-        console.log("[Panel] Ignoring playLoop request - duplicate signature");
-        return;
-    }
-
-    if (!acquireCommandLock("playLoop")) {
         return;
     }
 
@@ -553,11 +312,9 @@ function playLoop() {
                 "Loop playback failed to start"
             );
         })
-        .catch(() => {
+        .catch((error) => {
+            console.error("[Panel] Loop playback command failed:", error);
             updatePanelState("idle");
-        })
-        .finally(() => {
-            releaseCommandLock();
         });
 }
 
@@ -567,22 +324,7 @@ function handlePlayStartResponse(response, failureMessage, noResponseLog, failur
         updatePanelState("idle");
         return;
     }
-
-    // Duplicate play requests may be ignored by the Service Worker/offscreen guards.
-    // Treat these as a no-op and restore the UI so the panel doesn't get stuck.
-    const ignoredStatus = typeof response.status === 'string' ? response.status : '';
-    if (response.ignored === true || ignoredStatus === 'ignored' || ignoredStatus.startsWith('ignored')) {
-        console.info("[Panel] Play request ignored:", response);
-        const el = ensureStatusLineElement();
-        el.textContent = response.message || "Playback request ignored.";
-        el.style.color = "#666";
-        updatePanelState("idle");
-        return;
-    }
-
-    // Some failures return an error payload without an explicit success flag.
-    // Treat any error that isn't an explicit success as a failure.
-    if (response.success === false || (response.error && response.success !== true)) {
+    if (response.success === false) {
         console.warn(`[Panel] ${failureLog}`, response);
         const el = ensureStatusLineElement();
         el.textContent = response.error || failureMessage;
@@ -630,6 +372,8 @@ function edit() {
     sendCommand("editMacro", {
         file_path: filePath,
         macro_name: macroName
+    }).catch((error) => {
+        console.error("[Panel] Edit command failed:", error);
     });
 }
 
@@ -653,6 +397,8 @@ function openInfoEdit() {
     sendCommand("editMacro", {
         file_path: filePath,
         macro_name: macroName
+    }).catch((error) => {
+        console.error("[Panel] Info edit command failed:", error);
     });
 }
 
@@ -755,17 +501,15 @@ function updatePanelState(state) {
     let stateName = state;
     if (state && typeof state === 'object') {
         panelState = state;
-        stateName = state.isRecording ? 'recording' : state.isPlaying ? 'playing' : state.isPaused ? 'paused' : 'idle';
-    } else if (state === 'idle' || state === 'playing' || state === 'recording' || state === 'paused') {
+        stateName = state.isRecording ? 'recording' : state.isPlaying ? 'playing' : 'idle';
+    } else if (state === 'idle' || state === 'playing' || state === 'recording') {
         // When called with a string, also update panelState to keep it in sync
         panelState = {
             isPlaying: state === 'playing',
             isRecording: state === 'recording',
-            isPaused: state === 'paused',
             currentMacro: state === 'idle' ? null : panelState.currentMacro
         };
     }
-
     const setCollapsed = (id, collapsed) => {
         const el = document.getElementById(id);
         if (el) el.setAttribute("collapsed", collapsed ? "true" : "false");
@@ -780,40 +524,19 @@ function updatePanelState(state) {
         setCollapsed("pause-button", false);
         setDisabled("stop-replaying-button", false);
         setDisabled("record-button", true);
-        setDisabled("loop-button", true);
-        setDisabled("edit-button", true);
-        setDisabled("saveas-button", true);
-        setDisabled("capture-button", true);
-    } else if (stateName === "paused") {
-        setCollapsed("play-button", false);
-        setCollapsed("pause-button", true);
-        setDisabled("stop-replaying-button", false);
-        setDisabled("record-button", true);
-        setDisabled("loop-button", true);
-        setDisabled("edit-button", true);
-        setDisabled("saveas-button", true);
-        setDisabled("capture-button", true);
     } else if (stateName === "recording") {
         setDisabled("stop-recording-button", false);
         setDisabled("play-button", true);
-        setDisabled("loop-button", true);
-        setDisabled("edit-button", true);
-        setDisabled("record-button", true);
-        setDisabled("saveas-button", false);
-        setDisabled("capture-button", false);
     } else { // idle
         setCollapsed("play-button", false);
         setCollapsed("pause-button", true);
         setDisabled("stop-replaying-button", true);
         setDisabled("stop-recording-button", true);
         setDisabled("record-button", false);
-        setDisabled("saveas-button", true);
-        setDisabled("capture-button", true);
 
         // 選択状態に応じてボタン復帰
         if (selectedMacro && selectedMacro.type === 'macro') {
             setDisabled("play-button", false);
-            setDisabled("loop-button", false);
             setDisabled("edit-button", false);
         }
     }
@@ -886,19 +609,27 @@ function ensureStatusLineElement() {
 function handlePanelSetStatLine(data) {
     if (!data) return;
     const el = ensureStatusLineElement();
-    const text = typeof data.text !== "undefined" ? data.text : data.txt;
-    const level = data.level || data.type;
-    el.textContent = text || "";
-    if (level === "error") {
+    el.textContent = data.text || "";
+    if (data.level === "error") {
         el.style.color = "#b00020";
-    } else if (level === "warning") {
+    } else if (data.level === "warning") {
         el.style.color = "#ff6a00";
     } else {
         el.style.color = "#222";
     }
 }
 
-function ensureMacroLinesElements(titleText) {
+function handlePanelShowLines(data) {
+    const source = (data && data.source) || "";
+    const macroName = (data && data.currentMacro && typeof data.currentMacro === "string")
+        ? data.currentMacro
+        : "";
+    if (!source && !macroName) {
+        const container = document.getElementById("panel-macro-container");
+        if (container) container.remove();
+        return;
+    }
+
     let container = document.getElementById("panel-macro-container");
     if (!container) {
         container = document.createElement("div");
@@ -920,9 +651,7 @@ function ensureMacroLinesElements(titleText) {
         titleEl.style.padding = "2px 4px";
         container.appendChild(titleEl);
     }
-    if (typeof titleText === "string") {
-        titleEl.textContent = titleText;
-    }
+    titleEl.textContent = macroName ? `Macro: ${macroName}` : "Macro source";
 
     let pre = document.getElementById("panel-macro-lines");
     if (!pre) {
@@ -934,68 +663,12 @@ function ensureMacroLinesElements(titleText) {
         pre.style.tabSize = "4";
         container.appendChild(pre);
     }
-
-    return { container, titleEl, pre };
-}
-
-function removeMacroLinesContainer() {
-    const container = document.getElementById("panel-macro-container");
-    if (container) container.remove();
-}
-
-function handlePanelShowLines(data) {
-    const source = (data && (data.source || data.code)) || "";
-    const macroName = (data && data.currentMacro && typeof data.currentMacro === "string")
-        ? data.currentMacro
-        : "";
-    if (!source && !macroName) {
-        removeMacroLinesContainer();
-        return;
-    }
-
-    const titleText = macroName ? `Macro: ${macroName}` : "Macro source";
-    const { pre } = ensureMacroLinesElements(titleText);
     pre.textContent = source;
-}
-
-function handlePanelAddLine(data) {
-    if (!data) return;
-    const line = typeof data.line !== "undefined"
-        ? data.line
-        : (typeof data.text !== "undefined" ? data.text : data.txt);
-    if (typeof line === "undefined" || line === null) return;
-    const { container, titleEl, pre } = ensureMacroLinesElements();
-    if (!titleEl.textContent) {
-        titleEl.textContent = "Recording";
-    }
-    const lineText = String(line);
-    pre.textContent = pre.textContent ? `${pre.textContent}\n${lineText}` : lineText;
-    if (container) {
-        container.scrollTop = container.scrollHeight;
-    }
-}
-
-function handlePanelRemoveLastLine() {
-    const pre = document.getElementById("panel-macro-lines");
-    if (!pre) return;
-    const lines = pre.textContent.split(/\n/);
-    lines.pop();
-    const nextText = lines.join("\n");
-    if (!nextText) {
-        removeMacroLinesContainer();
-        return;
-    }
-    pre.textContent = nextText;
-}
-
-function handlePanelShowMacroTree() {
-    removeMacroLinesContainer();
-    refreshTreeView();
 }
 
 function handlePanelSetLoopValue(data) {
     if (!data) return;
-    const input = document.getElementById("current-loop") || document.getElementById("max-loop");
+    const input = document.getElementById("max-loop");
     if (input && typeof data.value !== "undefined") {
         input.value = data.value;
     }
@@ -1018,263 +691,205 @@ function handlePanelHighlightLine(data) {
 
 if (isTopFrame) {
     window.addEventListener("message", (event) => {
-    // fileView.js (iframe) からの通知を受け取る
-    const treeFrame = document.getElementById("tree-iframe");
-    const allowedSource = treeFrame ? treeFrame.contentWindow : null;
-    if (event.origin !== window.location.origin || !event.data || typeof event.data !== "object") {
-        return;
-    }
-    // Reject if iframe not found or source doesn't match
-    if (!allowedSource) {
-        console.warn("[Panel] tree-iframe not ready yet, ignoring message from", event.origin);
-        return;
-    }
-    if (event.source !== allowedSource) {
-        console.warn("[Panel] Message from unexpected source");
-        return;
-    }
-    if (event.data.type === "iMacrosSelectionChanged") {
-        onSelectionChanged(event.data.node);
-    }
-    if (event.data.type === "playMacro") {
-        play();
-    }
+        // fileView.js (iframe) からの通知を受け取る
+        const treeFrame = document.getElementById("tree-iframe");
+        const allowedSource = treeFrame ? treeFrame.contentWindow : null;
+        if (event.origin !== window.location.origin || !event.data || typeof event.data !== "object") {
+            return;
+        }
+        // Reject if iframe not found or source doesn't match
+        if (!allowedSource) {
+            console.warn("[Panel] tree-iframe not ready yet, ignoring message from", event.origin);
+            return;
+        }
+        if (event.source !== allowedSource) {
+            console.warn("[Panel] Message from unexpected source");
+            return;
+        }
+        if (event.data.type === "iMacrosSelectionChanged") {
+            onSelectionChanged(event.data.node);
+        }
+        if (event.data.type === "playMacro") {
+            play();
+        }
     });
 
-// --- Extension Reload Detection ---
-// Establish a long-lived connection to detect when the extension context is invalidated (reloaded/updated)
-// --- Extension Reload/Lifecycle Detection ---
-// Maintain a connection to keep SW alive and detect when extension is reloaded.
-let lifeCyclePort = null;
+    // --- Extension Reload Detection ---
+    // Establish a long-lived connection to detect when the extension context is invalidated (reloaded/updated)
+    // --- Extension Reload/Lifecycle Detection ---
+    // Maintain a connection to keep SW alive and detect when extension is reloaded.
+    let lifeCyclePort = null;
 
-function connectToLifecycle() {
-    try {
-        lifeCyclePort = chrome.runtime.connect({ name: "panel-lifecycle" });
-        lifeCyclePort.onDisconnect.addListener(() => {
-            console.log("[Panel] Lifecycle port disconnected. Checking extension status...");
-            lifeCyclePort = null;
+    function connectToLifecycle() {
+        try {
+            lifeCyclePort = chrome.runtime.connect({ name: "panel-lifecycle" });
+            lifeCyclePort.onDisconnect.addListener(() => {
+                console.log("[Panel] Lifecycle port disconnected. Checking extension status...");
+                lifeCyclePort = null;
 
-            if (chrome.runtime.lastError) {
-                console.warn("[Panel] Port disconnected due to error:", chrome.runtime.lastError.message);
-            }
+                if (chrome.runtime.lastError) {
+                    console.warn("[Panel] Port disconnected due to error:", chrome.runtime.lastError.message);
+                }
 
-            const pingPromise = new Promise((resolve, reject) => {
+                // Attempt to ping the runtime to see if it's still valid
+                let pingHandled = false;
+                const pingTimeout = setTimeout(() => {
+                    if (pingHandled) return;
+                    pingHandled = true;
+                    console.log("[Panel] Extension context appears invalid (ping timeout). Reloading panel...");
+                    window.location.reload();
+                }, 1000);
+
                 try {
-                    chrome.runtime.sendMessage({ keepAlive: true }, (response) => {
+                    chrome.runtime.sendMessage({ keepAlive: true }, () => {
+                        if (pingHandled) return;
+                        pingHandled = true;
+                        clearTimeout(pingTimeout);
                         if (chrome.runtime.lastError) {
-                            reject(chrome.runtime.lastError);
+                            console.log("[Panel] Extension context appears invalid (ping failed). Reloading panel...");
+                            setTimeout(() => window.location.reload(), 500);
                         } else {
-                            resolve(response);
+                            console.log("[Panel] Service Worker terminated (idle), reconnecting...");
+                            connectToLifecycle();
                         }
                     });
                 } catch (e) {
-                    reject(e);
+                    clearTimeout(pingTimeout);
+                    console.log("[Panel] Extension context invalidated (exception). Reloading panel...");
+                    setTimeout(() => window.location.reload(), 500);
                 }
             });
-
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error("Timeout")), 1000);
-            });
-
-            Promise.race([pingPromise, timeoutPromise])
-                .then(() => {
-                    console.log("[Panel] Service Worker terminated (idle), reconnecting...");
-                    connectToLifecycle();
-                })
-                .catch(() => {
-                    console.log("[Panel] Extension context appears invalid or timed out. Reloading panel...");
-                    setTimeout(() => window.location.reload(), 500);
-                });
-        });
-    } catch (e) {
-        console.error("[Panel] Failed to connect to background:", e);
+        } catch (e) {
+            console.error("[Panel] Failed to connect to background:", e);
+        }
     }
-}
 
     connectToLifecycle();
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if ((message.type === 'PANEL_STATE_UPDATE' || message.type === 'UPDATE_PANEL_STATE') &&
-        (!message.target || message.target === 'panel')) {
-        if (message.state) updatePanelState(message.state);
-    }
-    if (message.type === "updatePanel") {
-        updatePanelState(message.state);
-    }
-	    if (message.type === "macroStopped") {
-	        updatePanelState("idle");
-	        releaseCommandLock();
-	    }
-    if (message.type === "UPDATE_PANEL_VIEWS" || message.type === "REFRESH_PANEL_TREE") {
-        refreshTreeView();
-        sendResponse({ success: true });
-        return true;
-    }
-
-    if (message.type === "PANEL_SHOW_INFO") {
-        handlePanelShowInfo(message.data && message.data.args);
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
-
-    if (message.type === "PANEL_SHOW_LINES") {
-        handlePanelShowLines(message.data);
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
-
-    if (message.type === "PANEL_ADD_LINE") {
-        handlePanelAddLine(message.data);
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
-
-    if (message.type === "PANEL_REMOVE_LAST_LINE") {
-        handlePanelRemoveLastLine();
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
-
-    if (message.type === "PANEL_SHOW_MACRO_TREE") {
-        handlePanelShowMacroTree();
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
-
-    if (message.type === "PANEL_SET_STAT_LINE") {
-        handlePanelSetStatLine(message.data);
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
-
-    if (message.type === "PANEL_SET_LOOP_VALUE") {
-        handlePanelSetLoopValue(message.data);
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
-
-    if (message.type === "PANEL_HIGHLIGHT_LINE") {
-        handlePanelHighlightLine(message.data);
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
-
-    // ★追加: mrecorder.jsから送信されるメッセージのハンドラ
-    if (message.type === "PANEL_ADD_LINE") {
-        // 録画中にマクロ行を追加
-        const txt = message.data && message.data.txt;
-        if (txt) {
-            const displayArea = document.getElementById("macro-display-area");
-            if (displayArea) {
-                const line = document.createElement("div");
-                line.className = "macro-line";
-                line.textContent = txt;
-                displayArea.appendChild(line);
-                displayArea.scrollTop = displayArea.scrollHeight;
-            }
+        if (message.target === 'panel' && message.type === 'PANEL_STATE_UPDATE') {
+            if (message.state) updatePanelState(message.state);
         }
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
-
-    if (message.type === "PANEL_REMOVE_LAST_LINE") {
-        // 録画中に最後のマクロ行を削除
-        const displayArea = document.getElementById("macro-display-area");
-        if (displayArea && displayArea.lastChild) {
-            displayArea.removeChild(displayArea.lastChild);
+        if (message.type === "updatePanel") {
+            updatePanelState(message.state);
         }
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
+        if (message.type === "macroStopped") {
+            updatePanelState("idle");
+        }
+        if (message.type === "UPDATE_PANEL_VIEWS") {
+            refreshTreeView();
+            sendResponse({ success: true });
+            return true;
+        }
 
-    if (message.type === "PANEL_SHOW_MACRO_TREE") {
-        // 録画停止後にマクロツリーを表示
-        refreshTreeView();
-        sendResponse && sendResponse({ success: true });
-        return true;
-    }
+        if (message.type === "PANEL_SHOW_INFO") {
+            handlePanelShowInfo(message.data && message.data.args);
+            sendResponse && sendResponse({ success: true });
+            return true;
+        }
+
+        if (message.type === "PANEL_SHOW_LINES") {
+            handlePanelShowLines(message.data);
+            sendResponse && sendResponse({ success: true });
+            return true;
+        }
+
+        if (message.type === "PANEL_SET_STAT_LINE") {
+            handlePanelSetStatLine(message.data);
+            sendResponse && sendResponse({ success: true });
+            return true;
+        }
+
+        if (message.type === "PANEL_SET_LOOP_VALUE") {
+            handlePanelSetLoopValue(message.data);
+            sendResponse && sendResponse({ success: true });
+            return true;
+        }
+
+        if (message.type === "PANEL_HIGHLIGHT_LINE") {
+            handlePanelHighlightLine(message.data);
+            sendResponse && sendResponse({ success: true });
+            return true;
+        }
     });
 
     document.addEventListener("DOMContentLoaded", () => {
-    console.log("[Panel] DOMContentLoaded");
+        console.log("[Panel] DOMContentLoaded");
 
-    // ウィンドウIDを初期化
-    windowIdReadyPromise = initWindowId();
-    panelWindowIdReadyPromise = initPanelWindowId();
+        // ウィンドウIDを初期化
+        windowIdReadyPromise = initWindowId();
 
-    // イベントリスナーの登録
-    const addListener = (id, handler) => {
-        const el = document.getElementById(id);
-        if (el) el.addEventListener("click", handler);
-    };
+        // イベントリスナーの登録
+        const addListener = (id, handler) => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener("click", handler);
+        };
 
-    addListener("play-button", play);
-    addListener("record-button", record);
-    addListener("stop-replaying-button", stop);
-    addListener("stop-recording-button", stop);
-    addListener("pause-button", pause);
-    addListener("saveas-button", saveAs);
-    addListener("capture-button", capture);
-    addListener("loop-button", playLoop);
-    addListener("settings-button", openSettings);
-    addListener("edit-button", edit);
-    addListener("help-button", openHelp);
-    addListener("info-help-button", openErrorHelp);
-    addListener("info-edit-button", openInfoEdit);
-    addListener("info-close-button", closeInfoPanel);
+        addListener("play-button", play);
+        addListener("record-button", record);
+        addListener("stop-replaying-button", stop);
+        addListener("stop-recording-button", stop);
+        addListener("pause-button", pause);
+        addListener("loop-button", playLoop);
+        addListener("settings-button", openSettings);
+        addListener("edit-button", edit);
+        addListener("help-button", openHelp);
+        addListener("info-help-button", openErrorHelp);
+        addListener("info-edit-button", openInfoEdit);
+        addListener("info-close-button", closeInfoPanel);
 
-    requestStateUpdate();
-    notifyPanelLoaded();
+        requestStateUpdate();
 
-    const filesRadio = document.getElementById("radio-files-tree");
-    const bookmarksRadio = document.getElementById("radio-bookmarks-tree");
+        const filesRadio = document.getElementById("radio-files-tree");
+        const bookmarksRadio = document.getElementById("radio-bookmarks-tree");
 
-    if (filesRadio) {
-        filesRadio.addEventListener("change", async () => {
-            if (!filesRadio.checked) return;
-            try {
-                const installed = await afio.isInstalled();
-                if (!installed) {
-                    alert("File access module is not installed. Switching to Bookmarks view.");
+        if (filesRadio) {
+            filesRadio.addEventListener("change", async () => {
+                if (!filesRadio.checked) return;
+                try {
+                    const installed = await afio.isInstalled();
+                    if (!installed) {
+                        alert("File access module is not installed. Switching to Bookmarks view.");
+                        applyTreeSelection("bookmarks", { persist: true, forceReload: true });
+                        return;
+                    }
+                    applyTreeSelection("files", { persist: true });
+                } catch (e) {
+                    console.error("[Panel] Failed to switch to files tree", e);
                     applyTreeSelection("bookmarks", { persist: true, forceReload: true });
-                    return;
                 }
-                applyTreeSelection("files", { persist: true });
-            } catch (e) {
-                console.error("[Panel] Failed to switch to files tree", e);
-                applyTreeSelection("bookmarks", { persist: true, forceReload: true });
+            });
+        }
+
+        if (bookmarksRadio) {
+            bookmarksRadio.addEventListener("change", () => {
+                if (!bookmarksRadio.checked) return;
+                applyTreeSelection("bookmarks", { persist: true });
+            });
+        }
+
+        // 右クリックはボタンに限定して無効化（一般操作は維持）
+        document.body.addEventListener("contextmenu", (event) => {
+            const target = event.target;
+            if (target && typeof target.closest === "function" && target.closest(".button")) {
+                event.preventDefault();
             }
         });
-    }
 
-    if (bookmarksRadio) {
-        bookmarksRadio.addEventListener("change", () => {
-            if (!bookmarksRadio.checked) return;
-            applyTreeSelection("bookmarks", { persist: true });
-        });
-    }
+        if (filesRadio) filesRadio.disabled = true;
+        if (bookmarksRadio) bookmarksRadio.disabled = true;
 
-    // 右クリック無効化
-    document.body.oncontextmenu = (e) => { e.preventDefault(); return false; };
+        selectInitialTree()
+            .catch((error) => {
+                console.error("[Panel] Initialization failed", error);
+            })
+            .finally(() => {
+                if (filesRadio) filesRadio.disabled = false;
+                if (bookmarksRadio) bookmarksRadio.disabled = false;
+            });
 
-    if (filesRadio) filesRadio.disabled = true;
-    if (bookmarksRadio) bookmarksRadio.disabled = true;
-
-    selectInitialTree()
-        .catch((error) => {
-            console.error("[Panel] Initialization failed", error);
-        })
-        .finally(() => {
-            if (filesRadio) filesRadio.disabled = false;
-            if (bookmarksRadio) bookmarksRadio.disabled = false;
-        });
-
-    // 広告などの読み込み
-    if (typeof setAdDetails === "function") setAdDetails();
-
-    window.addEventListener("beforeunload", () => {
-        notifyPanelClosing(getPanelBoxSnapshot());
-    });
+        // 広告などの読み込み
+        if (typeof setAdDetails === "function") setAdDetails();
     });
 } else {
     console.info("[Panel] iframe context detected; skipping panel initialization:", window.location.href);

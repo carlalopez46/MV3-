@@ -6,6 +6,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // Note: When null (not yet loaded or failed to load), we default to reloading
 // on all bookmark events to maintain safe behavior.
 let iMacrosFolderIdCache = null;
+const PANEL_ORIGIN = window.location.origin;
 
 // Helper function to check if a bookmark is descendant of iMacros folder
 // Always returns a Promise for consistent API
@@ -94,7 +95,8 @@ window.addEventListener("load", function (event) {
         }
     });
 
-    window.top.onSelectionChanged(TreeView.selectedItem != null);
+    // Notify parent panel that no item is selected yet.
+    window.parent.postMessage({ type: "iMacrosSelectionChanged", node: null }, PANEL_ORIGIN);
     document.body.oncontextmenu = function(e) {
         e.preventDefault()
     }
@@ -488,15 +490,30 @@ const TreeView = {
                         console.error("Can not parse bookmarklet " + data.node.text);
                         return;
                     }
-                    document.getElementById("imacros-macro-container").value = decodeURIComponent(atob(m[1]));
-                    window.top.onSelectionChanged(true);
+                    const macroSource = decodeURIComponent(atob(m[1]));
+                    document.getElementById("imacros-macro-container").value = macroSource;
+                    const nodeInfo = {
+                        type: 'macro',
+                        id: data.node.id,
+                        bookmark_id: data.node.id,
+                        text: data.node.text,
+                        source: macroSource
+                    };
+                    window.parent.postMessage({ type: "selectionChanged", selected: true }, PANEL_ORIGIN);
+                    window.parent.postMessage({ type: "iMacrosSelectionChanged", node: nodeInfo }, PANEL_ORIGIN);
 
                     e.preventDefault();
 
                 }
                 //folder
                 else {
-                    window.top.onSelectionChanged(false);
+                    const nodeInfo = {
+                        type: data.node.type || 'folder',
+                        id: data.node.id,
+                        text: data.node.text
+                    };
+                    window.parent.postMessage({ type: "selectionChanged", selected: false }, PANEL_ORIGIN);
+                    window.parent.postMessage({ type: "iMacrosSelectionChanged", node: nodeInfo }, PANEL_ORIGIN);
                 }
             });
 
@@ -505,7 +522,9 @@ const TreeView = {
                 const target_node = jQuery('#jstree_container').jstree(true).get_node(e.target.getAttribute("bookmark_id"));
 
                 if (target_node.type == 'macro') {
-                    setTimeout(function () { window.top.play(); }, 200);
+                    setTimeout(function () {
+                        window.parent.postMessage({ type: "playMacro" }, PANEL_ORIGIN);
+                    }, 200);
                 }
             });
         });

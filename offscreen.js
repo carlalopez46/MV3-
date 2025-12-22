@@ -20,14 +20,24 @@ const pendingEvals = new Map();
 
 // Listen for messages from sandbox iframe
 window.addEventListener('message', function (event) {
-    if (event.data && event.data.type === 'eval_in_sandbox_result') {
-        const id = event.data.id;
+    const payload = event && event.data;
+    if (!payload || payload.type !== 'eval_in_sandbox_result') {
+        return;
+    }
+
+    // Only accept results from our own sandbox iframe.
+    const sandboxFrame = document.getElementById('sandbox');
+    const sandboxWindow = sandboxFrame && sandboxFrame.contentWindow;
+    if (!sandboxWindow || event.source !== sandboxWindow) {
+        return;
+    }
+
+    const id = payload.id;
         const sendResponse = pendingEvals.get(id);
         if (sendResponse) {
-            sendResponse(event.data);
+            sendResponse(payload);
             pendingEvals.delete(id);
         }
-    }
 });
 
 function safeSendResponse(sendResponse, payload) {
@@ -50,6 +60,31 @@ if (chrome && chrome.runtime && chrome.runtime.onMessage) {
             if (message.target === 'offscreen') {
                 // This message is for offscreen_bg.js, not for us
                 return false;
+            }
+
+            // SECURITY: Only allow sensitive operations from privileged extension contexts.
+            const msgType = message && typeof message === 'object' ? message.type : null;
+            if (msgType === "eval_in_sandbox" || msgType === "clipboard_write" || msgType === "clipboard_read") {
+                const extensionOrigin = (chrome && chrome.runtime && typeof chrome.runtime.getURL === 'function')
+                    ? chrome.runtime.getURL('')
+                    : '';
+                const senderIsPrivileged = (typeof isPrivilegedSender === 'function')
+                    ? isPrivilegedSender(sender, chrome.runtime.id, extensionOrigin)
+                    : false;
+
+                if (!senderIsPrivileged) {
+                    console.warn('[iMacros Offscreen] Blocked unprivileged request:', msgType, sender);
+                    if (msgType === "eval_in_sandbox") {
+                        safeSendResponse(sendResponse, {
+                            type: "eval_in_sandbox_result",
+                            id: message && message.id,
+                            error: { message: "Access denied" }
+                        });
+                    } else {
+                        safeSendResponse(sendResponse, { success: false, error: "Access denied" });
+                    }
+                    return true;
+                }
             }
 
             // Handle eval requests
@@ -232,7 +267,7 @@ if (chrome && chrome.runtime && chrome.runtime.onMessage) {
             }
 
             // Ensure callers always receive a response to avoid runtime.lastError noise.
-            const backgroundHandledTypes = new Set(['UPDATE_PANEL_VIEWS', 'SET_DIALOG_RESULT', 'GET_DIALOG_ARGS']);
+            const backgroundHandledTypes = new Set(['UPDATE_PANEL_VIEWS', 'SET_DIALOG_RESULT', 'GET_DIALOG_ARGS', 'CALL_CONTEXT_METHOD']);
             if (message && backgroundHandledTypes.has(message.type)) {
                 // These message types are processed by the Service Worker; avoid responding here so the
                 // background listener can supply the authoritative result.
