@@ -1712,21 +1712,45 @@ CSPlayer.prototype.onHideScrollbars = function (args, callback) {
 }
 
 // get offset of the current window relative to topmost frame
+// get offset of the current window relative to topmost frame
 function getXYOffset(w) {
     if (w === window.top) {
-        let style = w.getComputedStyle(w.document.body)
-        return {
-            x_offset: parseInt(style.marginLeft),
-            y_offset: parseInt(style.marginTop)
+        try {
+            let style = w.getComputedStyle(w.document.body);
+            return {
+                x_offset: parseInt(style.marginLeft) || 0,
+                y_offset: parseInt(style.marginTop) || 0
+            };
+        } catch (e) {
+            console.warn("[iMacros] Error getting body style in top frame:", e);
+            return { x_offset: 0, y_offset: 0 };
         }
     }
 
-    let { x_offset, y_offset } = getXYOffset(w.parent)
-    let style = w.parent.getComputedStyle(w.frameElement)
-    let rect = w.frameElement.getBoundingClientRect()
-    return {
-        x_offset: rect.left + x_offset + parseInt(style.borderLeftWidth),
-        y_offset: rect.top + y_offset + parseInt(style.borderTopWidth)
+    try {
+        // Check for cross-origin access before attempting to access w.frameElement or w.parent
+        // Accessing w.frameElement property throws SecurityError if cross-origin
+        const frameElement = w.frameElement;
+
+        if (!frameElement) {
+            // Cannot access frameElement or it's null
+            return { x_offset: 0, y_offset: 0 };
+        }
+
+        let { x_offset, y_offset } = getXYOffset(w.parent);
+
+        let style = w.parent.getComputedStyle(frameElement);
+        let rect = frameElement.getBoundingClientRect();
+
+        return {
+            x_offset: rect.left + x_offset + (parseInt(style.borderLeftWidth) || 0),
+            y_offset: rect.top + y_offset + (parseInt(style.borderTopWidth) || 0)
+        };
+    } catch (e) {
+        // Suppress errors for cross-origin frames
+        // This is expected when running in iframes on different domains
+        // console.warn("[iMacros] Cross-origin access blocked in getXYOffset:", e);
+        return { x_offset: 0, y_offset: 0 };
     }
 }
 
