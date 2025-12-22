@@ -1598,10 +1598,9 @@ communicator.registerHandler("run-macro", function (data, tab_id) {
                 console.warn('[iMacros Offscreen] run-macro ignored: macro already playing', { win_id: w_id });
                 return;
             }
-            if (playInFlight.has(w_id)) {
-                console.warn('[iMacros Offscreen] run-macro ignored: play request in flight', { win_id: w_id });
-                return;
-            }
+            // Note: We only use mplayer.playing check here, not playInFlight,
+            // because run-macro doesn't have a completion callback to clear playInFlight.
+            // playInFlight is used by playFile and runMacroByUrl which have proper lifecycle management.
 
             if (Storage.getBool("before-play-dialog")) {
                 data.win_id = w_id;
@@ -1638,14 +1637,11 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
             // ★修正: マクロ再生中の二重実行を防止
             if (ctx.mplayer && ctx.mplayer.playing) {
                 console.warn('[iMacros Offscreen] PLAY_MACRO ignored: macro already playing', { win_id });
-                sendResponse({ success: true, ignored: true, reason: 'already_playing' });
+                sendResponse({ success: false, ignored: true, reason: 'already_playing' });
                 return;
             }
-            if (playInFlight.has(win_id)) {
-                console.warn('[iMacros Offscreen] PLAY_MACRO ignored: play request in flight', { win_id });
-                sendResponse({ success: true, ignored: true, reason: 'in_flight' });
-                return;
-            }
+            // Note: We only use mplayer.playing check here, not playInFlight,
+            // because PLAY_MACRO doesn't have a completion callback to clear playInFlight.
 
             return getLimits().then(
                 limits => asyncRun(function () {
