@@ -32,6 +32,10 @@ const RUN_MACRO_DUPLICATE_WINDOW_MS = 1000;
 const runMacroStartGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: RUN_MACRO_DUPLICATE_WINDOW_MS, maxKeys: 300 })
     : null;
+const PLAY_EXECUTION_DUPLICATE_WINDOW_MS = 15000;
+const playExecutionGuard = (typeof createRecentKeyGuard === 'function')
+    ? createRecentKeyGuard({ ttlMs: PLAY_EXECUTION_DUPLICATE_WINDOW_MS, maxKeys: 500 })
+    : null;
 const playMacroMessageGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: 10000, maxKeys: 500 })
     : null;
@@ -484,8 +488,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 		            const requestedAt = (typeof requestedAtRaw === 'number')
 		                ? requestedAtRaw
 		                : (typeof requestedAtRaw === 'string' ? parseInt(requestedAtRaw, 10) : NaN);
-		            const lastStopAt = lastStopAtByWindow.get(win_id);
-		            if (Number.isFinite(requestedAt) && typeof lastStopAt === 'number' && lastStopAt >= requestedAt) {
+            const lastStopAt = lastStopAtByWindow.get(win_id);
+            if (Number.isFinite(requestedAt) && typeof lastStopAt === 'number' && lastStopAt >= requestedAt) {
 		                console.warn('[Offscreen] Ignoring playFile - stop requested after this play request', {
 		                    win_id,
 		                    requestedAt,
@@ -501,12 +505,38 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 		                        state: 'idle'
 		                    });
 		                }
-		                return false;
-		            }
+                return false;
+            }
 
-	            const existingContext = context[win_id];
-	            if (existingContext && existingContext.mplayer && existingContext.mplayer.playing) {
-	                console.warn(`[Offscreen] Ignoring playFile - macro already playing for window ${win_id}`);
+            const executionId = requestMeta && requestMeta.executionId;
+            if (executionId && playExecutionGuard) {
+                const execKey = `play-exec:${win_id}:${executionId}`;
+                const dedupeExec = playExecutionGuard(execKey);
+                if (!dedupeExec.allowed) {
+                    console.warn('[Offscreen] Duplicate playFile executionId ignored', {
+                        win_id,
+                        executionId,
+                        ageMs: dedupeExec.ageMs,
+                        ttlMs: dedupeExec.ttlMs,
+                        requestId: playRequestId
+                    });
+                    if (sendResponse) {
+                        sendResponse({
+                            success: true,
+                            ignored: true,
+                            status: 'ignored',
+                            reason: 'duplicate_execution',
+                            message: 'Duplicate play request ignored',
+                            executionId
+                        });
+                    }
+                    return false;
+                }
+            }
+
+            const existingContext = context[win_id];
+            if (existingContext && existingContext.mplayer && existingContext.mplayer.playing) {
+                console.warn(`[Offscreen] Ignoring playFile - macro already playing for window ${win_id}`);
                 if (sendResponse) {
                     sendResponse({ success: true, alreadyPlaying: true, state: 'playing' });
                 }
@@ -521,7 +551,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 return false;
             }
 
-		            if (playFileStartGuard) {
+		    if (playFileStartGuard) {
                 const guardPath = normalizeMacroPathForGuard(filePath) || filePath;
                 const key = `playFile:${win_id}:${guardPath}:${loops}`;
                 const dedupe = playFileStartGuard(key);

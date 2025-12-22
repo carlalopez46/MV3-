@@ -14,6 +14,8 @@ let panelState = {
 
 // Guard against overlapping start commands (rapid clicks / duplicate triggers)
 let pendingCommand = null;
+let lastPlayRequestAt = 0;
+const PLAY_DEBOUNCE_MS = 800;
 
 function acquireCommandLock(command) {
     if (pendingCommand) {
@@ -293,6 +295,13 @@ function requestStateUpdate() {
 function play() {
     console.log("[Panel] Play button clicked");
 
+    const now = Date.now();
+    if (now - lastPlayRequestAt < PLAY_DEBOUNCE_MS) {
+        console.log("[Panel] Ignoring play request - debounce");
+        return;
+    }
+    lastPlayRequestAt = now;
+
     if (panelState.isPaused) {
         console.log("[Panel] Unpause requested");
         if (!acquireCommandLock("unpause")) {
@@ -442,6 +451,13 @@ function capture() {
 
 function playLoop() {
     console.log("[Panel] Loop button clicked");
+
+    const now = Date.now();
+    if (now - lastPlayRequestAt < PLAY_DEBOUNCE_MS) {
+        console.log("[Panel] Ignoring loop request - debounce");
+        return;
+    }
+    lastPlayRequestAt = now;
 
     // Guard against double execution - ignore if already playing or recording
     if (panelState.isPlaying) {

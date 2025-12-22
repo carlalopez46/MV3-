@@ -1113,6 +1113,43 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
         }
     });
 
+    await runCase('offscreen_bg playFile ignores duplicate executionId', async () => {
+        const harness = createHarness();
+        const win_id = 5;
+
+        await harness.dispatch({
+            target: 'offscreen',
+            command: 'CALL_CONTEXT_METHOD',
+            method: 'playFile',
+            win_id,
+            args: ['Macros/a.iim', 1],
+            requestId: 'req1',
+            executionId: 'exec-1'
+        });
+
+        if (harness.readDeferreds.length !== 1) {
+            throw new Error(`Expected 1 readTextFile call, got ${harness.readDeferreds.length}`);
+        }
+
+        const responses = await harness.dispatch({
+            target: 'offscreen',
+            command: 'CALL_CONTEXT_METHOD',
+            method: 'playFile',
+            win_id,
+            args: ['Macros/a.iim', 1],
+            requestId: 'req2',
+            executionId: 'exec-1'
+        });
+
+        const ignoredResponse = responses.find((payload) => payload && payload.status === 'ignored');
+        if (!ignoredResponse) {
+            throw new Error('Expected duplicate executionId to be ignored');
+        }
+        if (harness.readDeferreds.length !== 1) {
+            throw new Error(`Expected no second readTextFile call, got ${harness.readDeferreds.length}`);
+        }
+    });
+
     await runCase('offscreen_bg runMacroByUrl guard normalizes imacros_url paths', async () => {
         const harness = createHarness();
         const windowId = 4;

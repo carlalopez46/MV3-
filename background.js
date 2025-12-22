@@ -2453,17 +2453,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 	        const requestedAt = Date.now();
 	        // Ensure stored execution ID (from prior SW sessions) is restored before checking duplicates
 	        restoreExecutionIdFromStorage().then(() => {
-	            const requestId = msg.requestId || createRequestId();
-	            const executionId = msg.executionId;
-	            const isValidExecutionId = executionId && typeof executionId === 'string' && executionId.trim().length > 0;
-	            console.log("[iMacros SW] Play request for:", msg.file_path, {
-	                requestId,
-	                executionId,
-	                requestedAt,
-	                win_id: msg.win_id,
-	                swInstanceId: SW_INSTANCE_ID,
-	                restoreComplete: executionIdRestoreComplete
-	            });
+            const requestId = msg.requestId || createRequestId();
+            const executionId = msg.executionId;
+            const isValidExecutionId = executionId && typeof executionId === 'string' && executionId.trim().length > 0;
+            console.log("[iMacros SW] Play request for:", msg.file_path, {
+                requestId,
+                executionId,
+                requestedAt,
+                win_id: msg.win_id,
+                swInstanceId: SW_INSTANCE_ID,
+                restoreComplete: executionIdRestoreComplete
+            });
+
+            if (isValidExecutionId && playMacroExecutionGuard) {
+                const dedupe = playMacroExecutionGuard(`playMacro:${executionId}`);
+                if (!dedupe.allowed) {
+                    console.warn('[iMacros SW] Duplicate playMacro executionId suppressed', {
+                        executionId,
+                        ageMs: dedupe.ageMs,
+                        ttlMs: dedupe.ttlMs,
+                        requestId
+                    });
+                    sendResponse({ success: true, ignored: true, status: 'ignored', reason: 'duplicate_execution' });
+                    return;
+                }
+            }
 
             if (isValidExecutionId && executionId === lastProcessedExecutionId) {
                 console.warn(`[iMacros SW] Duplicate play request detected (ID: ${executionId}). Ignoring.`);
@@ -3103,6 +3117,10 @@ const imacrosUrlRunGuard = (typeof createRecentKeyGuard === 'function')
 const PLAY_MACRO_DUPLICATE_WINDOW_MS = 1000;
 const playMacroStartGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: PLAY_MACRO_DUPLICATE_WINDOW_MS, maxKeys: 500 })
+    : null;
+const PLAY_MACRO_EXEC_DUPLICATE_WINDOW_MS = 15000;
+const playMacroExecutionGuard = (typeof createRecentKeyGuard === 'function')
+    ? createRecentKeyGuard({ ttlMs: PLAY_MACRO_EXEC_DUPLICATE_WINDOW_MS, maxKeys: 500 })
     : null;
 
 function normalizeMacroPathForGuard(value) {
