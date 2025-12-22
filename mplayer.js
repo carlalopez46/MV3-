@@ -93,7 +93,7 @@ function MacroPlayer(win_id) {
     this._onScriptError = this.onErrorOccurred.bind(this);
     // this._onBeforeNavigate = this.onBeforeNavigate.bind(this);
     // this._onCompleted = this.onNavigationCompleted.bind(this);
-    this._onErrorOccured = this.onNavigationErrorOccured.bind(this);
+    this._onErrorOccurred = this.onNavigationErrorOccurred.bind(this);
     // this._onCommitted = this.onNavigationCommitted.bind(this);
     // this._onCreatedNavTarget = this.onCreatedNavigationTarget.bind(this);
     // this._onDOMLoaded = this.onDOMContentLoaded.bind(this);
@@ -726,7 +726,7 @@ MacroPlayer.prototype.isInternalURL = function (url) {
 // };
 
 
-MacroPlayer.prototype.onNavigationErrorOccured = function (details) {
+MacroPlayer.prototype.onNavigationErrorOccurred = function (details) {
     if (details.tabId != this.tab_id)
         return;
 
