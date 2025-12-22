@@ -1,0 +1,88 @@
+/*
+Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
+*/
+
+/* styles for saveAs dialog */
+
+@font-face {
+    font-family: "imicons";
+    src: url("imicons/fonts/imicons.eot");
+    src: url("imicons/fonts/imicons.eot?#iefix") format("embedded-opentype"), 
+        url("imicons/fonts/imicons.woff") format("woff"), 
+        url("imicons/fonts/imicons.ttf") format("truetype"), 
+        url("imicons/fonts/imicons.svg#imicons") format("svg");
+    font-weight: normal;
+    font-style: normal;
+}
+
+body {
+    margin: 0px;
+    padding: 0px;
+    /* font-family: sans-serif; */
+    font-size: small;
+    min-width: 400px;
+    max-width: 500px;
+}
+
+
+#main-container {
+    margin: 0px;
+    padding: 15px;
+    -webkit-box-sizing: border-box;
+    -webkit-border-radius: 5px;
+    min-height: 200px;
+}
+
+#macro-name {
+    margin: 10px;
+    min-width: 80%;
+    display: -webkit-box;
+}
+
+#buttonpack {
+    -webkit-box-sizing: border-box;
+}
+
+#ok-button {
+    /*background-image: url("ok.png");*/
+    text-align: center;
+    padding-bottom: 3px;
+}
+
+#ok-button:before {
+    font-family: imicons;
+    display: inline-block;
+    content: "a";
+    font-size: 16px;
+    color: ghostwhite;
+    margin-right: 10px;
+    margin-bottom: inherit;
+    vertical-align: middle;
+}
+
+#cancel-button {
+    /*background-image: url("cancel.png");*/
+    text-align: center;
+    padding-bottom: 3px;
+}
+
+#cancel-button:before {
+    font-family: imicons;
+    display: inline-block;
+    content: "e";
+    font-size: 16px;
+    color: ghostwhite;
+    margin-right: 10px;
+    margin-bottom: inherit;
+    vertical-align: middle;
+}
+
+#tree-switcher-box {
+    margin-top: 15px;
+    margin-bottom: 15px;
+}
+
+
+.tree-switcher {
+    font-size: small;
+}

@@ -1,0 +1,189 @@
+<html translate="no">
+
+<head>
+  <meta charset="UTF-8">
+  <title>iMacros の設定</title>
+  <script src="errorLogger.js"></script>
+  <script src="utils.js"> </script>
+  <script src="vendor/jQuery/jquery-2.2.1.min.js"></script>
+  <script src="vendor/jQueryUI/jquery-ui.min.js"></script>
+  <script src="errorLogger.js"></script>
+  <script src="WindowsPathMappingService.js"></script>
+  <script src="FileSystemAccessService.js"></script>
+  <script src="options.js"> </script>
+  <link rel="stylesheet" type="text/css" href="skin/common.css" />
+  <link rel="stylesheet" type="text/css" href="skin/options.css" />
+  <link rel="stylesheet" type="text/css" href="vendor/jQueryUI/jquery-ui.min.css" />
+</head>
+
+<body>
+  <span id="title">iMacros の設定</span>
+  <div id="file-access-note">
+    <p id="note-header"></p>
+    <ul id="note-list"></ul>
+  </div>
+  <div id="common" class="settings-container">
+    <span class="header">一般設定</span>
+    <div id="dock-panel-box">
+        <input id="dock-panel" type="checkbox">
+      <span>iMacros パネルをブラウザ ウィンドウにドッキングする</span>
+    </div>
+    <div id="before-play-box">
+        <input id="show-before-play-dialog" type="checkbox">
+      <span> ブックマークの編集ダイアログを表示
+        <span id="more-info-bp" class="a-link"> (More Info) </span>
+      </span>
+    </div>
+    <div id="profiler-enabled-box">
+        <input id="enable-profiler" type="checkbox">
+      <span>プロファイルマクロのパフォーマンス
+        <span id="more-info-profiler" class="a-link"> (More Info) </span>
+      </span>
+    </div>
+  </div>
+
+  <div id="recorder" class="settings-container">
+    <span class="header">レコーダーの設定</span>
+    <div id="record-mode-box">
+      <span>録画モード:</span>
+      <div id="recording-modes">
+        <input type="radio" name="recording-mode" id="record-mode-conventional">
+        <label for="record-mode-conventional">従来の録画モード</label>
+      </div>
+      <div>
+        <input type="radio" name="recording-mode" id="record-mode-event">
+        <label for="record-mode-event">イベント記録モード<span id="more-info-event" class="a-link"> (More Info) </span></label>
+      </div>
+    </div>
+    <div id="favorid-panel-box">
+      <p />
+      <div style="width: 70%;">一部の Web ページでは、動的に生成された ID を使用します。 記録に問題がある場合は、下のチェックボックスをオフにします。
+        従来の記録モードの場合、このボックスのチェックを外すと、完全な HTML タグの使用が強制されます。
+      </div>
+        <input id="favorid-panel" type="checkbox">
+      <label for="favorid-panel">可能な限り要素 ID を使用する</label>
+    </div>
+    <div id="css-selectors-box">
+      <p />
+      <div style="width: 70%;">CSS セレクターを使用してタグを選択する
+      </div>
+        <input id="css-selectors" type="checkbox">
+      <label for="css-selectors">CSSセレクターを使用する</label>
+    </div>
+  </div>
+
+  <div id="player" class="settings-container">
+    <span class="header">プレーヤーの設定</span>
+    <div id="replay-speed-box">
+      <span>再生速度:</span>
+      <div>
+        <input type="radio" name="replay-speed" id="replay-speed-fast">
+        <label for="replay-speed-fast">Fast</label>
+        <input type="radio" name="replay-speed" id="replay-speed-medium">
+        <label for="replay-speed-medium">Medium</label>
+        <input type="radio" name="replay-speed" id="replay-speed-slow">
+        <label for="replay-speed-slow">Slow</label>
+      </div>
+    </div>
+  </div>
+
+  <div id="path-settings" class="settings-container">
+    <span class="header">パスの設定</span>
+    <div>
+      <div class="vbox">
+        <span> マクロのディレクトリパス: </span>
+        <div class="hbox">
+          <div>
+            <input id="defsavepath" class="path-field" type="text">
+          </div>
+          <div id="defsavepath-browse" class="button browse-button"></div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="vbox">
+        <span> データソースのディレクトリパス: </span>
+        <div class="hbox">
+          <div>
+            <input id="defdatapath" class="path-field" type="text">
+          </div>
+          <div id="defdatapath-browse" class="button browse-button"></div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="vbox">
+        <span> ダウンロードディレクトリのパス: </span>
+        <div class="hbox">
+          <div>
+            <input id="defdownpath" class="path-field" type="text">
+          </div>
+          <div id="defdownpath-browse" class="button browse-button"></div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="vbox">
+        <span> ログディレクトリのパス: </span>
+        <div class="hbox">
+          <div>
+            <input id="deflogpath" class="path-field" type="text">
+          </div>
+          <div id="deflogpath-browse" class="button browse-button"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="security" class="settings-container">
+    <span class="header">Security settings</span>
+    <div style="margin-top: 10px">
+      &nbsp;マスターパスワードは、保存されているすべての暗号化と復号化に使用されます。
+      ウェブサイトのパスワード。 ウェブサイトのパスワードは強力な暗号化方式を使用して暗号化されています
+      暗号化され、マクロ テキスト ファイル内に保存されます。
+    </div>
+    <div id="type_no-box" class="radio-container">
+        <input type="radio" id="type_no" name="encryption_type">
+      <label for="type_no">パスワードを暗号化しないでください</label>
+      <div class="radio-description">
+        パスワードはマクロにプレーンテキストとして保存されます。</div>
+    </div>
+    <div id="type_stored-box" class="radio-container">
+        <input type="radio" id="type_stored" name="encryption_type">
+      <label for="type_stored">マスターパスワードをここに入力して保存します。</label>
+    </div>
+    <div id="stored-password-field">
+      <label for="stored-password-box">保存されたマスターパスワード:</label>
+        <input type="password" name="stored-password-box" id="stored-password-box">
+    </div>
+
+    <div id="type_tmpkey-box" class="radio-container">
+        <input type="radio" id="type_tmpkey" name="encryption_type">
+      <label for="type_tmpkey">
+        一時的なマスターパスワードを保存したくない場合は、ここに入力します。
+        iMacros を起動して Web サイトのパスワードを初めて使用するときは、毎回再入力する必要があります。 安全性は向上しますが、利便性は低下します。
+      </label>
+
+      <div id="temp-password-field" style="margin-top:1em;">
+        <label for="temp-password-box">一時的なマスターパスワード:</label>
+        <input type="password" name="temp-password-box" id="temp-password-box" />
+      </div>
+    </div>
+
+    <div style="margin-top:20px;">
+      注: 暗号化は、SET を使用して各マクロで変更することもできます。 SET
+      !ENCRYPTION NO / STOREDKEY / TMPKEY
+    </div>
+    <div style="margin-top:10px;">
+      パスワード文字列を手動で作成または復号化する:
+      <span id="password-tool-page" class="a-link"> パスワードツールページ</span>
+    </div>
+    <div style="margin-top:12px;margin-left:60px;margin-bottom:7px">
+      <span id="more-info-encryption" class="a-link">暗号化に関する詳細情報</span>
+    </div>
+  </div>
+  <span id="license-link" class="a-link">EULA</span>
+  <span id="test"></span>
+</body>
+
+</html>

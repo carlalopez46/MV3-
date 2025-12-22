@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iMacros MV3 - Integrated Test Runner</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .controls {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-bottom: 2px solid #e9ecef;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+            transform: translateY(-2px);
+        }
+
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .btn-warning:hover {
+            background: #e0a800;
+            transform: translateY(-2px);
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .test-suites {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            padding: 30px;
+        }
+
+        .test-suite-card {
+            background: white;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .test-suite-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .test-suite-card h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 1.3em;
+        }
+
+        .test-suite-card p {
+            color: #6c757d;
+            margin-bottom: 15px;
+            line-height: 1.6;
+        }
+
+        .test-suite-status {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .status-badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-idle {
+            background: #e9ecef;
+            color: #6c757d;
+        }
+
+        .status-running {
+            background: #ffc107;
+            color: #212529;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        .status-passed {
+            background: #28a745;
+            color: white;
+        }
+
+        .status-failed {
+            background: #dc3545;
+            color: white;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .results-section {
+            padding: 30px;
+            background: #f8f9fa;
+        }
+
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .results-header h2 {
+            color: #333;
+            font-size: 1.8em;
+        }
+
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .summary-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            border-left: 4px solid #667eea;
+        }
+
+        .summary-card.passed {
+            border-left-color: #28a745;
+        }
+
+        .summary-card.failed {
+            border-left-color: #dc3545;
+        }
+
+        .summary-card.skipped {
+            border-left-color: #ffc107;
+        }
+
+        .summary-card h3 {
+            font-size: 2.5em;
+            margin-bottom: 5px;
+            color: #333;
+        }
+
+        .summary-card p {
+            color: #6c757d;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        #console-output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 13px;
+            max-height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            line-height: 1.5;
+        }
+
+        #console-output::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        #console-output::-webkit-scrollbar-track {
+            background: #2d2d2d;
+            border-radius: 5px;
+        }
+
+        #console-output::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 5px;
+        }
+
+        .console-error {
+            color: #f48771;
+        }
+
+        .console-warning {
+            color: #dcdcaa;
+        }
+
+        .console-success {
+            color: #4ec9b0;
+        }
+
+        .console-info {
+            color: #9cdcfe;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error-details {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+
+        .error-details h4 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+
+        .error-list {
+            list-style: none;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .error-list li {
+            background: white;
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 5px;
+            border-left: 3px solid #dc3545;
+        }
+
+        .error-list .error-context {
+            font-weight: 600;
+            color: #dc3545;
+        }
+
+        .error-list .error-location {
+            font-size: 0.9em;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧪 iMacros MV3 Test Suite</h1>
+            <p>File System Access API & Windows Path Mapping Integration Tests</p>
+        </div>
+
+        <div class="controls">
+            <button class="btn btn-primary" id="run-all-btn">
+                ▶️ Run All Tests
+            </button>
+            <button class="btn btn-success" id="run-fsaccess-btn">
+                Run FS Access Tests
+            </button>
+            <button class="btn btn-success" id="run-afio-btn">
+                Run AFIO Tests
+            </button>
+            <button class="btn btn-warning" id="export-report-btn">
+                📥 Export Error Report
+            </button>
+            <button class="btn btn-warning" id="print-report-btn">
+                🖨️ Print Report
+            </button>
+            <button class="btn btn-danger" id="clear-console-btn">
+                🗑️ Clear Console
+            </button>
+        </div>
+
+        <div class="test-suites">
+            <div class="test-suite-card">
+                <h3>📁 File System Access API</h3>
+                <p>Tests FileSystemAccessService core functionality, Windows path detection, and IndexedDB integration</p>
+                <div class="test-suite-status">
+                    <span class="status-badge status-idle" id="status-fsaccess">Idle</span>
+                    <span id="count-fsaccess">0 tests</span>
+                </div>
+            </div>
+
+            <div class="test-suite-card">
+                <h3>🗺️ Windows Path Mapping</h3>
+                <p>Tests WindowsPathMappingService path resolution, normalization, and mapping persistence</p>
+                <div class="test-suite-status">
+                    <span class="status-badge status-idle" id="status-pathmapping">Idle</span>
+                    <span id="count-pathmapping">0 tests</span>
+                </div>
+            </div>
+
+            <div class="test-suite-card">
+                <h3>🔄 AsyncFileIO Integration</h3>
+                <p>Tests afio backend detection, fallback mechanisms, and operation routing</p>
+                <div class="test-suite-status">
+                    <span class="status-badge status-idle" id="status-afio">Idle</span>
+                    <span id="count-afio">0 tests</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="results-section">
+            <div class="results-header">
+                <h2>📊 Test Results</h2>
+            </div>
+
+            <div class="summary-cards">
+                <div class="summary-card passed">
+                    <h3 id="total-passed">0</h3>
+                    <p>Passed</p>
+                </div>
+                <div class="summary-card failed">
+                    <h3 id="total-failed">0</h3>
+                    <p>Failed</p>
+                </div>
+                <div class="summary-card skipped">
+                    <h3 id="total-skipped">0</h3>
+                    <p>Skipped</p>
+                </div>
+                <div class="summary-card">
+                    <h3 id="total-tests">0</h3>
+                    <p>Total Tests</p>
+                </div>
+            </div>
+
+            <div id="error-details-container"></div>
+
+            <div id="console-output"></div>
+        </div>
+    </div>
+
+    <!-- Load dependencies -->
+    <script src="../utils.js"></script>
+    <script src="../GlobalErrorLogger.js"></script>
+    <script src="../VirtualFileService.js"></script>
+    <script src="../WindowsPathMappingService.js"></script>
+    <script src="../FileSystemAccessService.js"></script>
+    <script src="../FileSyncBridge.js"></script>
+    <script src="../AsyncFileIO.js"></script>
+
+    <!-- Load test suites -->
+    <script src="filesystem_access_test_suite.js"></script>
+    <script src="afio_test_suite.js"></script>
+
+    <script>
+        // Console capture
+        const consoleOutput = document.getElementById('console-output');
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        const originalConsoleWarn = console.warn;
+        const originalConsoleInfo = console.info;
+
+        function appendToConsole(message, className = '') {
+            const timestamp = new Date().toLocaleTimeString();
+            const line = `[${timestamp}] ${message}\n`;
+            const span = document.createElement('span');
+            span.className = className;
+            span.textContent = line;
+            consoleOutput.appendChild(span);
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        }
+
+        console.log = function(...args) {
+            originalConsoleLog.apply(console, args);
+            appendToConsole(args.join(' '), 'console-info');
+        };
+
+        console.error = function(...args) {
+            originalConsoleError.apply(console, args);
+            appendToConsole(args.join(' '), 'console-error');
+        };
+
+        console.warn = function(...args) {
+            originalConsoleWarn.apply(console, args);
+            appendToConsole(args.join(' '), 'console-warning');
+        };
+
+        console.info = function(...args) {
+            originalConsoleInfo.apply(console, args);
+            appendToConsole(args.join(' '), 'console-info');
+        };
+
+        // Test runner functions
+        function updateStatus(suite, status) {
+            const statusElement = document.getElementById(`status-${suite}`);
+            if (statusElement) {
+                statusElement.className = `status-badge status-${status}`;
+                statusElement.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+            }
+        }
+
+        function updateSummary(results) {
+            document.getElementById('total-passed').textContent = results.passed || 0;
+            document.getElementById('total-failed').textContent = results.failed || 0;
+            document.getElementById('total-skipped').textContent = results.skipped || 0;
+            const total = (results.passed || 0) + (results.failed || 0) + (results.skipped || 0);
+            document.getElementById('total-tests').textContent = total;
+        }
+
+        function displayErrors(errorReport) {
+            const container = document.getElementById('error-details-container');
+
+            // Clear previous content
+            while (container.firstChild) {
+                container.removeChild(container.firstChild);
+            }
+
+            if (!errorReport || errorReport.totalErrors === 0 || !Array.isArray(errorReport.errors)) {
+                return;
+            }
+
+            // Create error details container
+            const errorDetails = document.createElement('div');
+            errorDetails.className = 'error-details';
+
+            // Create heading
+            const heading = document.createElement('h4');
+            heading.textContent = '❌ Error Details';
+            errorDetails.appendChild(heading);
+
+            // Create error list
+            const errorList = document.createElement('ul');
+            errorList.className = 'error-list';
+
+            // Add each error (last 20 only)
+            errorReport.errors.slice(-20).forEach(error => {
+                const listItem = document.createElement('li');
+
+                // Error context and message
+                const contextDiv = document.createElement('div');
+                contextDiv.className = 'error-context';
+                contextDiv.textContent = `${error.context}: ${error.message}`;
+                listItem.appendChild(contextDiv);
+
+                // File location
+                const locationDiv = document.createElement('div');
+                locationDiv.className = 'error-location';
+                locationDiv.textContent = `📍 ${error.file}:${error.line}:${error.column}`;
+                listItem.appendChild(locationDiv);
+
+                // Category and severity
+                const categoryDiv = document.createElement('div');
+                categoryDiv.className = 'error-location';
+                categoryDiv.textContent = `🏷️ ${error.category} | ${error.severity}`;
+                listItem.appendChild(categoryDiv);
+
+                errorList.appendChild(listItem);
+            });
+
+            errorDetails.appendChild(errorList);
+            container.appendChild(errorDetails);
+        }
+
+        async function runAllTests() {
+            console.log('='.repeat(80));
+            console.log('RUNNING ALL TESTS');
+            console.log('='.repeat(80));
+
+            // Clear previous results
+            if (typeof GlobalErrorLogger !== 'undefined') {
+                GlobalErrorLogger.clear();
+            }
+
+            // Accumulate results from both test suites
+            const accumulatedResults = {
+                passed: 0,
+                failed: 0,
+                skipped: 0
+            };
+
+            // Run File System Access tests
+            try {
+                const fsAccessResult = await runFsAccessTests();
+                if (fsAccessResult && fsAccessResult.results) {
+                    accumulatedResults.passed += fsAccessResult.results.passed || 0;
+                    accumulatedResults.failed += fsAccessResult.results.failed || 0;
+                    accumulatedResults.skipped += fsAccessResult.results.skipped || 0;
+                }
+            } catch (err) {
+                console.error('Fatal error in File System Access test suite:', err);
+                if (typeof GlobalErrorLogger !== 'undefined') {
+                    GlobalErrorLogger.logError('runAllTests.fsAccess', err, {
+                        severity: 'HIGH'
+                    });
+                }
+                // エラーでも続行して他のスイートを実行
+            }
+
+            // Run AFIO tests
+            try {
+                const afioResult = await runAfioTests();
+                if (afioResult && afioResult.results) {
+                    accumulatedResults.passed += afioResult.results.passed || 0;
+                    accumulatedResults.failed += afioResult.results.failed || 0;
+                    accumulatedResults.skipped += afioResult.results.skipped || 0;
+                }
+            } catch (err) {
+                console.error('Fatal error in AFIO test suite:', err);
+                if (typeof GlobalErrorLogger !== 'undefined') {
+                    GlobalErrorLogger.logError('runAllTests.afio', err, {
+                        severity: 'HIGH'
+                    });
+                }
+                // エラーでも続行して結果を表示
+            }
+
+            // Update summary with accumulated results
+            updateSummary(accumulatedResults);
+
+            console.log('='.repeat(80));
+            console.log('ALL TESTS COMPLETED');
+            console.log('='.repeat(80));
+
+            if (typeof GlobalErrorLogger !== 'undefined') {
+                GlobalErrorLogger.printReport();
+            }
+        }
+
+        async function runFsAccessTests() {
+            console.log('\n📁 Running File System Access API Tests...\n');
+            updateStatus('fsaccess', 'running');
+            updateStatus('pathmapping', 'running');
+
+            try {
+                const result = await FileSystemAccessTestSuite.run();
+
+                if (result.success) {
+                    updateStatus('fsaccess', 'passed');
+                    updateStatus('pathmapping', 'passed');
+                } else {
+                    updateStatus('fsaccess', 'failed');
+                    updateStatus('pathmapping', 'failed');
+                }
+
+                updateSummary(result.results);
+
+                if (result.errors) {
+                    displayErrors(result.errors);
+                }
+
+                return result;
+            } catch (err) {
+                console.error('Fatal error running File System Access tests:', err);
+                updateStatus('fsaccess', 'failed');
+                updateStatus('pathmapping', 'failed');
+                throw err;
+            }
+        }
+
+        async function runAfioTests() {
+            console.log('\n🔄 Running AsyncFileIO Tests...\n');
+            updateStatus('afio', 'running');
+
+            try {
+                const result = await AfioTestSuite.run();
+
+                if (result.success) {
+                    updateStatus('afio', 'passed');
+                } else {
+                    updateStatus('afio', 'failed');
+                }
+
+                updateSummary(result.results);
+
+                if (result.errors) {
+                    displayErrors(result.errors);
+                }
+
+                return result;
+            } catch (err) {
+                console.error('Fatal error running AFIO tests:', err);
+                updateStatus('afio', 'failed');
+                throw err;
+            }
+        }
+
+        function exportErrorReport() {
+            if (typeof GlobalErrorLogger !== 'undefined') {
+                GlobalErrorLogger.exportReport();
+                console.log('✅ Error report exported');
+            } else {
+                console.error('GlobalErrorLogger is not available');
+            }
+        }
+
+        function printErrorReport() {
+            if (typeof GlobalErrorLogger !== 'undefined') {
+                GlobalErrorLogger.printReport();
+            } else {
+                console.error('GlobalErrorLogger is not available');
+            }
+        }
+
+        function clearConsole() {
+            consoleOutput.innerHTML = '';
+            console.log('Console cleared');
+        }
+
+        /**
+         * Wrapper for async event handlers with proper error handling
+         */
+        function wrapAsyncHandler(asyncFn) {
+            return function(event) {
+                try {
+                    const result = asyncFn(event);
+                    if (result && typeof result.catch === 'function') {
+                        result.catch(err => {
+                            console.error('Unhandled error in async handler:', err);
+                            if (typeof GlobalErrorLogger !== 'undefined') {
+                                GlobalErrorLogger.logError('AsyncEventHandler', err, {
+                                    severity: 'HIGH',
+                                    handler: asyncFn.name || 'anonymous'
+                                });
+                            }
+                        });
+                    }
+                } catch (err) {
+                    console.error('Error in event handler:', err);
+                    if (typeof GlobalErrorLogger !== 'undefined') {
+                        GlobalErrorLogger.logError('EventHandler', err, {
+                            severity: 'HIGH',
+                            handler: asyncFn.name || 'anonymous'
+                        });
+                    }
+                }
+            };
+        }
+
+        // Initialize event listeners when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            // Run all tests button
+            document.getElementById('run-all-btn').addEventListener('click',
+                wrapAsyncHandler(runAllTests));
+
+            // Run FS Access tests button
+            document.getElementById('run-fsaccess-btn').addEventListener('click',
+                wrapAsyncHandler(runFsAccessTests));
+
+            // Run AFIO tests button
+            document.getElementById('run-afio-btn').addEventListener('click',
+                wrapAsyncHandler(runAfioTests));
+
+            // Export error report button
+            document.getElementById('export-report-btn').addEventListener('click',
+                wrapAsyncHandler(exportErrorReport));
+
+            // Print report button
+            document.getElementById('print-report-btn').addEventListener('click',
+                wrapAsyncHandler(printErrorReport));
+
+            // Clear console button (synchronous, but wrapped for consistency)
+            document.getElementById('clear-console-btn').addEventListener('click',
+                wrapAsyncHandler(clearConsole));
+
+            console.log('✅ Event listeners initialized');
+        });
+
+        // Initialize
+        console.log('🚀 Integrated Test Runner loaded');
+        console.log('📋 Click "Run All Tests" to begin testing');
+    </script>
+</body>
+</html>

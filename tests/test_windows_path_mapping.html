@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Windows Path Mapping Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .test-section h3 {
+            margin-top: 0;
+        }
+        button {
+            margin: 5px;
+            padding: 10px 15px;
+            cursor: pointer;
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+        #results {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+    </style>
+    <script src="../utils.js"></script>
+    <script src="../VirtualFileService.js"></script>
+    <script src="../WindowsPathMappingService.js"></script>
+    <script src="../FileSystemAccessService.js"></script>
+</head>
+<body>
+    <h1>Windows Path Mapping Test</h1>
+
+    <div class="test-section">
+        <h3>Step 1: Check Support</h3>
+        <button onclick="checkSupport()">Check Browser Support</button>
+        <div id="support-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Step 2: Initialize Services</h3>
+        <button onclick="initializeServices()">Initialize Services</button>
+        <div id="init-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Step 3: Add Windows Path Mapping</h3>
+        <input type="text" id="windows-path" placeholder="C:\Users\John\Documents" style="width: 300px;">
+        <button onclick="addMapping()">Add Mapping</button>
+        <div id="add-mapping-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Step 4: Test Path Resolution</h3>
+        <input type="text" id="test-path" placeholder="C:\Users\John\Documents\test.txt" style="width: 300px;">
+        <button onclick="testPathResolution()">Test Resolution</button>
+        <div id="resolution-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>Step 5: List All Mappings</h3>
+        <button onclick="listMappings()">List All Mappings</button>
+        <button onclick="clearMappings()">Clear All Mappings</button>
+        <div id="mappings-result"></div>
+    </div>
+
+    <div id="results">
+        Ready to test...
+    </div>
+
+    <script>
+        let pathMappingService = null;
+        let fsAccessService = null;
+
+        function log(message, isError = false) {
+            const results = document.getElementById('results');
+            const timestamp = new Date().toLocaleTimeString();
+            const prefix = isError ? '❌ ERROR' : '✓ SUCCESS';
+            results.textContent += `[${timestamp}] ${prefix}: ${message}\n`;
+            results.scrollTop = results.scrollHeight;
+        }
+
+        function checkSupport() {
+            const resultDiv = document.getElementById('support-result');
+
+            try {
+                const isSupported = WindowsPathMappingService.isSupported();
+
+                if (isSupported) {
+                    resultDiv.innerHTML = '<span class="success">✓ File System Access API is supported!</span>';
+                    log('Browser supports File System Access API');
+                } else {
+                    resultDiv.innerHTML = '<span class="error">✗ File System Access API is NOT supported</span>';
+                    log('Browser does not support File System Access API', true);
+                }
+
+                // Platform check
+                const isWindows = __is_windows();
+                resultDiv.innerHTML += `<br>Platform: ${navigator.platform} (Windows: ${isWindows})`;
+                log(`Platform detected: ${navigator.platform}, isWindows: ${isWindows}`);
+
+            } catch (err) {
+                resultDiv.innerHTML = `<span class="error">Error: ${err.message}</span>`;
+                log(`Error checking support: ${err.message}`, true);
+            }
+        }
+
+        async function initializeServices() {
+            const resultDiv = document.getElementById('init-result');
+
+            try {
+                log('Initializing WindowsPathMappingService...');
+                pathMappingService = new WindowsPathMappingService({
+                    autoPrompt: true
+                });
+                await pathMappingService.init();
+
+                log('Initializing FileSystemAccessService...');
+                fsAccessService = new FileSystemAccessService({
+                    autoPrompt: false,
+                    enableWindowsPathMapping: true
+                });
+                await fsAccessService.init();
+
+                resultDiv.innerHTML = '<span class="success">✓ Services initialized successfully</span>';
+                log('All services initialized successfully');
+
+            } catch (err) {
+                resultDiv.innerHTML = `<span class="error">Error: ${err.message}</span>`;
+                log(`Error initializing services: ${err.message}`, true);
+            }
+        }
+
+        async function addMapping() {
+            const resultDiv = document.getElementById('add-mapping-result');
+            const path = document.getElementById('windows-path').value;
+
+            if (!path) {
+                resultDiv.innerHTML = '<span class="error">Please enter a Windows path</span>';
+                return;
+            }
+
+            if (!pathMappingService) {
+                resultDiv.innerHTML = '<span class="error">Please initialize services first</span>';
+                return;
+            }
+
+            try {
+                log(`Adding mapping for: ${path}`);
+                const mapping = await pathMappingService.promptForPath(path);
+
+                if (mapping) {
+                    resultDiv.innerHTML = `<span class="success">✓ Mapping added successfully</span>
+                        <br>Original Path: ${mapping.originalPath}
+                        <br>Normalized Path: ${mapping.normalizedPath}`;
+                    log(`Mapping added: ${mapping.originalPath} -> ${mapping.normalizedPath}`);
+                } else {
+                    resultDiv.innerHTML = '<span class="error">User cancelled directory selection</span>';
+                    log('User cancelled directory selection', true);
+                }
+
+            } catch (err) {
+                resultDiv.innerHTML = `<span class="error">Error: ${err.message}</span>`;
+                log(`Error adding mapping: ${err.message}`, true);
+            }
+        }
+
+        async function testPathResolution() {
+            const resultDiv = document.getElementById('resolution-result');
+            const path = document.getElementById('test-path').value;
+
+            if (!path) {
+                resultDiv.innerHTML = '<span class="error">Please enter a test path</span>';
+                return;
+            }
+
+            if (!pathMappingService) {
+                resultDiv.innerHTML = '<span class="error">Please initialize services first</span>';
+                return;
+            }
+
+            try {
+                log(`Testing path resolution for: ${path}`);
+                const resolved = await pathMappingService.resolveWindowsPath(path);
+
+                resultDiv.innerHTML = `<span class="success">✓ Path resolved successfully</span>
+                    <br>Mapped Base Path: ${resolved.mappedPath}
+                    <br>Relative Path: ${resolved.relativePath || '(root)'}`;
+                log(`Path resolved: ${path} -> ${resolved.mappedPath} + ${resolved.relativePath}`);
+
+            } catch (err) {
+                resultDiv.innerHTML = `<span class="error">Error: ${err.message}</span>`;
+                log(`Error resolving path: ${err.message}`, true);
+            }
+        }
+
+        async function listMappings() {
+            const resultDiv = document.getElementById('mappings-result');
+
+            if (!pathMappingService) {
+                resultDiv.innerHTML = '<span class="error">Please initialize services first</span>';
+                return;
+            }
+
+            try {
+                const mappings = pathMappingService.getAllMappings();
+
+                if (mappings.length === 0) {
+                    resultDiv.innerHTML = '<span>No mappings registered</span>';
+                    log('No mappings found');
+                } else {
+                    let html = '<span class="success">✓ Registered mappings:</span><br>';
+                    mappings.forEach((mapping, index) => {
+                        html += `<br>${index + 1}. ${mapping.originalPath}`;
+                        html += `<br>   Normalized: ${mapping.normalizedPath}`;
+                        html += `<br>   Timestamp: ${new Date(mapping.timestamp).toLocaleString()}`;
+                    });
+                    resultDiv.innerHTML = html;
+                    log(`Found ${mappings.length} mapping(s)`);
+                }
+
+            } catch (err) {
+                resultDiv.innerHTML = `<span class="error">Error: ${err.message}</span>`;
+                log(`Error listing mappings: ${err.message}`, true);
+            }
+        }
+
+        async function clearMappings() {
+            const resultDiv = document.getElementById('mappings-result');
+
+            if (!pathMappingService) {
+                resultDiv.innerHTML = '<span class="error">Please initialize services first</span>';
+                return;
+            }
+
+            if (!confirm('Are you sure you want to clear all mappings?')) {
+                return;
+            }
+
+            try {
+                await pathMappingService.clearAllMappings();
+                resultDiv.innerHTML = '<span class="success">✓ All mappings cleared</span>';
+                log('All mappings cleared successfully');
+
+            } catch (err) {
+                resultDiv.innerHTML = `<span class="error">Error: ${err.message}</span>`;
+                log(`Error clearing mappings: ${err.message}`, true);
+            }
+        }
+
+        // Auto-check support on load
+        window.addEventListener('load', () => {
+            checkSupport();
+        });
+    </script>
+</body>
+</html>

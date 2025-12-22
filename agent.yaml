@@ -1,0 +1,82 @@
+# ============================= IMPORTANT =============================
+# Rename this file to ".bito.yaml" and place it in the root of your repository's source branch.
+# This will override your review settings for this particular repository.
+# For more information, please visit: https://docs.bito.ai/ai-code-reviews-in-git/agent-settings/repo-level-settings
+# =====================================================================
+
+
+# Name and path to review guidelines that you want bito to follow. 
+# These files must exist in your source branch at review time.
+# We accept upto 3 general guidelines and 1 language specific guideline per language.
+custom_guidelines:
+  general:
+    - name: ""
+      path: ""
+  per_language:
+    python:
+      name: ""
+      path: ""
+
+# Run Dependency Check analysis during code reviews. Valid values : true | false
+dependency_check.enabled: true
+
+# Exclude draft PRs from being reviewed automatically. Valid values : true | false
+exclude_draft_pr: true
+
+# Comma-separated file path GLOB patterns to exclude from code reviews.
+# Examples: "*.md, *.yaml, config/*"
+exclude_files: "*.xml, *.json, *.properties, .gitignore, *.yml, *.md"
+
+# Automatically validate pull requests against Jira ticket referenced in PR description, title, or branch name.
+# Jira Integration must be completed from UI for this to work.
+# Valid values: true | false
+functional_validation_enabled: true
+
+# Source branches for which Bito automatically reviews pull requests.
+# Comma-separated GLOB/regex patterns, e.g.: "feature/*, release/*, main"
+include_source_branches: ""
+
+# Target branches for which Bito automatically reviews pull requests.
+# Comma-separated GLOB/regex patterns, e.g.: "feature/*, release/*, main"
+# Use "*" to include all target branches.
+include_target_branches: ""
+
+# List of labels that, if present on a PR/MR, skip automatic review. 
+# Example: "wip, do-not-review, chore, size/*"
+labels_excluded: ""
+
+# Run Linting tools during code reviews. Valid values : true | false
+linters_feedback: true
+
+# Post feedback as 'Request changes' comments during code review.
+# Depending on your Git provider settings, you will have to resolve all comments before merging.
+# For GitHub, this will automatically enable auto-approve for resolved PRs.
+# Valid values: true | false
+post_as_request_changes: true
+
+# Reviews will include a table listing all changed files and implemented changes. Valid values : true | false
+post_changelist: true
+
+# Automatically create summary of changes and append to your existing summary. Valid values : true | false
+post_description: true
+
+# When enabled, Bito will automatically detect and use best-practice guidelines from agent configuration files such as CLAUDE.md, AGENTS.md, GEMINI.md, .cursor/rules, or .windsurf/rules during code reviews.
+# Valid values: true | false
+repo_level_guidelines_enabled: true
+
+# Detects and reports secrets left in code changes. Valid values : true | false
+secret_scanner_feedback: true
+
+# When enabled, Bito will generate interaction diagrams during code reviews to visualize the architecture and impacted components in the submitted changes.
+# Supported for Github and Gitlab.
+# Valid values: true | false
+sequence_diagram_enabled: true
+
+# Run Static Analysis tools during code reviews for providing better feedback. Valid values : true | false
+static_analysis.fb_infer.enabled: true
+
+# Controls verbosity of reviews:
+# - essential: Only critical issues are posted inline; other issues appear in the summary under "Additional issues".
+# - comprehensive: Prioritizes exhaustive feedback.
+# Valid values: essential | comprehensive
+suggestion_mode: "comprehensive"

@@ -1,0 +1,76 @@
+{
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "webextensions": true
+  },
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "script"
+  },
+  "globals": {
+    "globalThis": "readonly",
+    "self": "readonly",
+    "chrome": "readonly",
+    "importScripts": "readonly",
+    "module": "readonly",
+    "GlobalErrorLogger": "readonly",
+    "VirtualFileService": "readonly",
+    "FileSystemAccessService": "readonly",
+    "WindowsPathMappingService": "readonly",
+    "Rijndael": "readonly",
+    "__is_windows": "readonly",
+    "__psep": "readonly",
+    "logInfo": "readonly",
+    "logError": "readonly",
+    "logWarning": "readonly",
+    "afio": "writable",
+    "afioCache": "writable",
+    "Storage": "writable",
+    "context": "writable",
+    "imns": "readonly",
+    "communicator": "readonly",
+    "badge": "readonly",
+    "nm_connector": "readonly",
+    "ErrorLogger": "readonly",
+    "dialogUtils": "readonly",
+    "MacroPlayer": "readonly",
+    "MacroRecorder": "readonly",
+    "VariableManager": "readonly",
+    "MessagingBus": "readonly",
+    "ExecutionStateMachine": "readonly",
+    "FileSyncBridge": "readonly",
+    "CsvParser": "readonly",
+    "SecurityManager": "readonly"
+  },
+  "rules": {
+    "no-eval": "error",
+    "no-new-func": "warn",
+    "no-implied-eval": "error",
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "no-undef": "warn",
+    "no-prototype-builtins": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["background.js"],
+      "parserOptions": {
+        "sourceType": "module"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "node_modules/",
+    "old_file/",
+    "vendor/",
+    "*.txt",
+    "*.md",
+    "samples/",
+    "docs/",
+    "sandbox.js",
+    "sandbox/**",
+    "tests/**",
+    "editor/**",
+    "treeView.js"
+  ]
+}
