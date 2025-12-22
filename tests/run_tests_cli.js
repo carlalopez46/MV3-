@@ -560,7 +560,8 @@ function loadTestSuites() {
         'filesystem_access_test_suite.js',
         'afio_test_suite.js',
         'variable_expansion_test_suite.js',
-        'macro_run_test_suite.js'
+        'macro_run_test_suite.js',
+        'regression_test_suite.js'
     ];
 
     logInfo('Loading test suites...');
@@ -589,7 +590,7 @@ function loadTestSuites() {
 
     // Expose suites placed on the simulated window to the shared sandbox so
     // the CLI runner (executing in the Node context) can access them.
-    const suiteGlobals = ['FileSystemAccessTestSuite', 'AfioTestSuite', 'MacroRunTestSuite'];
+    const suiteGlobals = ['FileSystemAccessTestSuite', 'AfioTestSuite', 'MacroRunTestSuite', 'RegressionTestSuite'];
     suiteGlobals.forEach(name => {
         if (sharedSandbox.window && typeof sharedSandbox.window[name] !== 'undefined') {
             sharedSandbox[name] = sharedSandbox.window[name];
@@ -634,7 +635,7 @@ async function runTests() {
     loadSourceFiles();
     loadTestSuites();
 
-    const { FileSystemAccessTestSuite, AfioTestSuite, VariableExpansionTestSuite, MacroRunTestSuite } = sharedSandbox;
+    const { FileSystemAccessTestSuite, AfioTestSuite, VariableExpansionTestSuite, MacroRunTestSuite, RegressionTestSuite } = sharedSandbox;
 
     function normalizeSuiteResult(rawResult, suiteName) {
         const defaultResults = { passed: 0, failed: 0, skipped: 0 };
@@ -746,6 +747,30 @@ async function runTests() {
                 }
             } else {
                 logWarning('AfioTestSuite not available');
+            }
+        }
+
+        // Run regression tests
+        if (options.suite === 'all' || options.suite === 'regression') {
+            logHeader('Regression Tests');
+
+            if (typeof RegressionTestSuite !== 'undefined') {
+                try {
+                    const regressionResult = normalizeSuiteResult(await RegressionTestSuite.run(), 'RegressionTestSuite');
+                    results.passed += regressionResult.results.passed || 0;
+                    results.failed += regressionResult.results.failed || 0;
+                    results.skipped += regressionResult.results.skipped || 0;
+                    results.errors.push(...regressionResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Regression tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'RegressionTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('RegressionTestSuite not available');
             }
         }
 

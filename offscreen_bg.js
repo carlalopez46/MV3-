@@ -332,16 +332,21 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 if (sendResponse) {
                     sendResponse({ success: false, error: 'Macro already playing', state: 'playing' });
                 }
-                return;
+                return true; // Keep channel open for async response
             }
 
+            // ★CRITICAL: Check and add to playInFlight atomically to prevent race conditions
+            // Two messages arriving within milliseconds could both pass the check otherwise
             if (playInFlight.has(win_id)) {
                 console.warn(`[Offscreen] Ignoring playFile - a play request is already pending for window ${win_id}`);
                 if (sendResponse) {
                     sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
                 }
-                return;
+                return true; // Keep channel open for async response
             }
+            // Add to guard immediately after check to minimize race window
+            playInFlight.add(win_id);
+            console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard (atomic check-and-add)`);
 
             const resolveAbsolutePath = async (path) => {
                 // ★パスクリーニング: "iMacrosMV3-main-main/Macros/" -> "Macros/"
@@ -389,10 +394,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 return ctx.mplayer.play(macro, limits);
             };
 
-            // ★重要: playInFlight への追加は async 関数の開始前に行う
-            // これにより、同時に届いた2つのメッセージの競合状態を防ぐ
-            playInFlight.add(win_id);
-            console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`);
+            // playInFlight.add() is now done atomically with the check above
 
             (async () => {
                 try {
