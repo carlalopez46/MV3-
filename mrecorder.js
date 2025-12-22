@@ -699,7 +699,7 @@ Recorder.prototype.packKeyUpEvent = function (extra) {
     if (keypress_re.test(prv) && pprv.indexOf(keydown_str) == 0) {
         // it is a first key event in a sequence so just collapse three events
         // into one keypress
-        this.packSingleKeyPressEvent(cur, extra, prv, pprv)
+        this.packSingleKeyPressEvent(extra, cur, prv, pprv)
     } else if (prv.indexOf(keydown_str) == 0) {
         // this is most likely a control key
         this.packKeyUpDownEvent(extra, cur, prv, pprv)

@@ -418,15 +418,16 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 if (sendResponse) {
                     sendResponse({ success: false, error: 'Macro already playing', state: 'playing' });
                 }
-                return;
+                return true; // Keep channel open for async response
             }
 
+            // Use isDuplicatePlayStart for comprehensive duplicate detection
             if (isDuplicatePlayStart(win_id, filePath, "playFile")) {
                 console.warn(`[Offscreen] Ignoring playFile - duplicate start detected for window ${win_id}`);
                 if (sendResponse) {
                     sendResponse({ success: false, error: 'Duplicate play request', state: 'starting' });
                 }
-                return false;
+                return true; // Keep channel open for async response
             }
 
             recordPlayStart(win_id, filePath);
@@ -485,6 +486,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 });
             };
 
+            // Send acknowledgment that play has started
             if (sendResponse) {
                 sendResponse({
                     ack: true,

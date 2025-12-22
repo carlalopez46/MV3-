@@ -1539,7 +1539,8 @@ function loadTestSuites() {
         'download_correlation_test_suite.js',
         'recorder_event_forwarding_test_suite.js',
         'panel_play_response_test_suite.js',
-        'macro_run_test_suite.js'
+        'macro_run_test_suite.js',
+        'regression_test_suite.js'
     ];
 
     logInfo('Loading test suites...');
@@ -1578,7 +1579,8 @@ function loadTestSuites() {
         'DedupGuardTestSuite',
         'DownloadCorrelationTestSuite',
         'RecorderEventForwardingTestSuite',
-        'PanelPlayResponseTestSuite'
+        'PanelPlayResponseTestSuite',
+        'RegressionTestSuite'
     ];
     suiteGlobals.forEach(name => {
         if (sharedSandbox.window && typeof sharedSandbox.window[name] !== 'undefined') {
@@ -1634,7 +1636,8 @@ async function runTests() {
         DedupGuardTestSuite,
         DownloadCorrelationTestSuite,
         RecorderEventForwardingTestSuite,
-        PanelPlayResponseTestSuite
+        PanelPlayResponseTestSuite,
+        RegressionTestSuite
     } = sharedSandbox;
 
     function normalizeSuiteResult(rawResult, suiteName) {
@@ -1886,6 +1889,30 @@ async function runTests() {
                 }
             } else {
                 logWarning('AfioTestSuite not available');
+            }
+        }
+
+        // Run regression tests
+        if (options.suite === 'all' || options.suite === 'regression') {
+            logHeader('Regression Tests');
+
+            if (typeof RegressionTestSuite !== 'undefined') {
+                try {
+                    const regressionResult = normalizeSuiteResult(await RegressionTestSuite.run(), 'RegressionTestSuite');
+                    results.passed += regressionResult.results.passed || 0;
+                    results.failed += regressionResult.results.failed || 0;
+                    results.skipped += regressionResult.results.skipped || 0;
+                    results.errors.push(...regressionResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Regression tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'RegressionTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('RegressionTestSuite not available');
             }
         }
 
