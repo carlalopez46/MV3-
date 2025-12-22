@@ -2478,23 +2478,19 @@ MacroPlayer.prototype.ActionTable["prompt"] = function (cmd) {
                 "iMacros Prompt Dialog",
                 { type: "askInput", text: x.text, default: x.defval });
             return p.then(function (result) {
-                console.log('[iMacros PROMPT] Dialog result received:', { result, varnum: x.varnum, varname: x.varname });
                 var retobj = { varnum: x.varnum, varname: x.varname };
                 retobj.value = "";
                 if (!result.canceled) {
                     retobj.value = result.inputValue;
                 }
-                console.log('[iMacros PROMPT] Setting variable:', { varnum: retobj.varnum, varname: retobj.varname, value: retobj.value });
                 if (typeof (retobj.varname) != "undefined") {
                     mplayer.setUserVar(retobj.varname, retobj.value);
                 } else if (typeof (retobj.varnum) != "undefined") {
                     const idx = imns.s2i(retobj.varnum);
-                    console.log('[iMacros PROMPT] Storing in mplayer.vars[' + idx + ']:', retobj.value);
                     mplayer.vars[idx] = retobj.value;
                     // Also update varManager if it exists to ensure getVar() returns the correct value
                     if (mplayer.varManager && typeof mplayer.varManager.setVar === 'function') {
                         mplayer.varManager.setVar('VAR' + idx, retobj.value);
-                        console.log('[iMacros PROMPT] Also stored in varManager as VAR' + idx);
                     }
                 }
                 mplayer.next("PROMPT");
@@ -4239,7 +4235,8 @@ MacroPlayer.prototype.play = function (macro, limits, callback) {
         this.times = macro.times || 1;
         this.currentLoop = macro.startLoop || 1;
         this.cycledReplay = this.times - this.currentLoop > 0;
-        console.log("[MacroPlayer] play() initialized with times:", this.times, "currentLoop:", this.currentLoop, "cycledReplay:", this.cycledReplay, "macro.times:", macro.times);
+        if (Storage.getBool("debug"))
+            console.log("[MacroPlayer] play() initialized with times:", this.times, "currentLoop:", this.currentLoop, "cycledReplay:", this.cycledReplay, "macro.times:", macro.times);
         // debugger should be attached at least once for every page if there is an
         // event command
         this.debuggerAttached = false;
@@ -4371,7 +4368,6 @@ MacroPlayer.prototype.next = function (caller_id) {
 
 
 MacroPlayer.prototype.playNextAction = function (caller_id) {
-    console.log("[MacroPlayer] playNextAction called from:", caller_id, "action_stack.length:", this.action_stack ? this.action_stack.length : 'undefined', "playing:", this.playing);
     if (!this.playing)
         return;
 
@@ -5028,14 +5024,12 @@ MacroPlayer.prototype.getColumnData = function (col) {
 
 // functions to access built-in VARiables
 MacroPlayer.prototype.getVar = function (idx) {
-    console.log('[iMacros getVar] Called with idx:', idx, 'hasVarManager:', !!(this.varManager && typeof this.varManager.getVar === 'function'));
     if (this.varManager && typeof this.varManager.getVar === 'function') {
         let name = idx;
         if (typeof idx !== 'string' || /^\d+$/.test(idx)) {
             name = 'VAR' + imns.s2i(idx);
         }
         const value = this.varManager.getVar(name);
-        console.log('[iMacros getVar] varManager.getVar(' + name + ') returned:', JSON.stringify(value), 'type:', typeof value);
         if (typeof value !== 'undefined') {
             return value === null ? "" : value;
         }
@@ -5043,7 +5037,6 @@ MacroPlayer.prototype.getVar = function (idx) {
 
     var num = typeof idx === "string" ? imns.s2i(idx) : idx;
     const fallbackValue = this.vars[num] || "";
-    console.log('[iMacros getVar] Fallback to this.vars[' + num + ']:', JSON.stringify(fallbackValue));
     return fallbackValue;
 };
 
@@ -5140,7 +5133,6 @@ MacroPlayer.prototype.expandVariables = function (param, eval_id) {
         var t = var_name.match(mplayer.limits.varsRe);
         if (t) {
             const value = mplayer.getVar(t[1]);
-            console.log('[iMacros EXPAND] Expanding ' + var_name + ' -> ' + JSON.stringify(value));
             return value;
         }
 
