@@ -226,6 +226,118 @@
     }
 
     /**
+     * Test: onNavigationErrorOccurred spelling is correct
+     * Bug: Method was misspelled as onNavigationErrorOccured (missing 'r')
+     * Fix: Renamed to onNavigationErrorOccurred in mplayer.js and offscreen_bg.js
+     */
+    function testNavigationErrorMethodSpelling() {
+        const testName = 'onNavigationErrorOccurred spelling is correct';
+
+        let fs, path;
+        try {
+            const requireFn = typeof require !== 'undefined' ? require : null;
+            if (!requireFn) {
+                skip(testName, 'require() not available in this environment');
+                return;
+            }
+            fs = requireFn('fs');
+            path = requireFn('path');
+            const testDir = typeof __dirname !== 'undefined' ? __dirname : '.';
+
+            // Check mplayer.js
+            const mplayerPath = path.join(testDir, '..', 'mplayer.js');
+            const mplayerSource = fs.readFileSync(mplayerPath, 'utf8');
+
+            // Check for correct spelling (should exist)
+            const correctPattern = /onNavigationErrorOccurred/;
+            // Check for typo (should NOT exist)
+            const typoPattern = /onNavigationErrorOccured[^r]/;
+
+            if (typoPattern.test(mplayerSource)) {
+                fail(testName, 'Typo "onNavigationErrorOccured" found in mplayer.js');
+                return;
+            }
+
+            if (!correctPattern.test(mplayerSource)) {
+                fail(testName, 'Correct spelling "onNavigationErrorOccurred" not found in mplayer.js');
+                return;
+            }
+
+            // Check offscreen_bg.js
+            const offscreenPath = path.join(testDir, '..', 'offscreen_bg.js');
+            const offscreenSource = fs.readFileSync(offscreenPath, 'utf8');
+
+            if (typoPattern.test(offscreenSource)) {
+                fail(testName, 'Typo "onNavigationErrorOccured" found in offscreen_bg.js');
+                return;
+            }
+
+            if (!correctPattern.test(offscreenSource)) {
+                fail(testName, 'Correct spelling "onNavigationErrorOccurred" not found in offscreen_bg.js');
+                return;
+            }
+
+            pass(testName, 'Method name is correctly spelled as onNavigationErrorOccurred');
+        } catch (e) {
+            if (e.code === 'MODULE_NOT_FOUND' || e.code === 'ENOENT') {
+                skip(testName, 'Cannot read source files in this environment');
+            } else {
+                fail(testName, `Exception: ${e.message}`);
+            }
+        }
+    }
+
+    /**
+     * Test: PLAY_MACRO handler is NOT in bg.js (Service Worker)
+     * Bug: Both bg.js and offscreen_bg.js had PLAY_MACRO handlers causing duplicate execution
+     * Fix: Removed PLAY_MACRO handler from bg.js; only offscreen_bg.js should handle it
+     */
+    function testPlayMacroHandlerNotInServiceWorker() {
+        const testName = 'PLAY_MACRO handler not in Service Worker (bg.js)';
+
+        let fs, path;
+        try {
+            const requireFn = typeof require !== 'undefined' ? require : null;
+            if (!requireFn) {
+                skip(testName, 'require() not available in this environment');
+                return;
+            }
+            fs = requireFn('fs');
+            path = requireFn('path');
+            const testDir = typeof __dirname !== 'undefined' ? __dirname : '.';
+
+            const bgPath = path.join(testDir, '..', 'bg.js');
+            const bgSource = fs.readFileSync(bgPath, 'utf8');
+
+            // Check for PLAY_MACRO handler pattern
+            // The handler would look like: if (message.type === 'PLAY_MACRO')
+            const handlerPattern = /if\s*\(\s*message\.type\s*===\s*['"]PLAY_MACRO['"]\s*\)/;
+
+            if (handlerPattern.test(bgSource)) {
+                fail(testName, 'PLAY_MACRO handler found in bg.js - should only be in offscreen_bg.js');
+                return;
+            }
+
+            // Verify offscreen_bg.js DOES have the handler
+            const offscreenPath = path.join(testDir, '..', 'offscreen_bg.js');
+            const offscreenSource = fs.readFileSync(offscreenPath, 'utf8');
+
+            if (!handlerPattern.test(offscreenSource)) {
+                fail(testName, 'PLAY_MACRO handler NOT found in offscreen_bg.js - it should be there');
+                return;
+            }
+
+            pass(testName, 'PLAY_MACRO handler correctly located only in offscreen_bg.js');
+        } catch (e) {
+            if (e.code === 'MODULE_NOT_FOUND' || e.code === 'ENOENT') {
+                skip(testName, 'Cannot read source files in this environment');
+            } else {
+                fail(testName, `Exception: ${e.message}`);
+            }
+        }
+    }
+
+    /**
      * Run all regression tests
      */
     function run() {
@@ -243,6 +355,8 @@
         testPlayInFlightGuardLocation();
         testPanelMessageHandlersExist();
         testAsyncHandlerReturnTrue();
+        testNavigationErrorMethodSpelling();
+        testPlayMacroHandlerNotInServiceWorker();
 
         log('');
         log(`Summary: ${results.passed} passed, ${results.failed} failed, ${results.skipped} skipped`);

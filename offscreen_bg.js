@@ -679,7 +679,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     } else if (req.type === 'TAB_DETACHED') {
                         if (recorder && recorder.onDetached) recorder.onDetached(req.tabId, req.detachInfo);
                     } else if (req.type === 'WEB_NAVIGATION_ERROR') {
-                        if (mplayer && mplayer.onNavigationErrorOccured) mplayer.onNavigationErrorOccured(req.details);
+                        if (mplayer && mplayer.onNavigationErrorOccurred) mplayer.onNavigationErrorOccurred(req.details);
                     } else if (req.type === 'WEB_NAVIGATION_COMMITTED') {
                         if (recorder && recorder.onCommitted) recorder.onCommitted(req.details);
                     }

@@ -489,42 +489,9 @@ communicator.registerHandler("run-macro", function (data, tab_id) {
     });
 });
 
-// Listen for PLAY_MACRO message from beforePlay.js
-chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
-    if (message.type === 'PLAY_MACRO') {
-        const { macro, win_id } = message;
-
-        // Ensure context is initialized (handles service worker restart)
-        const ctxPromise = context[win_id] && context[win_id]._initialized
-            ? Promise.resolve(context[win_id])
-            : context.init(win_id);
-
-        ctxPromise.then(ctx => {
-            return getLimits().then(
-                limits => asyncRun(function () {
-                    try {
-                        ctx.mplayer.play(macro, limits);
-                        sendResponse({ success: true });
-                    } catch (err) {
-                        logError("Failed to play macro: " + err.message, {
-                            win_id: win_id,
-                            macro_name: macro.name
-                        });
-                        sendResponse({ success: false, error: err.message });
-                    }
-                })
-            );
-        }).catch(err => {
-            logError("Failed to initialize context or play macro: " + err.message, {
-                win_id: win_id,
-                macro_name: macro.name
-            });
-            sendResponse({ success: false, error: err.message });
-        });
-
-        return true; // Keep message channel open for async response
-    }
-});
+// NOTE: PLAY_MACRO messages are handled by the Offscreen Document (offscreen_bg.js).
+// The MacroPlayer runs in the Offscreen Document context, not the Service Worker.
+// Do not add a PLAY_MACRO handler here to avoid duplicate execution.
 
 // Listen for preference messages
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
