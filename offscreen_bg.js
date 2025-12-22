@@ -8,7 +8,7 @@ worker via explicit messaging.
 
 //
 // Config
-/* global FileSyncBridge, afio, communicator, dialogUtils, sanitizeMacroFilePath, createRecentKeyGuard, isPrivilegedSender */
+/* global FileSyncBridge, afio, communicator, dialogUtils */
 "use strict";
 
 // Virtual filesystem fallback for RUN and related file lookups when the native
@@ -18,31 +18,10 @@ const virtualFileService = typeof VirtualFileService === "function" ? new Virtua
 let vfsReadyPromise = null;
 // Track in-flight play requests per window to avoid duplicate execution.
 const playInFlight = new Set();
-// Token map to prevent stop/start races (and to avoid old requests clearing new ones).
-// Key: windowId (number), Value: requestId (string)
-const playInFlightTokens = new Map();
-// Tracks the most recent stop() time per window to guard against stop→play message
-// reordering (stop delivered before a delayed playFile request).
-const lastStopAtByWindow = new Map();
-const IMACROS_URL_DUPLICATE_WINDOW_MS = 2000;
-const imacrosUrlRunGuard = (typeof createRecentKeyGuard === 'function')
-    ? createRecentKeyGuard({ ttlMs: IMACROS_URL_DUPLICATE_WINDOW_MS, maxKeys: 200 })
-    : null;
-const RUN_MACRO_DUPLICATE_WINDOW_MS = 2000;
-const runMacroStartGuard = (typeof createRecentKeyGuard === 'function')
-    ? createRecentKeyGuard({ ttlMs: RUN_MACRO_DUPLICATE_WINDOW_MS, maxKeys: 300 })
-    : null;
-const PLAY_EXECUTION_DUPLICATE_WINDOW_MS = 15000;
-const playExecutionGuard = (typeof createRecentKeyGuard === 'function')
-    ? createRecentKeyGuard({ ttlMs: PLAY_EXECUTION_DUPLICATE_WINDOW_MS, maxKeys: 500 })
-    : null;
-const playMacroMessageGuard = (typeof createRecentKeyGuard === 'function')
-    ? createRecentKeyGuard({ ttlMs: 10000, maxKeys: 500 })
-    : null;
-const PLAYFILE_DUPLICATE_WINDOW_MS = 2000;
-const playFileStartGuard = (typeof createRecentKeyGuard === 'function')
-    ? createRecentKeyGuard({ ttlMs: PLAYFILE_DUPLICATE_WINDOW_MS, maxKeys: 500 })
-    : null;
+const recentPlayStarts = new Map();
+const DUPLICATE_PLAY_START_WINDOW_MS = 1500;
+const DUPLICATE_PLAY_START_MAX_ENTRIES = 200;
+const DUPLICATE_PLAY_START_PRUNE_AGE_MS = DUPLICATE_PLAY_START_WINDOW_MS * 4;
 const OFFSCREEN_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
 
 if (typeof globalThis.afioCache === "undefined") {
@@ -59,57 +38,6 @@ function createRequestId() {
     return `off-${OFFSCREEN_INSTANCE_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
-function normalizeWinId(value) {
-    if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
-    if (typeof value === 'string') {
-        const trimmed = value.trim();
-        if (!trimmed) return null;
-        const parsed = parseInt(trimmed, 10);
-        if (Number.isInteger(parsed) && parsed > 0) return parsed;
-    }
-    return null;
-}
-
-function hashString(value) {
-    const str = typeof value === 'string' ? value : String(value || '');
-    let hash = 0;
-    for (let i = 0; i < str.length; i += 1) {
-        hash = ((hash << 5) - hash) + str.charCodeAt(i);
-        hash |= 0;
-    }
-    return (hash >>> 0).toString(36);
-}
-
-function normalizeMacroPathForGuard(value) {
-    if (typeof value !== 'string') return '';
-    let path = value.trim();
-    if (!path) return '';
-    path = path.replace(/\\/g, '/');
-    path = path.replace(/^\.\//, '');
-    const lower = path.toLowerCase();
-    const marker = '/macros/';
-    const idx = lower.lastIndexOf(marker);
-    if (idx >= 0) {
-        path = path.slice(idx + 1);
-    }
-    path = path.replace(/\/{2,}/g, '/');
-    try {
-        if (typeof sanitizeMacroFilePath === 'function') {
-            path = sanitizeMacroFilePath(path);
-        }
-    } catch (e) {
-        return '';
-    }
-    return path;
-}
-
-function buildRunMacroGuardKey(winId, macro) {
-    const macroName = macro && typeof macro.name === 'string' ? macro.name.trim() : '';
-    const source = macro && typeof macro.source === 'string' ? macro.source : '';
-    const fingerprint = source ? hashString(source) : '';
-    return `run-macro:${winId}:${macroName}:${fingerprint}`;
-}
-
 console.log('[iMacros Offscreen] Instance ID:', OFFSCREEN_INSTANCE_ID);
 
 function notifyAsyncError(win_id, message) {
@@ -119,6 +47,44 @@ function notifyAsyncError(win_id, message) {
     }
     if (typeof showNotification === 'function') {
         showNotification(win_id, { errorCode: 0, message: message });
+    }
+}
+
+function isDuplicatePlayStart(winId, macroPath, sourceLabel) {
+    if (!winId || !macroPath) {
+        console.debug(`[iMacros Offscreen] Duplicate play start guard skipped (${sourceLabel})`, {
+            winId,
+            macroPath
+        });
+        return false;
+    }
+    const key = `${winId}:${macroPath}`;
+    const now = Date.now();
+    const last = recentPlayStarts.get(key);
+    if (typeof last === 'number' && now - last < DUPLICATE_PLAY_START_WINDOW_MS) {
+        return true;
+    }
+    return false;
+}
+
+function recordPlayStart(winId, macroPath) {
+    if (!winId || !macroPath) {
+        return;
+    }
+    const key = `${winId}:${macroPath}`;
+    const now = Date.now();
+    recentPlayStarts.set(key, now);
+    if (recentPlayStarts.size > DUPLICATE_PLAY_START_MAX_ENTRIES) {
+        for (const [entryKey, timestamp] of recentPlayStarts.entries()) {
+            if (typeof timestamp !== 'number' || now - timestamp > DUPLICATE_PLAY_START_PRUNE_AGE_MS) {
+                recentPlayStarts.delete(entryKey);
+            }
+        }
+        while (recentPlayStarts.size > DUPLICATE_PLAY_START_MAX_ENTRIES) {
+            const oldestKey = recentPlayStarts.keys().next().value;
+            if (!oldestKey) break;
+            recentPlayStarts.delete(oldestKey);
+        }
     }
 }
 
@@ -225,79 +191,32 @@ function onPanelLoaded(panel, panelWindowId) {
 // EVAL Sandbox handling
 const pendingEvalRequests = new Map();
 
-const EXTENSION_ORIGIN = (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.getURL === 'function')
-    ? chrome.runtime.getURL('')
-    : '';
-
-function isOffscreenPrivilegedSender(sender) {
-    try {
-        if (typeof isPrivilegedSender === 'function' && typeof chrome !== 'undefined' && chrome.runtime) {
-            return isPrivilegedSender(sender, chrome.runtime.id, EXTENSION_ORIGIN);
-        }
-    } catch (e) {
-        // ignore
-    }
-    return false;
-}
-
-function getSenderUrl(sender) {
-    if (!sender || typeof sender !== 'object') return '';
-    if (typeof sender.url === 'string' && sender.url) return sender.url;
-    if (sender.tab && typeof sender.tab.url === 'string' && sender.tab.url) return sender.tab.url;
-    return '';
-}
-
 window.addEventListener('message', (event) => {
-    const response = event && event.data;
-    if (!response || !response.requestId || !pendingEvalRequests.has(response.requestId)) {
-        return;
+    const response = event.data;
+    if (response.requestId && pendingEvalRequests.has(response.requestId)) {
+        const sendResponse = pendingEvalRequests.get(response.requestId);
+        pendingEvalRequests.delete(response.requestId);
+        sendResponse(response);
     }
-
-    // Only accept results from the dedicated eval sandbox iframe.
-    const frame = document.getElementById('eval_sandbox');
-    const sandboxWindow = frame && frame.contentWindow;
-    if (!sandboxWindow || event.source !== sandboxWindow) {
-        return;
-    }
-
-    const sendResponse = pendingEvalRequests.get(response.requestId);
-    pendingEvalRequests.delete(response.requestId);
-    sendResponse(response);
 });
 
 // Message listener for Offscreen Document
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (request.target !== 'offscreen') return;
-    if (request.type === 'CHECK_MPLAYER_PAUSED' || request.type === 'PANEL_LOADED' || request.type === 'PANEL_CLOSING') {
-        return false;
-    }
-
-    const senderIsPrivileged = isOffscreenPrivilegedSender(sender);
-    if (!senderIsPrivileged) {
-        console.warn('[iMacros Offscreen] Blocked offscreen-targeted message from unprivileged sender:', {
-            command: request.command,
-            type: request.type,
-            url: getSenderUrl(sender)
-        });
-        if (typeof sendResponse === 'function') {
-            sendResponse({ success: false, error: 'Access denied' });
-        }
-        return false;
-    }
 
     const msgLabel = request.type || request.command;
     if (msgLabel !== 'QUERY_STATE' && msgLabel !== 'TAB_UPDATED') {
         console.log('[iMacros Offscreen] Received message:', msgLabel, request);
     }
 
-		    // ★重要: executeContextMethod を try ブロックの外で定義（スコープ問題の修正）
-		    // この関数は editMacro と CALL_CONTEXT_METHOD の両方から呼び出されるため、
-		    // メッセージリスナーのトップレベルで定義する必要がある
-		    function executeContextMethod(win_id, method, sendResponse, args, requestId, requestMeta) {
-		        if (method === "recorder.start") {
-	            console.log("[Offscreen] Starting recorder...");
-	            const rec = context[win_id].recorder;
-	            if (!rec) {
+    // ★重要: executeContextMethod を try ブロックの外で定義（スコープ問題の修正）
+    // この関数は editMacro と CALL_CONTEXT_METHOD の両方から呼び出されるため、
+    // メッセージリスナーのトップレベルで定義する必要がある
+    function executeContextMethod(win_id, method, sendResponse, args, requestId) {
+        if (method === "recorder.start") {
+            console.log("[Offscreen] Starting recorder...");
+            const rec = context[win_id].recorder;
+            if (!rec) {
                 sendResponse({ success: false, error: `Recorder not initialized for window ${win_id}` });
                 return;
             }
@@ -308,20 +227,40 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 console.error('[Offscreen] Error starting recorder:', e);
                 sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
             }
-		        } else if (method === "stop") {
-		            console.log("[Offscreen] Stopping...");
-		            const stopAt = Date.now();
-		            const clearPlayGuards = (id, at) => {
-		                const numericId = typeof id === 'number' ? id : parseInt(id, 10);
-		                if (!Number.isNaN(numericId)) {
-		                    lastStopAtByWindow.set(numericId, at);
-		                    playInFlight.delete(numericId);
-		                    playInFlightTokens.delete(numericId);
-		                }
-		            };
-		            const stopContext = (ctx, id) => {
-		                let stoppedPlayer = false;
-		                let stoppedRecorder = false;
+        } else if (method === "recorder.saveAs") {
+            const rec = context[win_id].recorder;
+            if (!rec || typeof rec.saveAs !== 'function') {
+                sendResponse({ success: false, error: `Recorder saveAs not available for window ${win_id}` });
+                return;
+            }
+            try {
+                rec.saveAs();
+                sendResponse({ success: true });
+            } catch (e) {
+                console.error('[Offscreen] Error in recorder.saveAs:', e);
+                sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+            }
+        } else if (method === "recorder.capture") {
+            const rec = context[win_id].recorder;
+            if (!rec || typeof rec.capture !== 'function') {
+                sendResponse({ success: false, error: `Recorder capture not available for window ${win_id}` });
+                return;
+            }
+            try {
+                rec.capture();
+                sendResponse({ success: true });
+            } catch (e) {
+                console.error('[Offscreen] Error in recorder.capture:', e);
+                sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
+            }
+        } else if (method === "stop") {
+            console.log("[Offscreen] Stopping...");
+            if (win_id) {
+                playInFlight.delete(win_id);
+            }
+            const stopContext = (ctx, id) => {
+                let stoppedPlayer = false;
+                let stoppedRecorder = false;
                 if (ctx.mplayer) {
                     try {
                         if (typeof ctx.mplayer.stop === 'function') {
@@ -332,37 +271,33 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                         console.error(`[Offscreen] Error stopping mplayer for window ${id}:`, e);
                     }
                 }
-		                if (ctx.recorder) {
-		                    try {
-		                        if (typeof ctx.recorder.stop === 'function') {
-		                            ctx.recorder.stop();
-		                            stoppedRecorder = true;
-		                        }
-		                    } catch (e) {
-		                        console.error(`[Offscreen] Error stopping recorder for window ${id}:`, e);
-		                    }
-		                }
-		                clearPlayGuards(id, stopAt);
-		                return { stoppedPlayer, stoppedRecorder };
-		            };
+                if (ctx.recorder) {
+                    try {
+                        if (typeof ctx.recorder.stop === 'function') {
+                            ctx.recorder.stop();
+                            stoppedRecorder = true;
+                        }
+                    } catch (e) {
+                        console.error(`[Offscreen] Error stopping recorder for window ${id}:`, e);
+                    }
+                }
+                return { stoppedPlayer, stoppedRecorder };
+            };
 
-		            // Always record stop intent for the requested window, even if its context is not yet initialized.
-		            clearPlayGuards(win_id, stopAt);
-
-	            if (context[win_id]) {
-	                const result = stopContext(context[win_id], win_id);
-	                sendResponse({ success: true, ...result });
-	            } else {
+            if (context[win_id]) {
+                const result = stopContext(context[win_id], win_id);
+                sendResponse({ success: true, ...result });
+            } else {
                 console.warn('[Offscreen] Stop target window not found. Scanning all contexts...');
                 const stoppedDetails = [];
-	                for (let id in context) {
-	                    if (Object.hasOwn(context, id) && context[id] && typeof context[id] === 'object') {
-	                        const result = stopContext(context[id], id);
-	                        if (result.stoppedPlayer || result.stoppedRecorder) {
-	                            stoppedDetails.push({ id, ...result });
-	                        }
-	                    }
-	                }
+                for (let id in context) {
+                    if (Object.hasOwn(context, id) && context[id] && typeof context[id] === 'object') {
+                        const result = stopContext(context[id], id);
+                        if (result.stoppedPlayer || result.stoppedRecorder) {
+                            stoppedDetails.push({ id, ...result });
+                        }
+                    }
+                }
                 if (stoppedDetails.length > 0) {
                     sendResponse({ success: true, message: "Stopped active processes in other windows", details: stoppedDetails });
                 } else {
@@ -426,7 +361,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             } else {
                 sendResponse({ success: false, error: 'unpause method not available' });
             }
-	        } else if (method === "mplayer.play") {
+        } else if (method === "mplayer.play") {
             console.log("[Offscreen] Calling mplayer.play with:", args[0].name);
             const mplayer = context[win_id].mplayer;
             if (!mplayer) {
@@ -448,181 +383,97 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 return;
             }
             return true;
-		        } else if (method === "playFile") {
-		            const playRequestId = requestId || createRequestId();
-		            console.log("[Offscreen] playFile request", {
-		                requestId: playRequestId,
-		                windowId: win_id,
-	                offscreenInstanceId: OFFSCREEN_INSTANCE_ID
-	            });
+        } else if (method === "playFile") {
+            const playRequestId = requestId || createRequestId();
+            console.log("[Offscreen] playFile request", {
+                requestId: playRequestId,
+                windowId: win_id,
+                offscreenInstanceId: OFFSCREEN_INSTANCE_ID
+            });
             if (typeof afio === 'undefined') {
                 console.error("[Offscreen] AFIO is not available for playFile");
                 if (sendResponse) {
                     sendResponse({ success: false, error: 'AFIO not available', state: 'idle' });
                 }
                 return false;
-	            }
-	            // ★追加: パスからファイルを読んで再生する
-		            let filePath = args[0];
-		            try {
-		                if (typeof sanitizeMacroFilePath === 'function') {
-		                    filePath = sanitizeMacroFilePath(filePath);
-		                }
-		            } catch (e) {
-	                const errorMsg = e && e.message ? e.message : String(e);
-	                console.warn('[Offscreen] Blocked invalid macro path for playFile:', filePath, errorMsg);
-	                if (sendResponse) {
-	                    sendResponse({ success: false, error: errorMsg, state: 'idle' });
-	                }
-	                return false;
-	            }
-		            const loops = Math.max(1, parseInt(args[1], 10) || 1);
-		            console.log("[Offscreen] Reading and playing file (original path):", filePath, { requestId: playRequestId });
-		            if (Storage.getBool("debug"))
-		                console.log("[Offscreen] Loop count:", loops, "(should be 1 for normal play, >1 for Play Loop)");
-
-		            // Guard against stop→play message reordering: if the user pressed Stop after the play
-		            // request was initiated (requestedAt), but the stop command reached offscreen first,
-		            // ignore this delayed playFile invocation.
-		            const requestedAtRaw = requestMeta && requestMeta.requestedAt;
-		            const requestedAt = (typeof requestedAtRaw === 'number')
-		                ? requestedAtRaw
-		                : (typeof requestedAtRaw === 'string' ? parseInt(requestedAtRaw, 10) : NaN);
-            const lastStopAt = lastStopAtByWindow.get(win_id);
-            if (Number.isFinite(requestedAt) && typeof lastStopAt === 'number' && lastStopAt >= requestedAt) {
-		                console.warn('[Offscreen] Ignoring playFile - stop requested after this play request', {
-		                    win_id,
-		                    requestedAt,
-		                    lastStopAt,
-		                    requestId: playRequestId
-		                });
-		                if (sendResponse) {
-		                    sendResponse({
-		                        success: true,
-		                        ignored: true,
-		                        status: 'ignored',
-		                        message: 'Play request ignored because stop was pressed',
-		                        state: 'idle'
-		                    });
-		                }
-                return false;
             }
+            // ★追加: パスからファイルを読んで再生する
+            let filePath = args[0];
+            const loops = Math.max(1, parseInt(args[1], 10) || 1);
+            console.log("[Offscreen] Reading and playing file (original path):", filePath, { requestId: playRequestId });
+            if (Storage.getBool("debug"))
+                console.log("[Offscreen] Loop count:", loops, "(should be 1 for normal play, >1 for Play Loop)");
 
-            const executionId = requestMeta && requestMeta.executionId;
-            if (executionId && playExecutionGuard) {
-                const execKey = `play-exec:${win_id}:${executionId}`;
-                const dedupeExec = playExecutionGuard(execKey);
-                if (!dedupeExec.allowed) {
-                    console.warn('[Offscreen] Duplicate playFile executionId ignored', {
-                        win_id,
-                        executionId,
-                        ageMs: dedupeExec.ageMs,
-                        ttlMs: dedupeExec.ttlMs,
-                        requestId: playRequestId
-                    });
-                    if (sendResponse) {
-                        sendResponse({
-                            success: true,
-                            ignored: true,
-                            status: 'ignored',
-                            reason: 'duplicate_execution',
-                            message: 'Duplicate play request ignored',
-                            executionId
-                        });
-                    }
-                    return false;
+            if (playInFlight.has(win_id)) {
+                console.warn(`[Offscreen] Ignoring playFile - a play request is already pending for window ${win_id}`);
+                if (sendResponse) {
+                    sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
                 }
+                return false;
             }
 
             const existingContext = context[win_id];
             if (existingContext && existingContext.mplayer && existingContext.mplayer.playing) {
                 console.warn(`[Offscreen] Ignoring playFile - macro already playing for window ${win_id}`);
                 if (sendResponse) {
-                    sendResponse({ success: true, alreadyPlaying: true, state: 'playing' });
+                    sendResponse({ success: false, error: 'Macro already playing', state: 'playing' });
                 }
-                return false;
+                return;
             }
 
-            if (playInFlight.has(win_id)) {
-                console.warn(`[Offscreen] Ignoring playFile - a play request is already pending for window ${win_id}`);
+            if (isDuplicatePlayStart(win_id, filePath, "playFile")) {
+                console.warn(`[Offscreen] Ignoring playFile - duplicate start detected for window ${win_id}`);
                 if (sendResponse) {
-                    sendResponse({ success: true, alreadyPlaying: true, state: 'starting' });
+                    sendResponse({ success: false, error: 'Duplicate play request', state: 'starting' });
                 }
                 return false;
             }
 
-		    if (playFileStartGuard) {
-                const guardPath = normalizeMacroPathForGuard(filePath) || filePath;
-                const key = `playFile:${win_id}:${guardPath}:${loops}`;
-                const dedupe = playFileStartGuard(key);
-                if (!dedupe.allowed) {
-                    console.warn('[Offscreen] Duplicate playFile start ignored', {
-                        win_id,
-                        filePath,
-                        guardPath,
-                        loops,
-                        ageMs: dedupe.ageMs,
-                        ttlMs: dedupe.ttlMs,
-                        requestId: playRequestId
-                    });
-                    if (sendResponse) {
-                        sendResponse({
-                            success: true,
-                            ignored: true,
-                            status: 'ignored',
-                            message: 'Duplicate play request ignored',
-                            ageMs: dedupe.ageMs,
-                            ttlMs: dedupe.ttlMs
-                        });
+            recordPlayStart(win_id, filePath);
+            playInFlight.add(win_id);
+            console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`, { requestId: playRequestId });
+
+            const resolveAbsolutePath = async (path) => {
+                let cleanedPath = path.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
+                if (!cleanedPath.startsWith('/') && !cleanedPath.match(/^[a-zA-Z]:/)) {
+                    if (typeof FileSystemAccessService !== 'undefined' && FileSystemAccessService.getRootPath) {
+                        try {
+                            const rootPath = await FileSystemAccessService.getRootPath();
+                            cleanedPath = `${rootPath}/${cleanedPath}`;
+                        } catch (err) {
+                            console.warn("[Offscreen] Falling back to cleaned relative path");
+                        }
+                    } else {
+                        console.warn("[Offscreen] FileSystemAccessService not available, using path as-is");
                     }
-                    return false;
                 }
-		            }
-
-	            playInFlight.add(win_id);
-	            playInFlightTokens.set(win_id, playRequestId);
-	            console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`, { requestId: playRequestId });
-	
-	            const assertStillCurrentPlay = () => {
-	                if (playInFlightTokens.get(win_id) !== playRequestId) {
-	                    const abortErr = new Error('Play request cancelled');
-	                    abortErr.name = 'AbortError';
-	                    throw abortErr;
-	                }
-	            };
-
-	            const resolveAbsolutePath = async (path) => {
-	                let cleanedPath = path.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
-                // File System Access backend resolves relative paths against the persisted root handle,
-                // and the native backend may also accept relative macro paths. Avoid relying on a
-                // non-existent FileSystemAccessService.getRootPath helper here.
                 return cleanedPath;
             };
 
-	            const readAndPlayFile = async (absolutePath, loops, win_id) => {
-	                assertStillCurrentPlay();
-	                const node = afio.openNode(absolutePath);
-	                const source = await afio.readTextFile(node);
-	                assertStillCurrentPlay();
-	                const macro = {
-	                    source: source,
-	                    name: node.leafName,
-	                    file_id: absolutePath,
-	                    times: loops
-	                };
+            const readAndPlayFile = async (absolutePath, loops, win_id) => {
+                const node = afio.openNode(absolutePath);
+                const source = await afio.readTextFile(node);
+                const macro = {
+                    source: source,
+                    name: node.leafName,
+                    file_id: absolutePath,
+                    times: loops
+                };
 
-	                const ctx = context[win_id] && context[win_id]._initialized
-	                    ? context[win_id]
-	                    : await context.init(win_id);
-	
-	                assertStillCurrentPlay();
+                if (!playInFlight.has(win_id)) {
+                    console.warn(`[Offscreen] playFile aborted before start for window ${win_id} (stop requested)`);
+                    return null;
+                }
 
-	                const limits = await getLimits();
-	                assertStillCurrentPlay();
-	                return new Promise((resolve, reject) => {
-	                    try {
-	                        ctx.mplayer.play(macro, limits, (result) => {
-	                            if (result && result.error) {
+                const ctx = context[win_id] && context[win_id]._initialized
+                    ? context[win_id]
+                    : await context.init(win_id);
+
+                const limits = await getLimits();
+                return new Promise((resolve, reject) => {
+                    try {
+                        ctx.mplayer.play(macro, limits, (result) => {
+                            if (result && result.error) {
                                 reject(new Error(result.error));
                             } else {
                                 resolve(result);
@@ -643,91 +494,49 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 });
             }
 
-	            (async () => {
-	                try {
-	                    assertStillCurrentPlay();
-	                    const absolutePath = await resolveAbsolutePath(filePath);
-	                    assertStillCurrentPlay();
-	                    await readAndPlayFile(absolutePath, loops, win_id);
-	                    console.log("[Offscreen] Macro play completed successfully", { requestId: playRequestId });
-	                    // 注: sendResponseは既に呼び出し済みのため、ここでは呼び出さない
-	                    // マクロ完了の通知は状態変更メッセージを通じてUIに伝達される
-	                } catch (err) {
-	                    if (err && err.name === 'AbortError') {
-	                        console.info('[Offscreen] playFile aborted', { requestId: playRequestId, windowId: win_id });
-	                    } else {
-	                        console.error("[Offscreen] File read/play error:", err, { requestId: playRequestId });
-	                        // ★重要: ファイル読み込みエラー時にUIへ通知
-	                        // mplayer.play()が呼び出される前にエラーが発生した場合、
-	                        // 状態変更コールバックが発火しないため、明示的にUIへ通知する
-	                        const errorMsg = err && err.message ? err.message : String(err);
-	                        notifyAsyncError(win_id, `Error: ${errorMsg}`);
-	                    }
-	                } finally {
-	                    const currentToken = playInFlightTokens.get(win_id);
-	                    const shouldFinalizeUi = currentToken === playRequestId || typeof currentToken === 'undefined';
-	
-	                    // Avoid sending "macroStopped" / badge resets for an old request if a newer play
-	                    // request has already taken ownership (token changed).
-	                    if (shouldFinalizeUi && chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
-	                        chrome.runtime.sendMessage({
-	                            type: "macroStopped",
-	                            win_id: win_id,
-	                            target: "panel"
-	                        });
-	                        chrome.runtime.sendMessage({
-	                            type: 'UPDATE_BADGE',
-	                            method: 'setText',
-	                            winId: win_id,
-	                            arg: ''
-	                        });
-	                    }
-	                    if (shouldFinalizeUi && typeof notifyPanel === 'function') {
-	                        notifyPanel(win_id, "UPDATE_PANEL_VIEWS", {});
-	                    }
-	
-	                    if (currentToken === playRequestId) {
-	                        playInFlightTokens.delete(win_id);
-	                        playInFlight.delete(win_id);
-	                        console.log(`[Offscreen] playFile - Removed ${win_id} from playInFlight guard`, { requestId: playRequestId });
-	                    } else if (typeof currentToken === 'undefined') {
-	                        playInFlight.delete(win_id);
-	                        console.log(`[Offscreen] playFile - Cleared stale playInFlight guard for ${win_id}`, { requestId: playRequestId });
-	                    } else {
-	                        console.log(`[Offscreen] playFile - Guard ownership changed; skipping clear for ${win_id}`, { requestId: playRequestId });
-	                    }
-	                }
-	            })();
-	            return false;
+            (async () => {
+                try {
+                    const absolutePath = await resolveAbsolutePath(filePath);
+                    await readAndPlayFile(absolutePath, loops, win_id);
+                    console.log("[Offscreen] Macro play completed successfully", { requestId: playRequestId });
+                    // 注: sendResponseは既に呼び出し済みのため、ここでは呼び出さない
+                    // マクロ完了の通知は状態変更メッセージを通じてUIに伝達される
+                } catch (err) {
+                    console.error("[Offscreen] File read/play error:", err, { requestId: playRequestId });
+                    // ★重要: ファイル読み込みエラー時にUIへ通知
+                    // mplayer.play()が呼び出される前にエラーが発生した場合、
+                    // 状態変更コールバックが発火しないため、明示的にUIへ通知する
+                    const errorMsg = err && err.message ? err.message : String(err);
+                    notifyAsyncError(win_id, `Error: ${errorMsg}`);
+                } finally {
+                    // ★重要: パネルの状態更新とガード解除を共通化
+                    if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
+                        chrome.runtime.sendMessage({
+                            type: "macroStopped",
+                            win_id: win_id,
+                            target: "panel"
+                        });
+                        chrome.runtime.sendMessage({
+                            type: 'UPDATE_BADGE',
+                            method: 'setText',
+                            winId: win_id,
+                            arg: ''
+                        });
+                    }
+                    // パネルの状態をリセットしてアイドル状態に戻す
+                    if (typeof notifyPanel === 'function') {
+                        notifyPanel(win_id, "UPDATE_PANEL_VIEWS", {});
+                    }
+                    playInFlight.delete(win_id);
+                    console.log(`[Offscreen] playFile - Removed ${win_id} from playInFlight guard`, { requestId: playRequestId });
+                }
+            })();
+            return false;
 
-	        } else if (method === "openEditor") {
-	            let filePath = args[0];
-	            try {
-	                if (typeof sanitizeMacroFilePath === 'function') {
-	                    filePath = sanitizeMacroFilePath(filePath);
-	                }
-	            } catch (e) {
-	                const errorMsg = e && e.message ? e.message : String(e);
-	                console.warn('[Offscreen] Blocked invalid macro path for openEditor:', filePath, errorMsg);
-	                if (sendResponse) {
-	                    sendResponse({ success: false, error: errorMsg, state: 'idle' });
-	                }
-	                return false;
-	            }
-	            filePath = filePath.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
-	            try {
-	                if (typeof sanitizeMacroFilePath === 'function') {
-	                    filePath = sanitizeMacroFilePath(filePath);
-	                }
-	            } catch (e) {
-	                const errorMsg = e && e.message ? e.message : String(e);
-	                console.warn('[Offscreen] Blocked invalid cleaned macro path for openEditor:', filePath, errorMsg);
-	                if (sendResponse) {
-	                    sendResponse({ success: false, error: errorMsg, state: 'idle' });
-	                }
-	                return false;
-	            }
-	            console.log("[Offscreen] Cleaned path for editor:", filePath);
+        } else if (method === "openEditor") {
+            let filePath = args[0];
+            filePath = filePath.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
+            console.log("[Offscreen] Cleaned path for editor:", filePath);
 
             if (sendResponse) {
                 const openRequestId = requestId || createRequestId();
@@ -799,20 +608,10 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
 
     if (request.command === 'panelCreated') {
         const win_id = request.win_id;
-        const assignPanelId = (ctx) => {
-            if (ctx) {
-                ctx.panelId = request.panelId;
-            }
-            if (sendResponse) sendResponse({ success: true });
-        };
         if (context[win_id]) {
-            assignPanelId(context[win_id]);
-            return true;
+            context[win_id].panelId = request.panelId;
         }
-        context.init(win_id).then(assignPanelId).catch((err) => {
-            console.error('[iMacros MV3] Failed to init context for panelCreated:', err);
-            if (sendResponse) sendResponse({ success: false, error: err && err.message ? err.message : String(err) });
-        });
+        if (sendResponse) sendResponse({ success: true });
         return true;
     }
 
@@ -832,22 +631,13 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (['DOWNLOAD_CREATED', 'DOWNLOAD_CHANGED'].includes(request.type)) {
         const targetWinIds = request.win_id ? [request.win_id] : Object.keys(context);
         for (let win_id of targetWinIds) {
-            win_id = normalizeWinId(win_id);
-            if (win_id === null) continue;
+            win_id = parseInt(win_id);
             if (context[win_id]) {
                 const mplayer = context[win_id].mplayer;
-                const recorder = context[win_id].recorder;
                 try {
                     if (request.type === 'DOWNLOAD_CREATED') {
                         if (mplayer && mplayer.onDownloadCreated) {
                             mplayer.onDownloadCreated(request.downloadItem);
-                        }
-                        if (recorder && typeof recorder.onDownloadCreated === 'function') {
-                            recorder.onDownloadCreated(request.downloadItem, {
-                                win_id: win_id,
-                                tab_id: request.tab_id,
-                                source: 'sw_forwarded'
-                            });
                         }
                     } else if (request.type === 'DOWNLOAD_CHANGED') {
                         if (mplayer && mplayer.onDownloadChanged) {
@@ -863,90 +653,37 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         return true;
     }
 
-    // Tab/navigation events (forwarded from Service Worker).
+    // Tab events
     if (['TAB_UPDATED', 'TAB_ACTIVATED', 'TAB_CREATED', 'TAB_REMOVED', 'TAB_MOVED', 'TAB_ATTACHED', 'TAB_DETACHED', 'WEB_NAVIGATION_ERROR', 'WEB_NAVIGATION_COMMITTED'].includes(request.type)) {
-        const resolveTargetWinIds = (req) => {
-            const ids = [];
-            const pushId = (value) => {
-                const id = normalizeWinId(value);
-                if (id === null) return;
-                if (!ids.includes(id)) ids.push(id);
-            };
-
-            // Explicit routing hint (e.g., forwarded by Service Worker).
-            pushId(req.win_id);
-
-            // Derive windowId from event payload when possible to avoid broadcasting.
-            if (ids.length === 0) {
-                switch (req.type) {
-                    case 'TAB_UPDATED':
-                        pushId(req.tab && req.tab.windowId);
-                        break;
-                    case 'TAB_ACTIVATED':
-                        pushId(req.activeInfo && req.activeInfo.windowId);
-                        break;
-                    case 'TAB_CREATED':
-                        pushId(req.tab && req.tab.windowId);
-                        break;
-                    case 'TAB_REMOVED':
-                        pushId(req.removeInfo && req.removeInfo.windowId);
-                        break;
-                    case 'TAB_MOVED':
-                        pushId(req.moveInfo && req.moveInfo.windowId);
-                        break;
-                    case 'TAB_ATTACHED':
-                        pushId(req.attachInfo && req.attachInfo.newWindowId);
-                        break;
-                    case 'TAB_DETACHED':
-                        pushId(req.detachInfo && req.detachInfo.oldWindowId);
-                        break;
-                    default:
-                        break;
+        for (let win_id in context) {
+            if (context[win_id]) {
+                const mplayer = context[win_id].mplayer;
+                const recorder = context[win_id].recorder;
+                const req = request;
+                try {
+                    if (req.type === 'TAB_UPDATED') {
+                        if (mplayer && mplayer.onTabUpdated) mplayer.onTabUpdated(req.tabId, req.changeInfo, req.tab);
+                    } else if (req.type === 'TAB_ACTIVATED') {
+                        if (mplayer && mplayer.onTabActivated) mplayer.onTabActivated(req.activeInfo);
+                        if (recorder && recorder.onActivated) recorder.onActivated(req.activeInfo);
+                    } else if (req.type === 'TAB_CREATED') {
+                        if (recorder && recorder.onCreated) recorder.onCreated(req.tab);
+                    } else if (req.type === 'TAB_REMOVED') {
+                        if (recorder && recorder.onRemoved) recorder.onRemoved(req.tabId);
+                    } else if (req.type === 'TAB_MOVED') {
+                        if (recorder && recorder.onMoved) recorder.onMoved(req.tabId, req.moveInfo);
+                    } else if (req.type === 'TAB_ATTACHED') {
+                        if (recorder && recorder.onAttached) recorder.onAttached(req.tabId, req.attachInfo);
+                    } else if (req.type === 'TAB_DETACHED') {
+                        if (recorder && recorder.onDetached) recorder.onDetached(req.tabId, req.detachInfo);
+                    } else if (req.type === 'WEB_NAVIGATION_ERROR') {
+                        if (mplayer && mplayer.onNavigationErrorOccured) mplayer.onNavigationErrorOccured(req.details);
+                    } else if (req.type === 'WEB_NAVIGATION_COMMITTED') {
+                        if (recorder && recorder.onCommitted) recorder.onCommitted(req.details);
+                    }
+                } catch (e) {
+                    console.error(`[iMacros Offscreen] Error handling ${req.type} for win_id ${win_id}:`, e);
                 }
-            }
-
-            if (ids.length > 0) return ids;
-
-            // Fallback: broadcast to all initialized contexts.
-            return Object.keys(context)
-                .map((key) => parseInt(key, 10))
-                .filter((id) => Number.isInteger(id));
-        };
-
-        const targetWinIds = resolveTargetWinIds(request);
-        for (let win_id of targetWinIds) {
-            win_id = normalizeWinId(win_id);
-            if (win_id === null) continue;
-            const ctx = context[win_id];
-            if (!ctx) continue;
-
-            const mplayer = ctx.mplayer;
-            const recorder = ctx.recorder;
-            const req = request;
-            try {
-                if (req.type === 'TAB_UPDATED') {
-                    if (mplayer && mplayer.onTabUpdated) mplayer.onTabUpdated(req.tabId, req.changeInfo, req.tab);
-                    if (recorder && recorder.recording && recorder.onUpdated) recorder.onUpdated(req.tabId, req.changeInfo, req.tab);
-                } else if (req.type === 'TAB_ACTIVATED') {
-                    if (mplayer && mplayer.onTabActivated) mplayer.onTabActivated(req.activeInfo);
-                    if (recorder && recorder.recording && recorder.onActivated) recorder.onActivated(req.activeInfo);
-                } else if (req.type === 'TAB_CREATED') {
-                    if (recorder && recorder.recording && recorder.onCreated) recorder.onCreated(req.tab);
-                } else if (req.type === 'TAB_REMOVED') {
-                    if (recorder && recorder.recording && recorder.onRemoved) recorder.onRemoved(req.tabId);
-                } else if (req.type === 'TAB_MOVED') {
-                    if (recorder && recorder.recording && recorder.onMoved) recorder.onMoved(req.tabId, req.moveInfo);
-                } else if (req.type === 'TAB_ATTACHED') {
-                    if (recorder && recorder.recording && recorder.onAttached) recorder.onAttached(req.tabId, req.attachInfo);
-                } else if (req.type === 'TAB_DETACHED') {
-                    if (recorder && recorder.recording && recorder.onDetached) recorder.onDetached(req.tabId, req.detachInfo);
-                } else if (req.type === 'WEB_NAVIGATION_ERROR') {
-                    if (mplayer && mplayer.onNavigationErrorOccured) mplayer.onNavigationErrorOccured(req.details);
-                } else if (req.type === 'WEB_NAVIGATION_COMMITTED') {
-                    if (recorder && recorder.recording && recorder.onCommitted) recorder.onCommitted(req.details);
-                }
-            } catch (e) {
-                console.error(`[iMacros Offscreen] Error handling ${req.type} for win_id ${win_id}:`, e);
             }
         }
         if (sendResponse) sendResponse({ success: true });
@@ -977,125 +714,26 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         return true;
     }
 
-		    if (request.command === 'runMacroByUrl') {
-		        let macroPath = request.macroPath;
-		        try {
-		            if (typeof sanitizeMacroFilePath === 'function') {
-		                macroPath = sanitizeMacroFilePath(macroPath);
-		            }
-		        } catch (e) {
-		            const errorMsg = e && e.message ? e.message : String(e);
-		            console.warn('[iMacros Offscreen] Blocked invalid macroPath in runMacroByUrl:', macroPath, errorMsg);
-		            if (sendResponse) {
-		                sendResponse({ success: false, error: errorMsg });
-		            }
-		            return false;
-		        }
-		        const rawWindowId = request.windowId;
-		        const windowId = (typeof rawWindowId === 'number')
-		            ? rawWindowId
-		            : (typeof rawWindowId === 'string' ? parseInt(rawWindowId, 10) : NaN);
-		        const requestId = request.requestId || createRequestId();
+    if (request.command === 'runMacroByUrl') {
+        const macroPath = request.macroPath;
+        const windowId = request.windowId;
+        const requestId = request.requestId || createRequestId();
 
-		        if (!Number.isInteger(windowId)) {
-		            console.warn('[iMacros Offscreen] runMacroByUrl missing/invalid windowId:', rawWindowId, { requestId });
-		            if (sendResponse) {
-		                sendResponse({ success: false, error: 'Invalid windowId', requestId });
-		            }
-		            return false;
-		        }
-
-		        // Guard against stop→runMacroByUrl message reordering.
-		        const requestedAtRaw = request.requestedAt;
-		        const requestedAt = (typeof requestedAtRaw === 'number')
-		            ? requestedAtRaw
-		            : (typeof requestedAtRaw === 'string' ? parseInt(requestedAtRaw, 10) : NaN);
-		        const lastStopAt = lastStopAtByWindow.get(windowId);
-		        if (Number.isFinite(requestedAt) && typeof lastStopAt === 'number' && lastStopAt >= requestedAt) {
-		            console.warn('[iMacros Offscreen] Ignoring runMacroByUrl - stop requested after this run request', {
-		                requestId,
-		                windowId,
-		                requestedAt,
-		                lastStopAt,
-		                macroPath
-		            });
-		            if (sendResponse) {
-		                sendResponse({
-		                    ack: true,
-		                    success: true,
-		                    ignored: true,
-		                    status: 'ignored',
-		                    reason: 'stop_after_request',
-		                    requestId
-		                });
-		            }
-		            return false;
-		        }
-
-	        console.log('[iMacros Offscreen] runMacroByUrl:', macroPath, {
-	            requestId,
-	            windowId,
-	            offscreenInstanceId: OFFSCREEN_INSTANCE_ID
+        console.log('[iMacros Offscreen] runMacroByUrl:', macroPath, {
+            requestId,
+            windowId,
+            offscreenInstanceId: OFFSCREEN_INSTANCE_ID
         });
-
-        if (request && request.source === 'imacros_url' && imacrosUrlRunGuard) {
-            const tabId = typeof request.tabId === 'number' ? request.tabId : 'na';
-            const guardPath = normalizeMacroPathForGuard(macroPath) || macroPath;
-            const key = `imacros-url:${tabId}:${windowId}:${guardPath}`;
-            const dedupe = imacrosUrlRunGuard(key);
-            if (!dedupe.allowed) {
-                console.warn('[iMacros Offscreen] Duplicate imacros_url run suppressed', {
-                    requestId,
-                    tabId,
-                    windowId,
-                    macroPath,
-                    guardPath,
-                    ageMs: dedupe.ageMs
-                });
-                if (sendResponse) {
-                    sendResponse({
-                        ack: true,
-                        success: true,
-                        ignored: true,
-                        status: 'ignored',
-                        reason: 'duplicate_imacros_url',
-                        requestId: requestId
-                    });
-                }
-                return false;
-            }
-        }
 
         if (playInFlight.has(windowId)) {
             if (sendResponse) sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
             return false;
         }
 
-        if (playFileStartGuard) {
-            const guardPath = normalizeMacroPathForGuard(macroPath) || macroPath;
-            const key = `playFile:${windowId}:${guardPath}:1`;
-            const dedupe = playFileStartGuard(key);
-            if (!dedupe.allowed) {
-                console.warn('[iMacros Offscreen] Duplicate runMacroByUrl suppressed', {
-                    requestId,
-                    windowId,
-                    macroPath,
-                    guardPath,
-                    ageMs: dedupe.ageMs,
-                    ttlMs: dedupe.ttlMs
-                });
-                if (sendResponse) {
-                    sendResponse({
-                        ack: true,
-                        success: true,
-                        ignored: true,
-                        status: 'ignored',
-                        reason: 'duplicate',
-                        requestId: requestId
-                    });
-                }
-                return false;
-            }
+        if (isDuplicatePlayStart(windowId, macroPath, "runMacroByUrl")) {
+            console.warn(`[iMacros Offscreen] Ignoring runMacroByUrl - duplicate start detected for window ${windowId}`);
+            if (sendResponse) sendResponse({ success: false, error: 'Duplicate runMacroByUrl request', state: 'starting' });
+            return false;
         }
 
         if (typeof afio === 'undefined') {
@@ -1104,23 +742,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             return false;
         }
 
-	        playInFlight.add(windowId);
-	        playInFlightTokens.set(windowId, requestId);
-	        console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
-	
-	        const clearRunMacroGuards = (reason) => {
-	            if (playInFlightTokens.get(windowId) === requestId) {
-	                playInFlightTokens.delete(windowId);
-	                playInFlight.delete(windowId);
-	                console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (${reason})`, { requestId });
-	            } else {
-	                console.log(`[iMacros Offscreen] runMacroByUrl - Guard ownership changed; skipping clear for ${windowId} (${reason})`, { requestId });
-	            }
-	        };
-
-	        if (!context[windowId]) {
-	            context[windowId] = {};
-	        }
+        if (!context[windowId]) {
+            context[windowId] = {};
+        }
 
         if (context[windowId].mplayer && context[windowId].mplayer.playing) {
             const mplayer = context[windowId].mplayer;
@@ -1139,23 +763,29 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                         message: 'Macro queued via RUN command'
                     });
                 }
-	            } catch (e) {
-	                clearRunMacroGuards('queue error');
-	                if (sendResponse) {
-	                    sendResponse({
-	                        ack: false,
+            } catch (e) {
+                playInFlight.delete(windowId);
+                console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (queue error)`, { requestId });
+                if (sendResponse) {
+                    sendResponse({
+                        ack: false,
                         success: false,
                         error: e.message,
                         requestId: requestId
                     });
                 }
                 return false;
-	            }
-	            if (queued) {
-	                clearRunMacroGuards('queued');
-	            }
-	            return false;
-	        }
+            }
+            if (queued) {
+                playInFlight.delete(windowId);
+                console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (queued)`, { requestId });
+            }
+            return false;
+        }
+
+        recordPlayStart(windowId, macroPath);
+        playInFlight.add(windowId);
+        console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
 
         if (sendResponse) {
             sendResponse({
@@ -1167,23 +797,19 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
         // NOTE: Completion/errors are logged asynchronously; caller should rely on macro state updates.
 
-	        afio.getDefaultDir("savepath").then(function (dir) {
-	            let fullPath = macroPath;
-	            if (!__is_full_path(macroPath)) {
-	                dir.append(macroPath);
-	                fullPath = dir.path;
+        afio.getDefaultDir("savepath").then(function (dir) {
+            let fullPath = macroPath;
+            if (!__is_full_path(macroPath)) {
+                dir.append(macroPath);
+                fullPath = dir.path;
             }
             const node = afio.openNode(fullPath);
             return node.exists().then(function (exists) {
                 if (!exists) throw new Error('Macro file not found: ' + fullPath);
-	                return afio.readTextFile(node).then(function (source) {
-	                    if (playInFlightTokens.get(windowId) !== requestId) {
-	                        console.warn('[iMacros Offscreen] runMacroByUrl aborted before play (token changed)', { requestId, windowId, macroPath });
-	                        return;
-	                    }
-	                    const macro = {
-	                        name: node.leafName || macroPath,
-	                        source: source,
+                return afio.readTextFile(node).then(function (source) {
+                    const macro = {
+                        name: node.leafName || macroPath,
+                        source: source,
                         file_id: fullPath,
                         times: 1,
                         startLoop: 1
@@ -1191,22 +817,28 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     if (!context[windowId].mplayer) {
                         context[windowId].mplayer = new MacroPlayer(windowId);
                     }
-	                    const mplayer = context[windowId].mplayer;
-	                    const limits = { maxVariables: 'unlimited', loops: 'unlimited' };
-	                    mplayer.play(macro, limits, function () {
-	                        console.log('[iMacros Offscreen] Macro execution completed:', macroPath, { requestId });
-	                        // ★重要: 実行完了後にガードをクリア
-	                        clearRunMacroGuards('completed');
-	                    });
-	                });
-	            });
-	        }).catch(function (e) {
-	            console.error('[iMacros Offscreen] Error loading macro:', e, { requestId });
-	            // ★重要: エラー時もガードをクリア
-	            clearRunMacroGuards('error');
-	            const errorMsg = e && e.message ? e.message : String(e);
-	            notifyAsyncError(windowId, `Error loading macro: ${errorMsg}`);
-	        });
+                    if (!playInFlight.has(windowId)) {
+                        console.warn(`[iMacros Offscreen] runMacroByUrl aborted before start for window ${windowId} (stop requested)`, { requestId });
+                        return;
+                    }
+                    const mplayer = context[windowId].mplayer;
+                    const limits = { maxVariables: 'unlimited', loops: 'unlimited' };
+                    mplayer.play(macro, limits, function () {
+                        console.log('[iMacros Offscreen] Macro execution completed:', macroPath, { requestId });
+                        // ★重要: 実行完了後にガードをクリア
+                        playInFlight.delete(windowId);
+                        console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (completed)`, { requestId });
+                    });
+                });
+            });
+        }).catch(function (e) {
+            console.error('[iMacros Offscreen] Error loading macro:', e, { requestId });
+            // ★重要: エラー時もガードをクリア
+            playInFlight.delete(windowId);
+            const errorMsg = e && e.message ? e.message : String(e);
+            notifyAsyncError(windowId, `Error loading macro: ${errorMsg}`);
+            console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (error)`, { requestId });
+        });
 
         return false;
     }
@@ -1266,21 +898,17 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             return true;
         }
 
-	        if (request.type === 'CALL_CONTEXT_METHOD') {
-	            const win_id = normalizeWinId(request.win_id);
-	            const objectPath = request.objectPath;
-	            const methodName = request.methodName;
-	            const args = request.args || [];
-	            try {
-	                if (win_id === null) {
-	                    sendResponse({ success: false, error: 'Invalid win_id' });
-	                    return true;
-	                }
-	                if (!context[win_id]) {
-	                    sendResponse({ success: false, error: `Context not found for window ${win_id}` });
-	                    return true;
-	                }
-	                const obj = context[win_id][objectPath];
+        if (request.type === 'CALL_CONTEXT_METHOD') {
+            const win_id = request.win_id;
+            const objectPath = request.objectPath;
+            const methodName = request.methodName;
+            const args = request.args || [];
+            try {
+                if (!context[win_id]) {
+                    sendResponse({ success: false, error: `Context not found for window ${win_id}` });
+                    return true;
+                }
+                const obj = context[win_id][objectPath];
                 if (!obj) {
                     sendResponse({ success: false, error: `Object ${objectPath} not found in context` });
                     return true;
@@ -1305,29 +933,25 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             return true;
         }
 
-	        // ★追加: command形式のCALL_CONTEXT_METHOD処理
-		        if (request.command === 'CALL_CONTEXT_METHOD') {
-		            const win_id = normalizeWinId(request.win_id);
-		            const method = request.method;
-		            try {
-		                if (win_id === null) {
-		                    sendResponse({ success: false, error: 'Invalid win_id' });
-		                    return true;
-		                }
-		                if (!context[win_id]) {
-		                    context.init(win_id).then(() => {
-		                        executeContextMethod(win_id, method, sendResponse, request.args, request.requestId, request);
-		                    }).catch(err => {
-		                        sendResponse({ success: false, error: `Failed to initialize context: ${err.message || String(err)}` });
-	                    });
-	                    return true;
-	                }
-	                return executeContextMethod(win_id, method, sendResponse, request.args, request.requestId, request);
-	            } catch (err) {
-	                sendResponse({ success: false, error: err.message || String(err) });
-	            }
-	            return true;
-	        }
+        // ★追加: command形式のCALL_CONTEXT_METHOD処理
+        if (request.command === 'CALL_CONTEXT_METHOD') {
+            const win_id = request.win_id;
+            const method = request.method;
+            try {
+                if (!context[win_id]) {
+                    context.init(win_id).then(() => {
+                        executeContextMethod(win_id, method, sendResponse, request.args, request.requestId);
+                    }).catch(err => {
+                        sendResponse({ success: false, error: `Failed to initialize context: ${err.message || String(err)}` });
+                    });
+                    return true;
+                }
+                return executeContextMethod(win_id, method, sendResponse, request.args, request.requestId);
+            } catch (err) {
+                sendResponse({ success: false, error: err.message || String(err) });
+            }
+            return true;
+        }
 
         if (request.type === 'SAVE_MACRO') {
             const saveWinId = request.win_id || request.winId;
@@ -1407,18 +1031,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             return true;
         }
 
-	        if (request.type === 'GET_RECORDER_STATE') {
-	            const win_id = normalizeWinId(request.win_id);
-	            try {
-	                if (win_id === null) {
-	                    sendResponse({ success: false, error: 'Invalid win_id' });
-	                    return true;
-	                }
-	                if (!context[win_id] || !context[win_id].recorder) {
-	                    sendResponse({ success: false, error: `Recorder not found for window ${win_id}` });
-	                    return true;
-	                }
-	                const recorder = context[win_id].recorder;
+        if (request.type === 'GET_RECORDER_STATE') {
+            const win_id = request.win_id;
+            try {
+                if (!context[win_id] || !context[win_id].recorder) {
+                    sendResponse({ success: false, error: `Recorder not found for window ${win_id}` });
+                    return true;
+                }
+                const recorder = context[win_id].recorder;
                 sendResponse({
                     success: true,
                     recording: recorder.recording || false,
@@ -1967,20 +1587,6 @@ communicator.registerHandler("run-macro", function (data, tab_id) {
             return;
         }
         var w_id = t.windowId;
-        const macroData = data && typeof data === 'object' ? data : {};
-        if (runMacroStartGuard) {
-            const guardKey = buildRunMacroGuardKey(w_id, macroData);
-            const dedupe = runMacroStartGuard(guardKey);
-            if (!dedupe.allowed) {
-                console.warn('[iMacros Offscreen] Duplicate run-macro ignored', {
-                    windowId: w_id,
-                    macroName: macroData.name,
-                    ageMs: dedupe.ageMs,
-                    ttlMs: dedupe.ttlMs
-                });
-                return;
-            }
-        }
 
         // Ensure context is initialized before processing
         var contextPromise = context[w_id] && context[w_id]._initialized
@@ -2012,32 +1618,7 @@ communicator.registerHandler("run-macro", function (data, tab_id) {
 // Listen for PLAY_MACRO message from beforePlay.js
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     if (message.type === 'PLAY_MACRO') {
-        if (!isOffscreenPrivilegedSender(sender)) {
-            console.warn('[iMacros Offscreen] Blocked PLAY_MACRO from unprivileged sender:', {
-                url: getSenderUrl(sender)
-            });
-            if (typeof sendResponse === 'function') {
-                sendResponse({ success: false, error: 'Access denied' });
-            }
-            return false;
-        }
-
         const { macro, win_id } = message;
-        const executionId = message.executionId;
-
-        if (executionId && playMacroMessageGuard) {
-            const key = `PLAY_MACRO:${win_id}:${executionId}`;
-            const dedupe = playMacroMessageGuard(key);
-            if (!dedupe.allowed) {
-                console.warn('[iMacros Offscreen] Duplicate PLAY_MACRO ignored', {
-                    win_id,
-                    executionId,
-                    ageMs: dedupe.ageMs
-                });
-                sendResponse({ success: true, ignored: true, reason: 'duplicate' });
-                return false;
-            }
-        }
 
         // Ensure context is initialized (handles service worker restart)
         const ctxPromise = context[win_id] && context[win_id]._initialized
@@ -2073,20 +1654,6 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 
 // Listen for preference messages
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
-    if (message.type === 'GET_PREFERENCE' || message.type === 'SET_PREFERENCE') {
-        if (!isOffscreenPrivilegedSender(sender)) {
-            console.warn('[iMacros Offscreen] Blocked preference message from unprivileged sender:', {
-                type: message.type,
-                key: message.key,
-                url: getSenderUrl(sender)
-            });
-            if (typeof sendResponse === 'function') {
-                sendResponse({ success: false, error: 'Access denied' });
-            }
-            return true;
-        }
-    }
-
     if (message.type === 'GET_PREFERENCE') {
         try {
             let value;
@@ -2283,51 +1850,22 @@ globalScope.edit = function (macro, overwrite, line) {
     // (fires after t.html?pipe=<pipe> page is loaded)
     chrome.runtime.onMessage.addListener(
         function (req, sender, sendResponse) {
-            const senderIsPrivileged = isOffscreenPrivilegedSender(sender);
-            const senderUrl = getSenderUrl(sender);
-            const senderIsFileScheme = typeof senderUrl === 'string' && senderUrl.startsWith('file:');
-
             // clean up request
             if (req.command == "restart-server") {
-                const pipe = typeof req.pipe === 'string' ? req.pipe.replace(/\0/g, '').trim() : '';
-
-                // SECURITY: Allow restart-server only from trusted extension contexts or the
-                // dedicated file:// SI listener page.
-                if (!senderIsPrivileged && !senderIsFileScheme) {
-                    console.warn('[iMacros Offscreen] Blocked restart-server from untrusted sender:', senderUrl);
-                    sendResponse({ status: "OK", ignored: true });
-                    return true;
-                }
-
-                // Validate pipe string to avoid pathological inputs.
-                if (!pipe || pipe.length > 4096) {
-                    console.warn('[iMacros Offscreen] Ignoring restart-server with invalid pipe:', {
-                        senderUrl,
-                        length: pipe ? pipe.length : 0
-                    });
-                    sendResponse({ status: "OK", ignored: true });
-                    return true;
-                }
-
                 // Note: Double-restart is avoided by checking if currentPipe differs from req.pipe.
                 // Only restart the server if the pipe name has changed.
                 sendResponse({ status: "OK" });
-                if (nm_connector.currentPipe != pipe) {
+                if (nm_connector.currentPipe != req.pipe) {
                     nm_connector.stopServer();
                     if (Storage.getBool("debug"))
-                        console.info("Restarting server, pipe=" + pipe);
-                    nm_connector.startServer(pipe);
-                    nm_connector.currentPipe = pipe;
+                        console.info("Restarting server, pipe=" + req.pipe);
+                    nm_connector.startServer(req.pipe);
+                    nm_connector.currentPipe = req.pipe;
                 }
                 return true; // Required for async response
             }
             // MV3: Handle getDialogArgs request from editor window
             else if (req.command == "getDialogArgs") {
-                if (!senderIsPrivileged) {
-                    console.warn('[iMacros Offscreen] Blocked getDialogArgs from unprivileged sender:', senderUrl);
-                    sendResponse({ success: false, error: "Access denied" });
-                    return true;
-                }
                 var win_id = req.win_id;
                 if (win_id != null &&
                     typeof dialogUtils !== "undefined" &&
@@ -2347,11 +1885,6 @@ globalScope.edit = function (macro, overwrite, line) {
             }
             // MV3: Handle setDialogArgs request from editor window
             else if (req.command == "setDialogArgs") {
-                if (!senderIsPrivileged) {
-                    console.warn('[iMacros Offscreen] Blocked setDialogArgs from unprivileged sender:', senderUrl);
-                    sendResponse({ success: false, error: "Access denied" });
-                    return true;
-                }
                 var targetWinId = req.win_id;
                 var dialogArgs = req.args;
                 if (targetWinId != null &&
@@ -2375,11 +1908,6 @@ globalScope.edit = function (macro, overwrite, line) {
             }
             // MV3: Handle save request from editor window
             else if (req.command == "save") {
-                if (!senderIsPrivileged) {
-                    console.warn('[iMacros Offscreen] Blocked save from unprivileged sender:', senderUrl);
-                    sendResponse({ success: false, error: "Access denied" });
-                    return true;
-                }
                 var save_data = req.data;
                 var overwrite = req.overwrite;
                 if (save_data && typeof save === "function") {
@@ -2458,56 +1986,17 @@ if (chrome.notifications && chrome.notifications.onClicked) {
 // remove panel when its parent window is closed
 if (typeof chrome.windows !== 'undefined' && chrome.windows.onRemoved) {
     chrome.windows.onRemoved.addListener(function (win_id) {
-        const normalizedWinId = normalizeWinId(win_id);
-        if (normalizedWinId !== null) {
-            lastStopAtByWindow.delete(normalizedWinId);
-            playInFlight.delete(normalizedWinId);
-            playInFlightTokens.delete(normalizedWinId);
+        if (!context[win_id])
+            return;
+        var panel = context[win_id].panelWindow;
+        if (panel && !panel.closed) {
+            panel.close();
         }
-
-        const ctx = context[win_id];
-        if (!ctx) return;
-
-        // Close panel window (if any) first.
-        try {
-            const panel = ctx.panelWindow;
-            if (panel && !panel.closed) {
-                panel.close();
-            }
-        } catch (e) {
-            console.warn('[iMacros Offscreen] Failed to close panel window on parent removal:', e);
+        // Clear dock interval to prevent memory leak
+        if (context[win_id].dockInterval) {
+            clearInterval(context[win_id].dockInterval);
+            context[win_id].dockInterval = null;
         }
-
-        // Delegate full cleanup to context.onRemoved (not attached in offscreen.html).
-        try {
-            if (typeof context.onRemoved === 'function') {
-                context.onRemoved(win_id);
-                return;
-            }
-        } catch (e) {
-            console.warn('[iMacros Offscreen] context.onRemoved failed; falling back to manual cleanup:', e);
-        }
-
-        // Fallback cleanup to avoid leaks if context.onRemoved is unavailable or fails.
-        try {
-            if (ctx.mplayer && typeof ctx.mplayer.terminate === 'function') {
-                ctx.mplayer.terminate();
-            }
-        } catch (e) { }
-        try {
-            if (ctx.recorder && typeof ctx.recorder.terminate === 'function') {
-                ctx.recorder.terminate();
-            }
-        } catch (e) { }
-        try {
-            if (ctx.dockInterval) {
-                clearInterval(ctx.dockInterval);
-                ctx.dockInterval = null;
-            }
-        } catch (e) { }
-        try {
-            delete context[win_id];
-        } catch (e) { }
     });
 } else {
     console.log("[iMacros] chrome.windows.onRemoved not available in Offscreen Document");
@@ -2581,22 +2070,6 @@ if (typeof XMLDocument !== 'undefined' && !XMLDocument.prototype.createAttribute
 
 // Add message listener for panel requests
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
-    if (!request || request.target !== 'offscreen') {
-        return false;
-    }
-    if (request && (request.type === 'CHECK_MPLAYER_PAUSED' || request.type === 'PANEL_LOADED' || request.type === 'PANEL_CLOSING')) {
-        if (!isOffscreenPrivilegedSender(sender)) {
-            console.warn('[iMacros Offscreen] Blocked panel request from unprivileged sender:', {
-                type: request.type,
-                url: getSenderUrl(sender)
-            });
-            if (typeof sendResponse === 'function') {
-                sendResponse({ success: false, error: 'Access denied' });
-            }
-            return true;
-        }
-    }
-
     if (request.type === 'CHECK_MPLAYER_PAUSED') {
         var win_id = request.win_id;
         if (!context[win_id]) {
