@@ -49,7 +49,7 @@
                 assertEqual(hasPathTraversalSegments('Macros/test.iim'), false, 'no traversal in normal macro path');
                 assertEqual(hasPathTraversalSegments('../Macros/test.iim'), true, 'detects leading traversal');
                 assertEqual(hasPathTraversalSegments('Macros/../test.iim'), true, 'detects middle traversal');
-                assertEqual(hasPathTraversalSegments('Macros\\\\..\\\\test.iim'), true, 'detects windows traversal');
+                assertEqual(hasPathTraversalSegments('Macros\\..\\test.iim'), true, 'detects windows traversal');
                 assertEqual(hasPathTraversalSegments('Macros/..foo/test.iim'), false, 'does not match ".." substring');
                 assertEqual(hasPathTraversalSegments(''), false, 'empty string');
                 assertEqual(hasPathTraversalSegments(null), false, 'null treated as empty');
@@ -69,7 +69,7 @@
             async run() {
                 assertThrows(() => sanitizeMacroFilePath('../Macros/test.iim'), 'throws on leading traversal');
                 assertThrows(() => sanitizeMacroFilePath('Macros/../test.iim'), 'throws on middle traversal');
-                assertThrows(() => sanitizeMacroFilePath('Macros\\\\..\\\\test.iim'), 'throws on windows traversal');
+                assertThrows(() => sanitizeMacroFilePath('Macros\\..\\test.iim'), 'throws on windows traversal');
             }
         },
         {

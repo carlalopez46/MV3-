@@ -38,11 +38,13 @@
 
         function prune(now) {
             if (ttlMs > 0) {
+                const expiredKeys = [];
                 for (const [key, ts] of seen) {
                     if (now - ts >= ttlMs) {
-                        seen.delete(key);
+                        expiredKeys.push(key);
                     }
                 }
+                expiredKeys.forEach((key) => seen.delete(key));
             }
 
             while (seen.size > maxKeys) {

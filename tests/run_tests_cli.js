@@ -1307,6 +1307,45 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
         }
     });
 
+    await runCase('offscreen_bg runMacroByUrl suppresses duplicate non-imacros_url starts', async () => {
+        const harness = createHarness();
+        const windowId = 6;
+        const requestedAt = Date.now();
+
+        await harness.dispatch({
+            target: 'offscreen',
+            command: 'runMacroByUrl',
+            macroPath: 'Macros/a.iim',
+            windowId,
+            requestId: 'run1',
+            requestedAt
+        });
+
+        if (harness.readDeferreds.length !== 1) {
+            throw new Error(`Expected 1 readTextFile call, got ${harness.readDeferreds.length}`);
+        }
+
+        harness.readDeferreds[0].resolve('CODE');
+        await harness.tick(6);
+
+        const responses = await harness.dispatch({
+            target: 'offscreen',
+            command: 'runMacroByUrl',
+            macroPath: 'Macros/a.iim',
+            windowId,
+            requestId: 'run2',
+            requestedAt: requestedAt + 1
+        });
+
+        const ignoredResponse = responses.find((payload) => payload && payload.status === 'ignored');
+        if (!ignoredResponse) {
+            throw new Error('Expected duplicate runMacroByUrl to be ignored');
+        }
+        if (harness.readDeferreds.length !== 1) {
+            throw new Error(`Expected no second readTextFile call, got ${harness.readDeferreds.length}`);
+        }
+    });
+
     await runCase('offscreen_bg routes PANEL_LOADED response via panel handler', async () => {
         const harness = createHarness();
         const win_id = 2;
@@ -1841,6 +1880,7 @@ function loadTestSuites() {
 	    const suiteGlobals = [
 	        'FileSystemAccessTestSuite',
 	        'AfioTestSuite',
+	        'VariableExpansionTestSuite',
 	        'SecurityUtilsTestSuite',
 	        'OffscreenSecurityTestSuite',
 	        'MacroRunTestSuite',

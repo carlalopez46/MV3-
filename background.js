@@ -1,4 +1,4 @@
-/* global chrome, sharedSave, globalScope */
+/* global chrome, sharedSave, globalScope, DownloadCorrelationTracker, isPrivilegedSender, createRecentKeyGuard, sanitizeMacroFilePath */
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
@@ -757,7 +757,7 @@ const downloadCorrelationTracker = (typeof DownloadCorrelationTracker === 'funct
     : null;
 const activeDownloadCorrelation = downloadCorrelationTracker ? null : new Map();
 const hasCorrelationIds = (winId, tabId) => Number.isInteger(winId) || Number.isInteger(tabId);
-const isValidDownloadId = (value) => Number.isInteger(value) && value >= 0;
+const isValidDownloadId = (value) => Number.isInteger(value) && value > 0;
 
 	if (chrome.downloads && chrome.downloads.onCreated) {
 	    chrome.downloads.onCreated.addListener(async (downloadItem) => {
@@ -3152,15 +3152,15 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // Provides Firefox-compatible imacros://run/?m=macro.iim functionality
 // =============================================================================
 
-const IMACROS_URL_DUPLICATE_WINDOW_MS = 1000;
+const IMACROS_URL_DUPLICATE_WINDOW_MS = 2000;
 const imacrosUrlRunGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: IMACROS_URL_DUPLICATE_WINDOW_MS, maxKeys: 200 })
     : null;
-const RUN_MACRO_DUPLICATE_WINDOW_MS = 1000;
+const RUN_MACRO_DUPLICATE_WINDOW_MS = 2000;
 const runMacroStartGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: RUN_MACRO_DUPLICATE_WINDOW_MS, maxKeys: 300 })
     : null;
-const PLAY_MACRO_DUPLICATE_WINDOW_MS = 1000;
+const PLAY_MACRO_DUPLICATE_WINDOW_MS = 2000;
 const playMacroStartGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: PLAY_MACRO_DUPLICATE_WINDOW_MS, maxKeys: 500 })
     : null;

@@ -6,6 +6,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // Note: When null (not yet loaded or failed to load), we default to reloading
 // on all bookmark events to maintain safe behavior.
 let iMacrosFolderIdCache = null;
+const PANEL_ORIGIN = window.location.origin;
 
 // Helper function to check if a bookmark is descendant of iMacros folder
 // Always returns a Promise for consistent API
@@ -95,7 +96,7 @@ window.addEventListener("load", function (event) {
     });
 
     // Notify parent panel that no item is selected yet.
-    window.parent.postMessage({ type: "iMacrosSelectionChanged", node: null }, "*");
+    window.parent.postMessage({ type: "iMacrosSelectionChanged", node: null }, PANEL_ORIGIN);
     document.body.oncontextmenu = function(e) {
         e.preventDefault()
     }
@@ -498,8 +499,8 @@ const TreeView = {
                         text: data.node.text,
                         source: macroSource
                     };
-                    window.parent.postMessage({ type: "selectionChanged", selected: true }, "*");
-                    window.parent.postMessage({ type: "iMacrosSelectionChanged", node: nodeInfo }, "*");
+                    window.parent.postMessage({ type: "selectionChanged", selected: true }, PANEL_ORIGIN);
+                    window.parent.postMessage({ type: "iMacrosSelectionChanged", node: nodeInfo }, PANEL_ORIGIN);
 
                     e.preventDefault();
 
@@ -511,8 +512,8 @@ const TreeView = {
                         id: data.node.id,
                         text: data.node.text
                     };
-                    window.parent.postMessage({ type: "selectionChanged", selected: false }, "*");
-                    window.parent.postMessage({ type: "iMacrosSelectionChanged", node: nodeInfo }, "*");
+                    window.parent.postMessage({ type: "selectionChanged", selected: false }, PANEL_ORIGIN);
+                    window.parent.postMessage({ type: "iMacrosSelectionChanged", node: nodeInfo }, PANEL_ORIGIN);
                 }
             });
 
@@ -522,7 +523,7 @@ const TreeView = {
 
                 if (target_node.type == 'macro') {
                     setTimeout(function () {
-                        window.parent.postMessage({ type: "playMacro" }, "*");
+                        window.parent.postMessage({ type: "playMacro" }, PANEL_ORIGIN);
                     }, 200);
                 }
             });

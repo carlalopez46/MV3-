@@ -14,8 +14,13 @@ let panelState = {
 
 // Guard against overlapping start commands (rapid clicks / duplicate triggers)
 let pendingCommand = null;
+let commandLockTimeoutId = null;
+const COMMAND_LOCK_TIMEOUT_MS = 10000;
 let lastPlayRequestAt = 0;
 const PLAY_DEBOUNCE_MS = 800;
+let lastPlaySignature = null;
+let lastPlaySignatureAt = 0;
+const PLAY_DUPLICATE_WINDOW_MS = 2000;
 
 function acquireCommandLock(command) {
     if (pendingCommand) {
@@ -23,17 +28,40 @@ function acquireCommandLock(command) {
         return false;
     }
     pendingCommand = command;
+    if (commandLockTimeoutId) {
+        clearTimeout(commandLockTimeoutId);
+    }
+    commandLockTimeoutId = setTimeout(() => {
+        console.warn("[Panel] Command lock timed out; releasing");
+        updatePanelState("idle");
+        releaseCommandLock();
+    }, COMMAND_LOCK_TIMEOUT_MS);
     return true;
 }
 
 function releaseCommandLock() {
     pendingCommand = null;
+    if (commandLockTimeoutId) {
+        clearTimeout(commandLockTimeoutId);
+        commandLockTimeoutId = null;
+    }
 }
 
 function generateExecutionId() {
     return (typeof crypto !== "undefined" && crypto.randomUUID)
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function isDuplicatePlaySignature(signature) {
+    if (!signature) return false;
+    const now = Date.now();
+    if (signature === lastPlaySignature && (now - lastPlaySignatureAt) < PLAY_DUPLICATE_WINDOW_MS) {
+        return true;
+    }
+    lastPlaySignature = signature;
+    lastPlaySignatureAt = now;
+    return false;
 }
 const isTopFrame = window.top === window;
 
@@ -334,6 +362,12 @@ function play() {
         return;
     }
 
+    const playSignature = `${filePath}:1`;
+    if (isDuplicatePlaySignature(playSignature)) {
+        console.log("[Panel] Ignoring play request - duplicate signature");
+        return;
+    }
+
     if (!acquireCommandLock("play")) {
         return;
     }
@@ -410,11 +444,10 @@ function stop() {
         return;
     }
     sendCommand("stop")
-        .then(() => {
-            updatePanelState("idle");
-            releaseCommandLock();
+        .catch((error) => {
+            console.warn("[Panel] Stop failed:", error);
         })
-        .catch(() => {
+        .finally(() => {
             // Even if stop fails, reset the UI so the user can retry
             updatePanelState("idle");
             releaseCommandLock();
@@ -490,6 +523,12 @@ function playLoop() {
         return;
     }
 
+    const playSignature = `${filePath}:${max}`;
+    if (isDuplicatePlaySignature(playSignature)) {
+        console.log("[Panel] Ignoring playLoop request - duplicate signature");
+        return;
+    }
+
     if (!acquireCommandLock("playLoop")) {
         return;
     }
@@ -526,7 +565,6 @@ function handlePlayStartResponse(response, failureMessage, noResponseLog, failur
     if (!response) {
         console.warn(`[Panel] ${noResponseLog}`);
         updatePanelState("idle");
-        releaseCommandLock();
         return;
     }
 
@@ -539,7 +577,6 @@ function handlePlayStartResponse(response, failureMessage, noResponseLog, failur
         el.textContent = response.message || "Playback request ignored.";
         el.style.color = "#666";
         updatePanelState("idle");
-        releaseCommandLock();
         return;
     }
 
@@ -551,7 +588,6 @@ function handlePlayStartResponse(response, failureMessage, noResponseLog, failur
         el.textContent = response.error || failureMessage;
         el.style.color = "#b00020";
         updatePanelState("idle");
-        releaseCommandLock();
     }
 }
 

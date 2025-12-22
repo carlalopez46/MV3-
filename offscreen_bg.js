@@ -8,7 +8,7 @@ worker via explicit messaging.
 
 //
 // Config
-/* global FileSyncBridge, afio, communicator, dialogUtils */
+/* global FileSyncBridge, afio, communicator, dialogUtils, sanitizeMacroFilePath, createRecentKeyGuard, isPrivilegedSender */
 "use strict";
 
 // Virtual filesystem fallback for RUN and related file lookups when the native
@@ -24,11 +24,11 @@ const playInFlightTokens = new Map();
 // Tracks the most recent stop() time per window to guard against stop→play message
 // reordering (stop delivered before a delayed playFile request).
 const lastStopAtByWindow = new Map();
-const IMACROS_URL_DUPLICATE_WINDOW_MS = 1000;
+const IMACROS_URL_DUPLICATE_WINDOW_MS = 2000;
 const imacrosUrlRunGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: IMACROS_URL_DUPLICATE_WINDOW_MS, maxKeys: 200 })
     : null;
-const RUN_MACRO_DUPLICATE_WINDOW_MS = 1000;
+const RUN_MACRO_DUPLICATE_WINDOW_MS = 2000;
 const runMacroStartGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: RUN_MACRO_DUPLICATE_WINDOW_MS, maxKeys: 300 })
     : null;
@@ -39,7 +39,7 @@ const playExecutionGuard = (typeof createRecentKeyGuard === 'function')
 const playMacroMessageGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: 10000, maxKeys: 500 })
     : null;
-const PLAYFILE_DUPLICATE_WINDOW_MS = 1000;
+const PLAYFILE_DUPLICATE_WINDOW_MS = 2000;
 const playFileStartGuard = (typeof createRecentKeyGuard === 'function')
     ? createRecentKeyGuard({ ttlMs: PLAYFILE_DUPLICATE_WINDOW_MS, maxKeys: 500 })
     : null;
@@ -1071,11 +1071,38 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             return false;
         }
 
-	        if (typeof afio === 'undefined') {
-	            console.error('[iMacros Offscreen] AFIO is not available for runMacroByUrl');
-	            if (sendResponse) sendResponse({ success: false, error: 'AFIO not available' });
-	            return false;
-	        }
+        if (playFileStartGuard) {
+            const guardPath = normalizeMacroPathForGuard(macroPath) || macroPath;
+            const key = `playFile:${windowId}:${guardPath}:1`;
+            const dedupe = playFileStartGuard(key);
+            if (!dedupe.allowed) {
+                console.warn('[iMacros Offscreen] Duplicate runMacroByUrl suppressed', {
+                    requestId,
+                    windowId,
+                    macroPath,
+                    guardPath,
+                    ageMs: dedupe.ageMs,
+                    ttlMs: dedupe.ttlMs
+                });
+                if (sendResponse) {
+                    sendResponse({
+                        ack: true,
+                        success: true,
+                        ignored: true,
+                        status: 'ignored',
+                        reason: 'duplicate',
+                        requestId: requestId
+                    });
+                }
+                return false;
+            }
+        }
+
+        if (typeof afio === 'undefined') {
+            console.error('[iMacros Offscreen] AFIO is not available for runMacroByUrl');
+            if (sendResponse) sendResponse({ success: false, error: 'AFIO not available' });
+            return false;
+        }
 
 	        playInFlight.add(windowId);
 	        playInFlightTokens.set(windowId, requestId);

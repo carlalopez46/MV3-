@@ -1888,9 +1888,14 @@ try {
                 window.player = __imacrosPlayerBootstrap.instance;
                 return;
             }
-            console.log("[iMacros MV3] Initializing CSPlayer");
-            __imacrosPlayerBootstrap.instance = new CSPlayer();
-            window.player = __imacrosPlayerBootstrap.instance;
+            try {
+                console.log("[iMacros MV3] Initializing CSPlayer");
+                __imacrosPlayerBootstrap.instance = new CSPlayer();
+                window.player = __imacrosPlayerBootstrap.instance;
+            } catch (err) {
+                __imacrosPlayerBootstrap.scheduled = false;
+                console.error("[iMacros MV3] CSPlayer initialization failed:", err);
+            }
         };
 
         if (document.readyState === "complete" || document.readyState === "interactive") {
@@ -1903,4 +1908,3 @@ try {
 } catch (e) {
     console.error("[iMacros MV3] Failed to initialize CSPlayer:", e);
 }
-
