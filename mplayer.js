@@ -560,7 +560,7 @@ MacroPlayer.prototype.addListeners = function () {
     if (!isOffscreenDocument && typeof chrome.webNavigation !== 'undefined' && chrome.webNavigation.onErrorOccurred) {
         // chrome.webNavigation.onBeforeNavigate.addListener(this._onBeforeNavigate);
         // chrome.webNavigation.onCompleted.addListener(this._onCompleted);
-        chrome.webNavigation.onErrorOccurred.addListener(this._onErrorOccured);
+        chrome.webNavigation.onErrorOccurred.addListener(this._onErrorOccurred);
     }
 
     // chrome.webNavigation.onCommitted.addListener(this._onCommitted);
@@ -636,7 +636,7 @@ MacroPlayer.prototype.removeListeners = function () {
     // chrome.webNavigation.onBeforeNavigate.removeListener(this._onBeforeNavigate);
     // chrome.webNavigation.onCompleted.removeListener(this._onCompleted);
     if (typeof chrome.webNavigation !== 'undefined' && chrome.webNavigation.onErrorOccurred) {
-        chrome.webNavigation.onErrorOccurred.removeListener(this._onErrorOccured);
+        chrome.webNavigation.onErrorOccurred.removeListener(this._onErrorOccurred);
     }
 
     // chrome.webNavigation.onCommitted.removeListener(this._onCommitted);

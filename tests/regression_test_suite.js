@@ -272,6 +272,11 @@
                 return;
             }
 
+            if (!correctPattern.test(offscreenSource)) {
+                fail(testName, 'Correct spelling "onNavigationErrorOccurred" not found in offscreen_bg.js');
+                return;
+            }
+
             pass(testName, 'Method name is correctly spelled as onNavigationErrorOccurred');
         } catch (e) {
             if (e.code === 'MODULE_NOT_FOUND' || e.code === 'ENOENT') {
