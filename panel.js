@@ -10,6 +10,11 @@ let panelState = {
     isPlaying: false,
     currentMacro: null
 };
+const COMMAND_LOCK_WINDOW_MS = 800;
+let commandInFlight = false;
+let lastCommandAt = 0;
+const COMMAND_LOCK_TIMEOUT_MS = 10000;
+let commandLockTimeoutId = null;
 
 function generateExecutionId() {
     return (typeof crypto !== "undefined" && crypto.randomUUID)
@@ -40,6 +45,36 @@ function getMacroPathAndName(macro) {
         filePath: normalized ? (normalized.path || normalized.id) : null,
         macroName: normalized ? (normalized.name || normalized.text || "") : ""
     };
+}
+
+function acquireCommandLock(context) {
+    const now = Date.now();
+    if (commandInFlight) {
+        console.log(`[Panel] Ignoring ${context} request - command already in flight`);
+        return false;
+    }
+    if (now - lastCommandAt < COMMAND_LOCK_WINDOW_MS) {
+        console.log(`[Panel] Ignoring ${context} request - within debounce window`);
+        return false;
+    }
+    commandInFlight = true;
+    lastCommandAt = now;
+    if (commandLockTimeoutId) {
+        clearTimeout(commandLockTimeoutId);
+    }
+    commandLockTimeoutId = setTimeout(() => {
+        console.warn("[Panel] Command lock timed out; releasing");
+        releaseCommandLock();
+    }, COMMAND_LOCK_TIMEOUT_MS);
+    return true;
+}
+
+function releaseCommandLock() {
+    commandInFlight = false;
+    if (commandLockTimeoutId) {
+        clearTimeout(commandLockTimeoutId);
+        commandLockTimeoutId = null;
+    }
 }
 
 // パネルのウィンドウIDを保持
@@ -166,15 +201,20 @@ function play() {
         console.log("[Panel] Ignoring play request - already playing");
         return;
     }
+    if (!acquireCommandLock("play")) {
+        return;
+    }
 
     if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
+        releaseCommandLock();
         return;
     }
 
     const { filePath, macroName, macro } = getMacroPathAndName(selectedMacro);
     if (!filePath) {
         alert("Unable to play: no macro path found.");
+        releaseCommandLock();
         return;
     }
 
@@ -201,6 +241,7 @@ function play() {
         })
         .catch(() => {
             updatePanelState("idle");
+            releaseCommandLock();
         });
 }
 
@@ -216,9 +257,13 @@ function record() {
         console.log("[Panel] Ignoring record request - currently playing");
         return;
     }
+    if (!acquireCommandLock("record")) {
+        return;
+    }
 
     if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
+        releaseCommandLock();
         return;
     }
     // UIを即時更新してストップボタンを有効化
@@ -231,7 +276,38 @@ function record() {
         })
         .catch(() => {
             updatePanelState("idle");
+            releaseCommandLock();
         });
+}
+
+function saveAs() {
+    console.log("[Panel] Save Page button clicked");
+    if (!panelState.isRecording) {
+        console.log("[Panel] Ignoring saveAs request - not recording");
+        return;
+    }
+    sendCommand("CALL_CONTEXT_METHOD", {
+        method: "recorder.saveAs",
+        args: []
+    }).catch(() => {
+        console.error("[Panel] saveAs command failed, stopping recorder");
+        stop();
+    });
+}
+
+function capture() {
+    console.log("[Panel] Capture button clicked");
+    if (!panelState.isRecording) {
+        console.log("[Panel] Ignoring capture request - not recording");
+        return;
+    }
+    sendCommand("CALL_CONTEXT_METHOD", {
+        method: "recorder.capture",
+        args: []
+    }).catch(() => {
+        console.error("[Panel] capture command failed, stopping recorder");
+        stop();
+    });
 }
 
 function stop() {
@@ -239,10 +315,12 @@ function stop() {
     sendCommand("stop")
         .then(() => {
             updatePanelState("idle");
+            releaseCommandLock();
         })
         .catch(() => {
             // Even if stop fails, reset the UI so the user can retry
             updatePanelState("idle");
+            releaseCommandLock();
         });
 }
 
@@ -263,21 +341,27 @@ function playLoop() {
         console.log("[Panel] Ignoring playLoop request - currently recording");
         return;
     }
+    if (!acquireCommandLock("playLoop")) {
+        return;
+    }
 
     if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
+        releaseCommandLock();
         return;
     }
     const loopInput = document.getElementById("max-loop");
     const max = loopInput ? parseInt(loopInput.value, 10) : NaN;
     if (!Number.isInteger(max) || max < 1) {
         alert("Please enter a valid loop count (positive integer).");
+        releaseCommandLock();
         return;
     }
 
     const { filePath, macroName, macro } = getMacroPathAndName(selectedMacro);
     if (!filePath) {
         alert("Unable to play: no macro path found.");
+        releaseCommandLock();
         return;
     }
 
@@ -303,6 +387,7 @@ function playLoop() {
         })
         .catch(() => {
             updatePanelState("idle");
+            releaseCommandLock();
         });
 }
 
@@ -310,6 +395,7 @@ function handlePlayStartResponse(response, failureMessage, noResponseLog, failur
     if (!response) {
         console.warn(`[Panel] ${noResponseLog}`);
         updatePanelState("idle");
+        releaseCommandLock();
         return;
     }
     if (response.status === 'ignored') {
@@ -317,15 +403,16 @@ function handlePlayStartResponse(response, failureMessage, noResponseLog, failur
         const el = ensureStatusLineElement();
         el.textContent = response.message || "Playback request ignored.";
         el.style.color = "#666";
-        updatePanelState("idle");
+        releaseCommandLock();
         return;
     }
-    if (response.success === false) {
+    if (response.success === false || (response.error && response.success !== true)) {
         console.warn(`[Panel] ${failureLog}`, response);
         const el = ensureStatusLineElement();
         el.textContent = response.error || failureMessage;
         el.style.color = "#b00020";
         updatePanelState("idle");
+        releaseCommandLock();
     }
 }
 
@@ -516,15 +603,22 @@ function updatePanelState(state) {
         setCollapsed("pause-button", false);
         setDisabled("stop-replaying-button", false);
         setDisabled("record-button", true);
+        setDisabled("saveas-button", true);
+        setDisabled("capture-button", true);
     } else if (stateName === "recording") {
         setDisabled("stop-recording-button", false);
         setDisabled("play-button", true);
+        setDisabled("saveas-button", false);
+        setDisabled("capture-button", false);
     } else { // idle
         setCollapsed("play-button", false);
         setCollapsed("pause-button", true);
         setDisabled("stop-replaying-button", true);
         setDisabled("stop-recording-button", true);
         setDisabled("record-button", false);
+        setDisabled("saveas-button", true);
+        setDisabled("capture-button", true);
+        releaseCommandLock();
 
         // 選択状態に応じてボタン復帰
         if (selectedMacro && selectedMacro.type === 'macro') {
@@ -823,6 +917,8 @@ function connectToLifecycle() {
     addListener("stop-recording-button", stop);
     addListener("pause-button", pause);
     addListener("loop-button", playLoop);
+    addListener("saveas-button", saveAs);
+    addListener("capture-button", capture);
     addListener("settings-button", openSettings);
     addListener("edit-button", edit);
     addListener("help-button", openHelp);
