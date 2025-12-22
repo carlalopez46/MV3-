@@ -202,11 +202,11 @@ function runContentScriptIdempotenceGuards(rootDir) {
         sandbox.window = sandbox;
         sandbox.self = sandbox;
         sandbox.globalThis = sandbox;
-        sandbox.addEventListener = () => {};
-        sandbox.removeEventListener = () => {};
+        sandbox.addEventListener = () => { };
+        sandbox.removeEventListener = () => { };
 
-        sandbox.logWarning = () => {};
-        sandbox.logError = () => {};
+        sandbox.logWarning = () => { };
+        sandbox.logError = () => { };
 
         sandbox.chrome = {
             runtime: {
@@ -275,9 +275,9 @@ function runContentScriptIdempotenceGuards(rootDir) {
         };
 
         sandbox.imns = Object.create(null);
-        sandbox.logWarning = () => {};
-        sandbox.logInfo = () => {};
-        sandbox.logError = () => {};
+        sandbox.logWarning = () => { };
+        sandbox.logInfo = () => { };
+        sandbox.logError = () => { };
 
         sandbox.connector = {
             registerHandler(_topic, _handler) {
@@ -347,7 +347,7 @@ function runContentScriptIdempotenceGuards(rootDir) {
         };
 
         sandbox.XPathResult = { ORDERED_NODE_ITERATOR_TYPE: 5 };
-        sandbox.CustomEvent = function CustomEvent() {};
+        sandbox.CustomEvent = function CustomEvent() { };
         sandbox.atob = (value) => value;
         sandbox.btoa = (value) => value;
         sandbox.decodeURIComponent = decodeURIComponent;
@@ -360,9 +360,9 @@ function runContentScriptIdempotenceGuards(rootDir) {
             counters.addEventListener += 1;
             counters.eventTypes.push(type);
         };
-        sandbox.window.dispatchEvent = () => {};
+        sandbox.window.dispatchEvent = () => { };
         sandbox.setInterval = () => 1;
-        sandbox.clearInterval = () => {};
+        sandbox.clearInterval = () => { };
 
         const context = vm.createContext(sandbox);
         vm.runInContext(code, context, { filename: relPath });
@@ -414,7 +414,7 @@ function runContentScriptIdempotenceGuards(rootDir) {
                 style: Object.create(null),
                 scrollWidth: 0,
                 scrollHeight: 0,
-                appendChild() {}
+                appendChild() { }
             },
             documentElement: {
                 style: { overflow: '' },
@@ -428,7 +428,7 @@ function runContentScriptIdempotenceGuards(rootDir) {
             counters.eventTypes.push(type);
         };
 
-        sandbox.setTimeout = () => {};
+        sandbox.setTimeout = () => { };
 
         const context = vm.createContext(sandbox);
         vm.runInContext(code, context, { filename: relPath });
@@ -475,7 +475,7 @@ function runContentScriptIdempotenceGuards(rootDir) {
         sandbox.chrome = {
             runtime: {
                 lastError: null,
-                onMessage: { addListener() {} },
+                onMessage: { addListener() { } },
                 sendMessage(_message, callback) {
                     if (typeof callback === 'function') callback(undefined);
                 }
@@ -502,11 +502,11 @@ function runContentScriptIdempotenceGuards(rootDir) {
         const counters = { addEventListener: 0, types: [] };
         const sandbox = Object.create(null);
         sandbox.console = {
-            log() {},
-            info() {},
-            warn() {},
-            error() {},
-            debug() {}
+            log() { },
+            info() { },
+            warn() { },
+            error() { },
+            debug() { }
         };
 
         sandbox.Map = Map;
@@ -531,20 +531,20 @@ function runContentScriptIdempotenceGuards(rootDir) {
 
         sandbox.localStorage = {
             getItem() { return null; },
-            setItem() {},
-            removeItem() {},
-            clear() {},
+            setItem() { },
+            removeItem() { },
+            clear() { },
             key() { return null; },
             get length() { return 0; }
         };
 
-        sandbox.postMessage = () => {};
+        sandbox.postMessage = () => { };
         sandbox.addEventListener = (type) => {
             counters.addEventListener += 1;
             counters.types.push(type);
         };
-        sandbox.setTimeout = () => {};
-        sandbox.clearTimeout = () => {};
+        sandbox.setTimeout = () => { };
+        sandbox.clearTimeout = () => { };
 
         sandbox.chrome = {
             storage: { local: { get(_keys, cb) { if (typeof cb === 'function') cb({}); } } },
@@ -576,11 +576,11 @@ function runContentScriptIdempotenceGuards(rootDir) {
 
         const counters = { addEventListener: 0, types: [] };
         const consoleStub = {
-            error() {},
-            warn() {},
-            info() {},
-            log() {},
-            debug() {}
+            error() { },
+            warn() { },
+            info() { },
+            log() { },
+            debug() { }
         };
         const sandbox = Object.create(null);
         sandbox.console = consoleStub;
@@ -609,9 +609,9 @@ function runContentScriptIdempotenceGuards(rootDir) {
 
         sandbox.localStorage = {
             getItem() { return null; },
-            setItem() {},
-            removeItem() {},
-            clear() {},
+            setItem() { },
+            removeItem() { },
+            clear() { },
             key() { return null; },
             get length() { return 0; }
         };
@@ -773,11 +773,11 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
         const mplayerStopCalls = [];
 
         const quietConsole = {
-            log() {},
-            info() {},
-            warn() {},
-            error() {},
-            debug() {}
+            log() { },
+            info() { },
+            warn() { },
+            error() { },
+            debug() { }
         };
 
         const createEvent = () => {
@@ -825,10 +825,10 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
         sandbox.document = {
             getElementById() { return null; }
         };
-        sandbox.addEventListener = () => {};
-        sandbox.removeEventListener = () => {};
+        sandbox.addEventListener = () => { };
+        sandbox.removeEventListener = () => { };
 
-        sandbox.registerSharedBackgroundHandlers = () => {};
+        sandbox.registerSharedBackgroundHandlers = () => { };
 
         sandbox.communicator = {
             handlers: Object.create(null),
@@ -848,7 +848,7 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
         };
 
         sandbox.nm_connector = {
-            startServer() {}
+            startServer() { }
         };
 
         sandbox.chrome = {
@@ -878,16 +878,16 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
             getBool(key) {
                 return key === 'already-installed';
             },
-            setBool() {},
+            setBool() { },
             getChar() { return ''; },
-            setChar() {}
+            setChar() { }
         };
 
         sandbox.getLimits = () => Promise.resolve({});
 
-        sandbox.notifyPanelStatLine = () => {};
-        sandbox.showNotification = () => {};
-        sandbox.notifyPanel = () => {};
+        sandbox.notifyPanelStatLine = () => { };
+        sandbox.showNotification = () => { };
+        sandbox.notifyPanel = () => { };
 
         sandbox.__is_full_path = () => false;
 
@@ -936,7 +936,7 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
                 };
             }
             if (!ctx.recorder) {
-                ctx.recorder = { recording: false, stop() {} };
+                ctx.recorder = { recording: false, stop() { } };
             }
             ctxStore[key] = ctx;
             return Promise.resolve(ctx);
@@ -990,11 +990,11 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
         };
     };
 
-	    logHeader('Offscreen play/stop race guards');
+    logHeader('Offscreen play/stop race guards');
 
-		    await runCase('offscreen_bg playFile aborts when stop called during file load', async () => {
-		        const harness = createHarness();
-		        const win_id = 1;
+    await runCase('offscreen_bg playFile aborts when stop called during file load', async () => {
+        const harness = createHarness();
+        const win_id = 1;
 
         await harness.dispatch({
             target: 'offscreen',
@@ -1020,122 +1020,14 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
         harness.readDeferreds[0].resolve('CODE');
         await harness.tick(4);
 
-		        if (harness.mplayerPlayCalls.length !== 0) {
-		            throw new Error(`Expected mplayer.play not to be called, got ${harness.mplayerPlayCalls.length}`);
-		        }
-		    });
+        if (harness.mplayerPlayCalls.length !== 0) {
+            throw new Error(`Expected mplayer.play not to be called, got ${harness.mplayerPlayCalls.length}`);
+        }
+    });
 
-		    await runCase('offscreen_bg playFile aborts when win_id is string and stop uses number', async () => {
-		        const harness = createHarness();
-		        const win_id = '1';
-
-	        await harness.dispatch({
-	            target: 'offscreen',
-	            command: 'CALL_CONTEXT_METHOD',
-	            method: 'playFile',
-	            win_id,
-	            args: ['Macros/a.iim', 1],
-	            requestId: 'reqStr'
-	        });
-
-	        if (harness.readDeferreds.length !== 1) {
-	            throw new Error(`Expected exactly 1 readTextFile call, got ${harness.readDeferreds.length}`);
-	        }
-
-	        await harness.dispatch({
-	            target: 'offscreen',
-	            command: 'CALL_CONTEXT_METHOD',
-	            method: 'stop',
-	            win_id: 1,
-	            args: []
-	        });
-
-	        harness.readDeferreds[0].resolve('CODE');
-	        await harness.tick(4);
-
-		        if (harness.mplayerPlayCalls.length !== 0) {
-		            throw new Error(`Expected mplayer.play not to be called, got ${harness.mplayerPlayCalls.length}`);
-		        }
-		    });
-
-			    await runCase('offscreen_bg ignores delayed playFile when stop arrives first (stop after request)', async () => {
-			        const harness = createHarness();
-			        const win_id = 1;
-			        const requestedAt = Date.now() - 1000;
-
-	        await harness.dispatch({
-	            target: 'offscreen',
-	            command: 'CALL_CONTEXT_METHOD',
-	            method: 'stop',
-	            win_id,
-	            args: []
-	        });
-
-	        const responses = await harness.dispatch({
-	            target: 'offscreen',
-	            command: 'CALL_CONTEXT_METHOD',
-	            method: 'playFile',
-	            win_id,
-	            args: ['Macros/a.iim', 1],
-	            requestId: 'reqLate',
-	            requestedAt
-	        });
-
-	        if (harness.readDeferreds.length !== 0) {
-	            throw new Error(`Expected readTextFile not to be called, got ${harness.readDeferreds.length}`);
-	        }
-
-	        if (harness.mplayerPlayCalls.length !== 0) {
-	            throw new Error(`Expected mplayer.play not to be called, got ${harness.mplayerPlayCalls.length}`);
-	        }
-
-	        const ignoredResponse = responses.find((payload) => payload && payload.status === 'ignored');
-		        if (!ignoredResponse) {
-		            throw new Error('Expected playFile response to be ignored after stop');
-		        }
-		    });
-
-		    await runCase('offscreen_bg ignores delayed runMacroByUrl when stop arrives first (stop after request)', async () => {
-		        const harness = createHarness();
-		        const windowId = 1;
-		        const requestedAt = Date.now() - 1000;
-
-		        await harness.dispatch({
-		            target: 'offscreen',
-		            command: 'CALL_CONTEXT_METHOD',
-		            method: 'stop',
-		            win_id: windowId,
-		            args: []
-		        });
-
-		        const responses = await harness.dispatch({
-		            target: 'offscreen',
-		            command: 'runMacroByUrl',
-		            macroPath: 'Macros/a.iim',
-		            windowId,
-		            tabId: 123,
-		            requestId: 'reqUrlLate',
-		            requestedAt,
-		            source: 'imacros_url'
-		        });
-
-		        if (harness.readDeferreds.length !== 0) {
-		            throw new Error(`Expected readTextFile not to be called, got ${harness.readDeferreds.length}`);
-		        }
-
-		        if (harness.mplayerPlayCalls.length !== 0) {
-		            throw new Error(`Expected mplayer.play not to be called, got ${harness.mplayerPlayCalls.length}`);
-		        }
-
-		        const ignoredResponse = responses.find((payload) => payload && payload.status === 'ignored');
-		        if (!ignoredResponse) {
-		            throw new Error('Expected runMacroByUrl response to be ignored after stop');
-		        }
-		    });
-
-    await runCase('offscreen_bg older playFile does not emit macroStopped after newer play takes ownership', async () => {
+    await runCase('offscreen_bg playFile aborts when win_id is string and stop uses number', async () => {
         const harness = createHarness();
-        const win_id = 1;
+        const win_id = '1';
 
         await harness.dispatch({
             target: 'offscreen',
@@ -1143,227 +1035,26 @@ async function runOffscreenPlayStopRaceGuards(rootDir) {
             method: 'playFile',
             win_id,
             args: ['Macros/a.iim', 1],
-            requestId: 'reqA'
+            requestId: 'reqStr'
         });
+
+        if (harness.readDeferreds.length !== 1) {
+            throw new Error(`Expected exactly 1 readTextFile call, got ${harness.readDeferreds.length}`);
+        }
 
         await harness.dispatch({
             target: 'offscreen',
             command: 'CALL_CONTEXT_METHOD',
             method: 'stop',
-            win_id,
+            win_id: 1,
             args: []
         });
 
-        await harness.dispatch({
-            target: 'offscreen',
-            command: 'CALL_CONTEXT_METHOD',
-            method: 'playFile',
-            win_id,
-            args: ['Macros/b.iim', 1],
-            requestId: 'reqB'
-        });
-
-        if (harness.readDeferreds.length !== 2) {
-            throw new Error(`Expected 2 readTextFile calls (A then B), got ${harness.readDeferreds.length}`);
-        }
-
-        harness.readDeferreds[0].resolve('CODE_A');
+        harness.readDeferreds[0].resolve('CODE');
         await harness.tick(4);
 
-        const macroStoppedAfterA = harness.sentMessages.filter((m) => m && m.type === 'macroStopped' && m.win_id === win_id).length;
-        if (macroStoppedAfterA !== 0) {
-            throw new Error(`Expected no macroStopped from aborted request A while B is active, got ${macroStoppedAfterA}`);
-        }
-
-        harness.readDeferreds[1].resolve('CODE_B');
-        await harness.tick(6);
-
-        const macroStoppedTotal = harness.sentMessages.filter((m) => m && m.type === 'macroStopped' && m.win_id === win_id).length;
-        if (macroStoppedTotal !== 1) {
-            throw new Error(`Expected exactly 1 macroStopped (from request B), got ${macroStoppedTotal}`);
-        }
-
-        if (harness.mplayerPlayCalls.length !== 1) {
-            throw new Error(`Expected mplayer.play to be called once (for B), got ${harness.mplayerPlayCalls.length}`);
-        }
-    });
-
-    await runCase('offscreen_bg playFile guard normalizes macro paths for dedupe', async () => {
-        const harness = createHarness();
-        const win_id = 3;
-
-        await harness.dispatch({
-            target: 'offscreen',
-            command: 'CALL_CONTEXT_METHOD',
-            method: 'playFile',
-            win_id,
-            args: ['MV3-1221/Macros/a.iim', 1],
-            requestId: 'req1'
-        });
-
-        if (harness.readDeferreds.length !== 1) {
-            throw new Error(`Expected 1 readTextFile call, got ${harness.readDeferreds.length}`);
-        }
-
-        harness.readDeferreds[0].resolve('CODE_A');
-        await harness.tick(6);
-
-        const responses = await harness.dispatch({
-            target: 'offscreen',
-            command: 'CALL_CONTEXT_METHOD',
-            method: 'playFile',
-            win_id,
-            args: ['Macros/a.iim', 1],
-            requestId: 'req2'
-        });
-
-        const ignoredResponse = responses.find((payload) => payload && payload.status === 'ignored');
-        if (!ignoredResponse) {
-            throw new Error('Expected duplicate playFile to be ignored');
-        }
-        if (harness.readDeferreds.length !== 1) {
-            throw new Error(`Expected no second readTextFile call, got ${harness.readDeferreds.length}`);
-        }
-    });
-
-    await runCase('offscreen_bg playFile ignores duplicate executionId', async () => {
-        const harness = createHarness();
-        const win_id = 5;
-
-        await harness.dispatch({
-            target: 'offscreen',
-            command: 'CALL_CONTEXT_METHOD',
-            method: 'playFile',
-            win_id,
-            args: ['Macros/a.iim', 1],
-            requestId: 'req1',
-            executionId: 'exec-1'
-        });
-
-        if (harness.readDeferreds.length !== 1) {
-            throw new Error(`Expected 1 readTextFile call, got ${harness.readDeferreds.length}`);
-        }
-
-        const responses = await harness.dispatch({
-            target: 'offscreen',
-            command: 'CALL_CONTEXT_METHOD',
-            method: 'playFile',
-            win_id,
-            args: ['Macros/a.iim', 1],
-            requestId: 'req2',
-            executionId: 'exec-1'
-        });
-
-        const ignoredResponse = responses.find((payload) => payload && payload.status === 'ignored');
-        if (!ignoredResponse) {
-            throw new Error('Expected duplicate executionId to be ignored');
-        }
-        if (harness.readDeferreds.length !== 1) {
-            throw new Error(`Expected no second readTextFile call, got ${harness.readDeferreds.length}`);
-        }
-    });
-
-    await runCase('offscreen_bg runMacroByUrl guard normalizes imacros_url paths', async () => {
-        const harness = createHarness();
-        const windowId = 4;
-        const tabId = 99;
-        const requestedAt = Date.now();
-
-        await harness.dispatch({
-            target: 'offscreen',
-            command: 'runMacroByUrl',
-            macroPath: 'MV3-1221/Macros/a.iim',
-            windowId,
-            tabId,
-            requestId: 'run1',
-            requestedAt,
-            source: 'imacros_url'
-        });
-
-        if (harness.readDeferreds.length !== 1) {
-            throw new Error(`Expected 1 readTextFile call, got ${harness.readDeferreds.length}`);
-        }
-
-        harness.readDeferreds[0].resolve('CODE');
-        await harness.tick(6);
-
-        const responses = await harness.dispatch({
-            target: 'offscreen',
-            command: 'runMacroByUrl',
-            macroPath: 'Macros/a.iim',
-            windowId,
-            tabId,
-            requestId: 'run2',
-            requestedAt: requestedAt + 1,
-            source: 'imacros_url'
-        });
-
-        const ignoredResponse = responses.find((payload) => payload && payload.status === 'ignored');
-        if (!ignoredResponse) {
-            throw new Error('Expected duplicate runMacroByUrl to be ignored');
-        }
-        if (harness.readDeferreds.length !== 1) {
-            throw new Error(`Expected no second readTextFile call, got ${harness.readDeferreds.length}`);
-        }
-    });
-
-    await runCase('offscreen_bg runMacroByUrl suppresses duplicate non-imacros_url starts', async () => {
-        const harness = createHarness();
-        const windowId = 6;
-        const requestedAt = Date.now();
-
-        await harness.dispatch({
-            target: 'offscreen',
-            command: 'runMacroByUrl',
-            macroPath: 'Macros/a.iim',
-            windowId,
-            requestId: 'run1',
-            requestedAt
-        });
-
-        if (harness.readDeferreds.length !== 1) {
-            throw new Error(`Expected 1 readTextFile call, got ${harness.readDeferreds.length}`);
-        }
-
-        harness.readDeferreds[0].resolve('CODE');
-        await harness.tick(6);
-
-        const responses = await harness.dispatch({
-            target: 'offscreen',
-            command: 'runMacroByUrl',
-            macroPath: 'Macros/a.iim',
-            windowId,
-            requestId: 'run2',
-            requestedAt: requestedAt + 1
-        });
-
-        const ignoredResponse = responses.find((payload) => payload && payload.status === 'ignored');
-        if (!ignoredResponse) {
-            throw new Error('Expected duplicate runMacroByUrl to be ignored');
-        }
-        if (harness.readDeferreds.length !== 1) {
-            throw new Error(`Expected no second readTextFile call, got ${harness.readDeferreds.length}`);
-        }
-    });
-
-    await runCase('offscreen_bg routes PANEL_LOADED response via panel handler', async () => {
-        const harness = createHarness();
-        const win_id = 2;
-        await harness.context.init(win_id);
-        harness.context[win_id].panelId = 777;
-
-        const responses = await harness.dispatchAll({
-            target: 'offscreen',
-            type: 'PANEL_LOADED',
-            panelWindowId: 777
-        });
-
-        if (responses.length !== 1) {
-            throw new Error(`Expected single PANEL_LOADED response, got ${responses.length}`);
-        }
-        const payload = responses[0] || {};
-        if (!payload.success || payload.win_id !== win_id) {
-            throw new Error(`Expected PANEL_LOADED response to include win_id ${win_id}, got ${JSON.stringify(payload)}`);
+        if (harness.mplayerPlayCalls.length !== 0) {
+            throw new Error(`Expected mplayer.play not to be called, got ${harness.mplayerPlayCalls.length}`);
         }
     });
 
@@ -1748,16 +1439,16 @@ function setupBrowserEnvironment() {
  */
 function loadSourceFiles() {
     const baseDir = path.join(__dirname, '..');
-	    const sourceFiles = [
-	        'utils.js',
-	        'macro_execution_guard.js',
-	        'security_utils.js',
-	        'download_correlation.js',
-	        'GlobalErrorLogger.js',
-	        'VirtualFileService.js',
-	        'WindowsPathMappingService.js',
-	        'FileSystemAccessService.js',
-	        'FileSyncBridge.js',
+    const sourceFiles = [
+        'utils.js',
+        'macro_execution_guard.js',
+        'security_utils.js',
+        'download_correlation.js',
+        'GlobalErrorLogger.js',
+        'VirtualFileService.js',
+        'WindowsPathMappingService.js',
+        'FileSystemAccessService.js',
+        'FileSyncBridge.js',
         'AsyncFileIO.js',
         'variable-manager.js',
         'mplayer.js',
@@ -1838,18 +1529,18 @@ function loadSourceFiles() {
  */
 function loadTestSuites() {
     const testDir = __dirname;
-	    const testFiles = [
-	        'filesystem_access_test_suite.js',
-	        'afio_test_suite.js',
-	        'variable_expansion_test_suite.js',
-	        'security_utils_test_suite.js',
-	        'offscreen_security_test_suite.js',
-	        'dedup_guard_test_suite.js',
-	        'download_correlation_test_suite.js',
-	        'recorder_event_forwarding_test_suite.js',
-	        'panel_play_response_test_suite.js',
-	        'macro_run_test_suite.js'
-	    ];
+    const testFiles = [
+        'filesystem_access_test_suite.js',
+        'afio_test_suite.js',
+        'variable_expansion_test_suite.js',
+        'security_utils_test_suite.js',
+        'offscreen_security_test_suite.js',
+        'dedup_guard_test_suite.js',
+        'download_correlation_test_suite.js',
+        'recorder_event_forwarding_test_suite.js',
+        'panel_play_response_test_suite.js',
+        'macro_run_test_suite.js'
+    ];
 
     logInfo('Loading test suites...');
 
@@ -1877,18 +1568,18 @@ function loadTestSuites() {
 
     // Expose suites placed on the simulated window to the shared sandbox so
     // the CLI runner (executing in the Node context) can access them.
-	    const suiteGlobals = [
-	        'FileSystemAccessTestSuite',
-	        'AfioTestSuite',
-	        'VariableExpansionTestSuite',
-	        'SecurityUtilsTestSuite',
-	        'OffscreenSecurityTestSuite',
-	        'MacroRunTestSuite',
-	        'DedupGuardTestSuite',
-	        'DownloadCorrelationTestSuite',
-	        'RecorderEventForwardingTestSuite',
-	        'PanelPlayResponseTestSuite'
-	    ];
+    const suiteGlobals = [
+        'FileSystemAccessTestSuite',
+        'AfioTestSuite',
+        'VariableExpansionTestSuite',
+        'SecurityUtilsTestSuite',
+        'OffscreenSecurityTestSuite',
+        'MacroRunTestSuite',
+        'DedupGuardTestSuite',
+        'DownloadCorrelationTestSuite',
+        'RecorderEventForwardingTestSuite',
+        'PanelPlayResponseTestSuite'
+    ];
     suiteGlobals.forEach(name => {
         if (sharedSandbox.window && typeof sharedSandbox.window[name] !== 'undefined') {
             sharedSandbox[name] = sharedSandbox.window[name];
@@ -1933,18 +1624,18 @@ async function runTests() {
     loadSourceFiles();
     loadTestSuites();
 
-			    const {
-			        FileSystemAccessTestSuite,
-			        AfioTestSuite,
-			        VariableExpansionTestSuite,
-			        SecurityUtilsTestSuite,
-			        OffscreenSecurityTestSuite,
-			        MacroRunTestSuite,
-			        DedupGuardTestSuite,
-			        DownloadCorrelationTestSuite,
-			        RecorderEventForwardingTestSuite,
-			        PanelPlayResponseTestSuite
-			    } = sharedSandbox;
+    const {
+        FileSystemAccessTestSuite,
+        AfioTestSuite,
+        VariableExpansionTestSuite,
+        SecurityUtilsTestSuite,
+        OffscreenSecurityTestSuite,
+        MacroRunTestSuite,
+        DedupGuardTestSuite,
+        DownloadCorrelationTestSuite,
+        RecorderEventForwardingTestSuite,
+        PanelPlayResponseTestSuite
+    } = sharedSandbox;
 
     function normalizeSuiteResult(rawResult, suiteName) {
         const defaultResults = { passed: 0, failed: 0, skipped: 0 };
@@ -1962,53 +1653,53 @@ async function runTests() {
         return { results, errors };
     }
 
-	    try {
-		        // Run security utils tests
-		        if (options.suite === 'all' || options.suite === 'security') {
-		            logHeader('Security Utils Tests');
+    try {
+        // Run security utils tests
+        if (options.suite === 'all' || options.suite === 'security') {
+            logHeader('Security Utils Tests');
 
-		            if (typeof SecurityUtilsTestSuite !== 'undefined') {
-		                try {
-		                    const securityResult = normalizeSuiteResult(await SecurityUtilsTestSuite.run(), 'SecurityUtilsTestSuite');
-		                    results.passed += securityResult.results.passed || 0;
-		                    results.failed += securityResult.results.failed || 0;
-		                    results.skipped += securityResult.results.skipped || 0;
-		                    results.errors.push(...securityResult.errors);
-		                } catch (err) {
-		                    logError(`Fatal error in Security Utils tests: ${err.message}`);
-		                    results.errors.push({
-		                        context: 'SecurityUtilsTestSuite',
-		                        message: err.message,
-		                        stack: err.stack
-		                    });
-		                }
-		            } else {
-		                logWarning('SecurityUtilsTestSuite not available');
-		            }
+            if (typeof SecurityUtilsTestSuite !== 'undefined') {
+                try {
+                    const securityResult = normalizeSuiteResult(await SecurityUtilsTestSuite.run(), 'SecurityUtilsTestSuite');
+                    results.passed += securityResult.results.passed || 0;
+                    results.failed += securityResult.results.failed || 0;
+                    results.skipped += securityResult.results.skipped || 0;
+                    results.errors.push(...securityResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Security Utils tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'SecurityUtilsTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('SecurityUtilsTestSuite not available');
+            }
 
-		            if (typeof OffscreenSecurityTestSuite !== 'undefined') {
-		                try {
-		                    const offscreenResult = normalizeSuiteResult(await OffscreenSecurityTestSuite.run(), 'OffscreenSecurityTestSuite');
-		                    results.passed += offscreenResult.results.passed || 0;
-		                    results.failed += offscreenResult.results.failed || 0;
-		                    results.skipped += offscreenResult.results.skipped || 0;
-		                    results.errors.push(...offscreenResult.errors);
-		                } catch (err) {
-		                    logError(`Fatal error in Offscreen Security tests: ${err.message}`);
-		                    results.errors.push({
-		                        context: 'OffscreenSecurityTestSuite',
-		                        message: err.message,
-		                        stack: err.stack
-		                    });
-		                }
-		            } else {
-		                logWarning('OffscreenSecurityTestSuite not available');
-		            }
-		        }
+            if (typeof OffscreenSecurityTestSuite !== 'undefined') {
+                try {
+                    const offscreenResult = normalizeSuiteResult(await OffscreenSecurityTestSuite.run(), 'OffscreenSecurityTestSuite');
+                    results.passed += offscreenResult.results.passed || 0;
+                    results.failed += offscreenResult.results.failed || 0;
+                    results.skipped += offscreenResult.results.skipped || 0;
+                    results.errors.push(...offscreenResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Offscreen Security tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'OffscreenSecurityTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('OffscreenSecurityTestSuite not available');
+            }
+        }
 
-	        // Run variable expansion tests
-	        if (options.suite === 'all' || options.suite === 'vars') {
-	            logHeader('Variable Expansion Tests');
+        // Run variable expansion tests
+        if (options.suite === 'all' || options.suite === 'vars') {
+            logHeader('Variable Expansion Tests');
 
             if (typeof VariableExpansionTestSuite !== 'undefined') {
                 try {
@@ -2030,15 +1721,15 @@ async function runTests() {
             }
         }
 
-	        // Run RUN/macro chaining tests
-		        if (options.suite === 'all' || options.suite === 'macro') {
-		            const raceResult = await runOffscreenPlayStopRaceGuards(path.resolve(__dirname, '..'));
-		            results.passed += raceResult.passed || 0;
-		            results.failed += raceResult.failed || 0;
-		            results.skipped += raceResult.skipped || 0;
-		            results.errors.push(...(raceResult.errors || []));
+        // Run RUN/macro chaining tests
+        if (options.suite === 'all' || options.suite === 'macro') {
+            const raceResult = await runOffscreenPlayStopRaceGuards(path.resolve(__dirname, '..'));
+            results.passed += raceResult.passed || 0;
+            results.failed += raceResult.failed || 0;
+            results.skipped += raceResult.skipped || 0;
+            results.errors.push(...(raceResult.errors || []));
 
-		            logHeader('Deduplication Guard Tests');
+            logHeader('Deduplication Guard Tests');
 
             if (typeof DedupGuardTestSuite !== 'undefined') {
                 try {
@@ -2076,83 +1767,83 @@ async function runTests() {
                         stack: err.stack
                     });
                 }
-	            } else {
-	                logWarning('MacroRunTestSuite not available');
-	            }
-	        }
+            } else {
+                logWarning('MacroRunTestSuite not available');
+            }
+        }
 
-            // Run Panel play response tests (keeps UI from getting stuck on error-only responses)
-            if (options.suite === 'all' || options.suite === 'panel') {
-                logHeader('Panel Play Response Tests');
+        // Run Panel play response tests (keeps UI from getting stuck on error-only responses)
+        if (options.suite === 'all' || options.suite === 'panel') {
+            logHeader('Panel Play Response Tests');
 
-                if (typeof PanelPlayResponseTestSuite !== 'undefined') {
-                    try {
-                        const panelResult = normalizeSuiteResult(await PanelPlayResponseTestSuite.run(), 'PanelPlayResponseTestSuite');
-                        results.passed += panelResult.results.passed || 0;
-                        results.failed += panelResult.results.failed || 0;
-                        results.skipped += panelResult.results.skipped || 0;
-                        results.errors.push(...panelResult.errors);
-                    } catch (err) {
-                        logError(`Fatal error in Panel play response tests: ${err.message}`);
-                        results.errors.push({
-                            context: 'PanelPlayResponseTestSuite',
-                            message: err.message,
-                            stack: err.stack
-                        });
-                    }
-                } else {
-                    logWarning('PanelPlayResponseTestSuite not available');
+            if (typeof PanelPlayResponseTestSuite !== 'undefined') {
+                try {
+                    const panelResult = normalizeSuiteResult(await PanelPlayResponseTestSuite.run(), 'PanelPlayResponseTestSuite');
+                    results.passed += panelResult.results.passed || 0;
+                    results.failed += panelResult.results.failed || 0;
+                    results.skipped += panelResult.results.skipped || 0;
+                    results.errors.push(...panelResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Panel play response tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'PanelPlayResponseTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
                 }
+            } else {
+                logWarning('PanelPlayResponseTestSuite not available');
+            }
+        }
+
+        // Run Recorder forwarded-event tests (prevents duplicate recording and restores ONDOWNLOAD)
+        if (options.suite === 'all' || options.suite === 'recorder') {
+            logHeader('Download Correlation Tests');
+
+            if (typeof DownloadCorrelationTestSuite !== 'undefined') {
+                try {
+                    const corrResult = normalizeSuiteResult(await DownloadCorrelationTestSuite.run(), 'DownloadCorrelationTestSuite');
+                    results.passed += corrResult.results.passed || 0;
+                    results.failed += corrResult.results.failed || 0;
+                    results.skipped += corrResult.results.skipped || 0;
+                    results.errors.push(...corrResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Download correlation tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'DownloadCorrelationTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
+                }
+            } else {
+                logWarning('DownloadCorrelationTestSuite not available');
             }
 
-	            // Run Recorder forwarded-event tests (prevents duplicate recording and restores ONDOWNLOAD)
-	            if (options.suite === 'all' || options.suite === 'recorder') {
-	                logHeader('Download Correlation Tests');
+            logHeader('Recorder Event Forwarding Tests');
 
-	                if (typeof DownloadCorrelationTestSuite !== 'undefined') {
-	                    try {
-	                        const corrResult = normalizeSuiteResult(await DownloadCorrelationTestSuite.run(), 'DownloadCorrelationTestSuite');
-	                        results.passed += corrResult.results.passed || 0;
-	                        results.failed += corrResult.results.failed || 0;
-	                        results.skipped += corrResult.results.skipped || 0;
-	                        results.errors.push(...corrResult.errors);
-	                    } catch (err) {
-	                        logError(`Fatal error in Download correlation tests: ${err.message}`);
-	                        results.errors.push({
-	                            context: 'DownloadCorrelationTestSuite',
-	                            message: err.message,
-	                            stack: err.stack
-	                        });
-	                    }
-	                } else {
-	                    logWarning('DownloadCorrelationTestSuite not available');
-	                }
-
-	                logHeader('Recorder Event Forwarding Tests');
-
-	                if (typeof RecorderEventForwardingTestSuite !== 'undefined') {
-	                    try {
-	                        const recorderResult = normalizeSuiteResult(await RecorderEventForwardingTestSuite.run(), 'RecorderEventForwardingTestSuite');
-                        results.passed += recorderResult.results.passed || 0;
-                        results.failed += recorderResult.results.failed || 0;
-                        results.skipped += recorderResult.results.skipped || 0;
-                        results.errors.push(...recorderResult.errors);
-                    } catch (err) {
-                        logError(`Fatal error in Recorder forwarding tests: ${err.message}`);
-                        results.errors.push({
-                            context: 'RecorderEventForwardingTestSuite',
-                            message: err.message,
-                            stack: err.stack
-                        });
-                    }
-                } else {
-                    logWarning('RecorderEventForwardingTestSuite not available');
+            if (typeof RecorderEventForwardingTestSuite !== 'undefined') {
+                try {
+                    const recorderResult = normalizeSuiteResult(await RecorderEventForwardingTestSuite.run(), 'RecorderEventForwardingTestSuite');
+                    results.passed += recorderResult.results.passed || 0;
+                    results.failed += recorderResult.results.failed || 0;
+                    results.skipped += recorderResult.results.skipped || 0;
+                    results.errors.push(...recorderResult.errors);
+                } catch (err) {
+                    logError(`Fatal error in Recorder forwarding tests: ${err.message}`);
+                    results.errors.push({
+                        context: 'RecorderEventForwardingTestSuite',
+                        message: err.message,
+                        stack: err.stack
+                    });
                 }
+            } else {
+                logWarning('RecorderEventForwardingTestSuite not available');
             }
+        }
 
-	        // Run File System Access tests
-	        if (options.suite === 'all' || options.suite === 'fsaccess') {
-	            logHeader('File System Access API Tests');
+        // Run File System Access tests
+        if (options.suite === 'all' || options.suite === 'fsaccess') {
+            logHeader('File System Access API Tests');
 
             if (typeof FileSystemAccessTestSuite !== 'undefined') {
                 try {

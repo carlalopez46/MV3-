@@ -8,18 +8,60 @@ let selectedMacro = null;
 let panelState = {
     isRecording: false,
     isPlaying: false,
+    isPaused: false,
     currentMacro: null
 };
-const COMMAND_LOCK_WINDOW_MS = 800;
-let commandInFlight = false;
-let lastCommandAt = 0;
-const COMMAND_LOCK_TIMEOUT_MS = 10000;
+
+// Guard against overlapping start commands (rapid clicks / duplicate triggers)
+let pendingCommand = null;
 let commandLockTimeoutId = null;
+const COMMAND_LOCK_TIMEOUT_MS = 10000;
+let lastPlayRequestAt = 0;
+const PLAY_DEBOUNCE_MS = 800;
+let lastPlaySignature = null;
+let lastPlaySignatureAt = 0;
+const PLAY_DUPLICATE_WINDOW_MS = 2000;
+
+function acquireCommandLock(command) {
+    if (pendingCommand) {
+        console.log(`[Panel] Ignoring ${command} request - command pending (${pendingCommand})`);
+        return false;
+    }
+    pendingCommand = command;
+    if (commandLockTimeoutId) {
+        clearTimeout(commandLockTimeoutId);
+    }
+    commandLockTimeoutId = setTimeout(() => {
+        console.warn("[Panel] Command lock timed out; releasing");
+        updatePanelState("idle");
+        releaseCommandLock();
+    }, COMMAND_LOCK_TIMEOUT_MS);
+    return true;
+}
+
+function releaseCommandLock() {
+    pendingCommand = null;
+    if (commandLockTimeoutId) {
+        clearTimeout(commandLockTimeoutId);
+        commandLockTimeoutId = null;
+    }
+}
 
 function generateExecutionId() {
     return (typeof crypto !== "undefined" && crypto.randomUUID)
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function isDuplicatePlaySignature(signature) {
+    if (!signature) return false;
+    const now = Date.now();
+    if (signature === lastPlaySignature && (now - lastPlaySignatureAt) < PLAY_DUPLICATE_WINDOW_MS) {
+        return true;
+    }
+    lastPlaySignature = signature;
+    lastPlaySignatureAt = now;
+    return false;
 }
 const isTopFrame = window.top === window;
 
@@ -47,38 +89,10 @@ function getMacroPathAndName(macro) {
     };
 }
 
-function acquireCommandLock(context) {
-    const now = Date.now();
-    if (commandInFlight) {
-        console.log(`[Panel] Ignoring ${context} request - command already in flight`);
-        return false;
-    }
-    if (now - lastCommandAt < COMMAND_LOCK_WINDOW_MS) {
-        console.log(`[Panel] Ignoring ${context} request - within debounce window`);
-        return false;
-    }
-    commandInFlight = true;
-    lastCommandAt = now;
-    if (commandLockTimeoutId) {
-        clearTimeout(commandLockTimeoutId);
-    }
-    commandLockTimeoutId = setTimeout(() => {
-        console.warn("[Panel] Command lock timed out; releasing");
-        releaseCommandLock();
-    }, COMMAND_LOCK_TIMEOUT_MS);
-    return true;
-}
-
-function releaseCommandLock() {
-    commandInFlight = false;
-    if (commandLockTimeoutId) {
-        clearTimeout(commandLockTimeoutId);
-        commandLockTimeoutId = null;
-    }
-}
-
 // パネルのウィンドウIDを保持
 let currentWindowId = null;
+let panelWindowId = null;
+let panelWindowIdReadyPromise = null;
 
 // ウィンドウIDを取得
 function initWindowId() {
@@ -114,6 +128,34 @@ function initWindowId() {
 
 let windowIdReadyPromise = null;
 
+function initPanelWindowId() {
+    return new Promise((resolve) => {
+        if (!chrome.windows || !chrome.windows.getCurrent) {
+            resolve(null);
+            return;
+        }
+        chrome.windows.getCurrent((win) => {
+            if (chrome.runtime.lastError) {
+                console.warn("[Panel] Failed to get panel window ID:", chrome.runtime.lastError);
+                resolve(null);
+            } else {
+                panelWindowId = win.id;
+                resolve(win.id);
+            }
+        });
+    });
+}
+
+function ensurePanelWindowId() {
+    if (panelWindowId !== null) {
+        return Promise.resolve(panelWindowId);
+    }
+    if (!panelWindowIdReadyPromise) {
+        panelWindowIdReadyPromise = initPanelWindowId();
+    }
+    return panelWindowIdReadyPromise;
+}
+
 // 通信機能: バックグラウンドへメッセージを送る
 function ensureWindowId() {
     if (currentWindowId !== null) {
@@ -142,7 +184,7 @@ function sendCommand(command, payload = {}) {
         const message = {
             ...payload,
             command: command,
-            target: 'offscreen',
+            target: 'background',
             win_id: payload.win_id || currentWindowId
         };
         console.log(`[Panel] Sending command: ${command}`, message);
@@ -163,6 +205,91 @@ function sendCommand(command, payload = {}) {
             }
         });
     });
+}
+
+function sendContextMethod(objectPath, methodName, args = []) {
+    return ensureWindowId().then(() => {
+        if (currentWindowId === null) {
+            handleMissingWindowId("Unable to determine window context. Command not sent.");
+            return Promise.reject(new Error("Window ID unavailable"));
+        }
+        const message = {
+            type: 'CALL_CONTEXT_METHOD',
+            target: 'background',
+            win_id: currentWindowId,
+            objectPath: objectPath,
+            methodName: methodName,
+            args: Array.isArray(args) ? args : []
+        };
+        return new Promise((resolve, reject) => {
+            try {
+                chrome.runtime.sendMessage(message, (response) => {
+                    if (chrome.runtime.lastError) {
+                        reject(chrome.runtime.lastError);
+                    } else {
+                        resolve(response);
+                    }
+                });
+            } catch (e) {
+                reject(e);
+            }
+        });
+    });
+}
+
+function getMainWindowIdFromUrl() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const winIdParam = urlParams.get('win_id');
+    if (!winIdParam) return null;
+    const parsed = parseInt(winIdParam, 10);
+    return Number.isNaN(parsed) ? null : parsed;
+}
+
+function notifyPanelLoaded() {
+    return ensurePanelWindowId().then((panelId) => {
+        if (panelId === null) return;
+        chrome.runtime.sendMessage({
+            type: 'PANEL_LOADED',
+            target: 'background',
+            panelWindowId: panelId
+        }, (response) => {
+            if (chrome.runtime.lastError) {
+                console.warn("[Panel] PANEL_LOADED failed:", chrome.runtime.lastError.message);
+                return;
+            }
+            if (response && response.win_id && currentWindowId === null) {
+                currentWindowId = response.win_id;
+            }
+        });
+    });
+}
+
+let panelClosingSent = false;
+function notifyPanelClosing(panelBox) {
+    if (panelClosingSent) return;
+    panelClosingSent = true;
+    const winId = currentWindowId !== null ? currentWindowId : getMainWindowIdFromUrl();
+    const payload = {
+        type: 'PANEL_CLOSING',
+        target: 'background',
+        panelBox: panelBox
+    };
+    if (winId !== null) payload.win_id = winId;
+    if (panelWindowId !== null) payload.panelWindowId = panelWindowId;
+    try {
+        chrome.runtime.sendMessage(payload, () => {});
+    } catch (e) {
+        console.warn("[Panel] Failed to notify PANEL_CLOSING:", e);
+    }
+}
+
+function getPanelBoxSnapshot() {
+    return {
+        left: typeof window.screenX === "number" ? window.screenX : 0,
+        top: typeof window.screenY === "number" ? window.screenY : 0,
+        width: typeof window.outerWidth === "number" ? window.outerWidth : window.innerWidth,
+        height: typeof window.outerHeight === "number" ? window.outerHeight : window.innerHeight
+    };
 }
 
 function requestStateUpdate() {
@@ -196,25 +323,52 @@ function requestStateUpdate() {
 function play() {
     console.log("[Panel] Play button clicked");
 
+    const now = Date.now();
+    if (now - lastPlayRequestAt < PLAY_DEBOUNCE_MS) {
+        console.log("[Panel] Ignoring play request - debounce");
+        return;
+    }
+    lastPlayRequestAt = now;
+
+    if (panelState.isPaused) {
+        console.log("[Panel] Unpause requested");
+        if (!acquireCommandLock("unpause")) {
+            return;
+        }
+        sendCommand("unpause")
+            .catch((error) => {
+                console.error("[Panel] Unpause failed:", error);
+            })
+            .finally(() => {
+                releaseCommandLock();
+            });
+        return;
+    }
+
     // Guard against double execution - ignore if already playing
     if (panelState.isPlaying) {
         console.log("[Panel] Ignoring play request - already playing");
         return;
     }
-    if (!acquireCommandLock("play")) {
-        return;
-    }
 
     if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
-        releaseCommandLock();
         return;
     }
 
     const { filePath, macroName, macro } = getMacroPathAndName(selectedMacro);
     if (!filePath) {
         alert("Unable to play: no macro path found.");
-        releaseCommandLock();
+        return;
+    }
+
+    const playSignature = `${filePath}:1`;
+    if (isDuplicatePlaySignature(playSignature)) {
+        console.log("[Panel] Ignoring play request - duplicate signature");
+        return;
+    }
+
+    if (!acquireCommandLock("play")) {
         return;
     }
 
@@ -241,6 +395,8 @@ function play() {
         })
         .catch(() => {
             updatePanelState("idle");
+        })
+        .finally(() => {
             releaseCommandLock();
         });
 }
@@ -257,17 +413,17 @@ function record() {
         console.log("[Panel] Ignoring record request - currently playing");
         return;
     }
-    if (!acquireCommandLock("record")) {
+    if (panelState.isPaused) {
+        console.log("[Panel] Ignoring record request - currently paused");
         return;
     }
 
-    if (!selectedMacro || selectedMacro.type !== "macro") {
-        alert("Please select a macro first.");
-        releaseCommandLock();
+    if (!acquireCommandLock("record")) {
         return;
     }
     // UIを即時更新してストップボタンを有効化
-    updatePanelState({ isRecording: true, isPlaying: false, currentMacro: selectedMacro });
+    const macroForState = (selectedMacro && selectedMacro.type === "macro") ? selectedMacro : null;
+    updatePanelState({ isRecording: true, isPlaying: false, currentMacro: macroForState });
     sendCommand("startRecording")
         .then((response) => {
             if (!response || response.success === false) {
@@ -276,58 +432,22 @@ function record() {
         })
         .catch(() => {
             updatePanelState("idle");
+        })
+        .finally(() => {
             releaseCommandLock();
         });
 }
 
-function saveAs() {
-    console.log("[Panel] Save Page button clicked");
-    if (!panelState.isRecording) {
-        console.log("[Panel] Ignoring saveAs request - not recording");
-        return;
-    }
-    sendCommand("CALL_CONTEXT_METHOD", {
-        method: "recorder.saveAs",
-        args: []
-    }).then((response) => {
-        if (response && response.success === false) {
-            console.error("[Panel] saveAs command failed, stopping recorder");
-            stop();
-        }
-    }).catch(() => {
-        console.error("[Panel] saveAs command failed, stopping recorder");
-        stop();
-    });
-}
-
-function capture() {
-    console.log("[Panel] Capture button clicked");
-    if (!panelState.isRecording) {
-        console.log("[Panel] Ignoring capture request - not recording");
-        return;
-    }
-    sendCommand("CALL_CONTEXT_METHOD", {
-        method: "recorder.capture",
-        args: []
-    }).then((response) => {
-        if (response && response.success === false) {
-            console.error("[Panel] capture command failed, stopping recorder");
-            stop();
-        }
-    }).catch(() => {
-        console.error("[Panel] capture command failed, stopping recorder");
-        stop();
-    });
-}
-
 function stop() {
     console.log("[Panel] Stop button clicked");
+    if (!panelState.isPlaying && !panelState.isRecording && !panelState.isPaused) {
+        return;
+    }
     sendCommand("stop")
-        .then(() => {
-            updatePanelState("idle");
-            releaseCommandLock();
+        .catch((error) => {
+            console.warn("[Panel] Stop failed:", error);
         })
-        .catch(() => {
+        .finally(() => {
             // Even if stop fails, reset the UI so the user can retry
             updatePanelState("idle");
             releaseCommandLock();
@@ -336,11 +456,41 @@ function stop() {
 
 function pause() {
     console.log("[Panel] Pause button clicked");
+    if (!panelState.isPlaying) {
+        return;
+    }
     sendCommand("pause");
+}
+
+function saveAs() {
+    const el = document.getElementById("saveas-button");
+    if (!el || el.getAttribute("disabled") === "true" || !panelState.isRecording) {
+        return;
+    }
+    sendContextMethod("recorder", "saveAs").catch((error) => {
+        console.error("[Panel] SaveAs failed:", error);
+    });
+}
+
+function capture() {
+    const el = document.getElementById("capture-button");
+    if (!el || el.getAttribute("disabled") === "true" || !panelState.isRecording) {
+        return;
+    }
+    sendContextMethod("recorder", "capture").catch((error) => {
+        console.error("[Panel] Capture failed:", error);
+    });
 }
 
 function playLoop() {
     console.log("[Panel] Loop button clicked");
+
+    const now = Date.now();
+    if (now - lastPlayRequestAt < PLAY_DEBOUNCE_MS) {
+        console.log("[Panel] Ignoring loop request - debounce");
+        return;
+    }
+    lastPlayRequestAt = now;
 
     // Guard against double execution - ignore if already playing or recording
     if (panelState.isPlaying) {
@@ -351,27 +501,35 @@ function playLoop() {
         console.log("[Panel] Ignoring playLoop request - currently recording");
         return;
     }
-    if (!acquireCommandLock("playLoop")) {
+    if (panelState.isPaused) {
+        console.log("[Panel] Ignoring playLoop request - currently paused");
         return;
     }
 
     if (!selectedMacro || selectedMacro.type !== "macro") {
         alert("Please select a macro first.");
-        releaseCommandLock();
         return;
     }
     const loopInput = document.getElementById("max-loop");
     const max = loopInput ? parseInt(loopInput.value, 10) : NaN;
     if (!Number.isInteger(max) || max < 1) {
         alert("Please enter a valid loop count (positive integer).");
-        releaseCommandLock();
         return;
     }
 
     const { filePath, macroName, macro } = getMacroPathAndName(selectedMacro);
     if (!filePath) {
         alert("Unable to play: no macro path found.");
-        releaseCommandLock();
+        return;
+    }
+
+    const playSignature = `${filePath}:${max}`;
+    if (isDuplicatePlaySignature(playSignature)) {
+        console.log("[Panel] Ignoring playLoop request - duplicate signature");
+        return;
+    }
+
+    if (!acquireCommandLock("playLoop")) {
         return;
     }
 
@@ -397,6 +555,8 @@ function playLoop() {
         })
         .catch(() => {
             updatePanelState("idle");
+        })
+        .finally(() => {
             releaseCommandLock();
         });
 }
@@ -405,25 +565,29 @@ function handlePlayStartResponse(response, failureMessage, noResponseLog, failur
     if (!response) {
         console.warn(`[Panel] ${noResponseLog}`);
         updatePanelState("idle");
-        releaseCommandLock();
         return;
     }
-    if (response.status === 'ignored') {
+
+    // Duplicate play requests may be ignored by the Service Worker/offscreen guards.
+    // Treat these as a no-op and restore the UI so the panel doesn't get stuck.
+    const ignoredStatus = typeof response.status === 'string' ? response.status : '';
+    if (response.ignored === true || ignoredStatus === 'ignored' || ignoredStatus.startsWith('ignored')) {
         console.info("[Panel] Play request ignored:", response);
         const el = ensureStatusLineElement();
         el.textContent = response.message || "Playback request ignored.";
         el.style.color = "#666";
         updatePanelState("idle");
-        releaseCommandLock();
         return;
     }
+
+    // Some failures return an error payload without an explicit success flag.
+    // Treat any error that isn't an explicit success as a failure.
     if (response.success === false || (response.error && response.success !== true)) {
         console.warn(`[Panel] ${failureLog}`, response);
         const el = ensureStatusLineElement();
         el.textContent = response.error || failureMessage;
         el.style.color = "#b00020";
         updatePanelState("idle");
-        releaseCommandLock();
     }
 }
 
@@ -591,15 +755,17 @@ function updatePanelState(state) {
     let stateName = state;
     if (state && typeof state === 'object') {
         panelState = state;
-        stateName = state.isRecording ? 'recording' : state.isPlaying ? 'playing' : 'idle';
-    } else if (state === 'idle' || state === 'playing' || state === 'recording') {
+        stateName = state.isRecording ? 'recording' : state.isPlaying ? 'playing' : state.isPaused ? 'paused' : 'idle';
+    } else if (state === 'idle' || state === 'playing' || state === 'recording' || state === 'paused') {
         // When called with a string, also update panelState to keep it in sync
         panelState = {
             isPlaying: state === 'playing',
             isRecording: state === 'recording',
+            isPaused: state === 'paused',
             currentMacro: state === 'idle' ? null : panelState.currentMacro
         };
     }
+
     const setCollapsed = (id, collapsed) => {
         const el = document.getElementById(id);
         if (el) el.setAttribute("collapsed", collapsed ? "true" : "false");
@@ -614,11 +780,25 @@ function updatePanelState(state) {
         setCollapsed("pause-button", false);
         setDisabled("stop-replaying-button", false);
         setDisabled("record-button", true);
+        setDisabled("loop-button", true);
+        setDisabled("edit-button", true);
+        setDisabled("saveas-button", true);
+        setDisabled("capture-button", true);
+    } else if (stateName === "paused") {
+        setCollapsed("play-button", false);
+        setCollapsed("pause-button", true);
+        setDisabled("stop-replaying-button", false);
+        setDisabled("record-button", true);
+        setDisabled("loop-button", true);
+        setDisabled("edit-button", true);
         setDisabled("saveas-button", true);
         setDisabled("capture-button", true);
     } else if (stateName === "recording") {
         setDisabled("stop-recording-button", false);
         setDisabled("play-button", true);
+        setDisabled("loop-button", true);
+        setDisabled("edit-button", true);
+        setDisabled("record-button", true);
         setDisabled("saveas-button", false);
         setDisabled("capture-button", false);
     } else { // idle
@@ -629,11 +809,11 @@ function updatePanelState(state) {
         setDisabled("record-button", false);
         setDisabled("saveas-button", true);
         setDisabled("capture-button", true);
-        releaseCommandLock();
 
         // 選択状態に応じてボタン復帰
         if (selectedMacro && selectedMacro.type === 'macro') {
             setDisabled("play-button", false);
+            setDisabled("loop-button", false);
             setDisabled("edit-button", false);
         }
     }
@@ -706,27 +886,19 @@ function ensureStatusLineElement() {
 function handlePanelSetStatLine(data) {
     if (!data) return;
     const el = ensureStatusLineElement();
-    el.textContent = data.text || "";
-    if (data.level === "error") {
+    const text = typeof data.text !== "undefined" ? data.text : data.txt;
+    const level = data.level || data.type;
+    el.textContent = text || "";
+    if (level === "error") {
         el.style.color = "#b00020";
-    } else if (data.level === "warning") {
+    } else if (level === "warning") {
         el.style.color = "#ff6a00";
     } else {
         el.style.color = "#222";
     }
 }
 
-function handlePanelShowLines(data) {
-    const source = (data && data.source) || "";
-    const macroName = (data && data.currentMacro && typeof data.currentMacro === "string")
-        ? data.currentMacro
-        : "";
-    if (!source && !macroName) {
-        const container = document.getElementById("panel-macro-container");
-        if (container) container.remove();
-        return;
-    }
-
+function ensureMacroLinesElements(titleText) {
     let container = document.getElementById("panel-macro-container");
     if (!container) {
         container = document.createElement("div");
@@ -748,7 +920,9 @@ function handlePanelShowLines(data) {
         titleEl.style.padding = "2px 4px";
         container.appendChild(titleEl);
     }
-    titleEl.textContent = macroName ? `Macro: ${macroName}` : "Macro source";
+    if (typeof titleText === "string") {
+        titleEl.textContent = titleText;
+    }
 
     let pre = document.getElementById("panel-macro-lines");
     if (!pre) {
@@ -760,12 +934,68 @@ function handlePanelShowLines(data) {
         pre.style.tabSize = "4";
         container.appendChild(pre);
     }
+
+    return { container, titleEl, pre };
+}
+
+function removeMacroLinesContainer() {
+    const container = document.getElementById("panel-macro-container");
+    if (container) container.remove();
+}
+
+function handlePanelShowLines(data) {
+    const source = (data && (data.source || data.code)) || "";
+    const macroName = (data && data.currentMacro && typeof data.currentMacro === "string")
+        ? data.currentMacro
+        : "";
+    if (!source && !macroName) {
+        removeMacroLinesContainer();
+        return;
+    }
+
+    const titleText = macroName ? `Macro: ${macroName}` : "Macro source";
+    const { pre } = ensureMacroLinesElements(titleText);
     pre.textContent = source;
+}
+
+function handlePanelAddLine(data) {
+    if (!data) return;
+    const line = typeof data.line !== "undefined"
+        ? data.line
+        : (typeof data.text !== "undefined" ? data.text : data.txt);
+    if (typeof line === "undefined" || line === null) return;
+    const { container, titleEl, pre } = ensureMacroLinesElements();
+    if (!titleEl.textContent) {
+        titleEl.textContent = "Recording";
+    }
+    const lineText = String(line);
+    pre.textContent = pre.textContent ? `${pre.textContent}\n${lineText}` : lineText;
+    if (container) {
+        container.scrollTop = container.scrollHeight;
+    }
+}
+
+function handlePanelRemoveLastLine() {
+    const pre = document.getElementById("panel-macro-lines");
+    if (!pre) return;
+    const lines = pre.textContent.split(/\n/);
+    lines.pop();
+    const nextText = lines.join("\n");
+    if (!nextText) {
+        removeMacroLinesContainer();
+        return;
+    }
+    pre.textContent = nextText;
+}
+
+function handlePanelShowMacroTree() {
+    removeMacroLinesContainer();
+    refreshTreeView();
 }
 
 function handlePanelSetLoopValue(data) {
     if (!data) return;
-    const input = document.getElementById("max-loop");
+    const input = document.getElementById("current-loop") || document.getElementById("max-loop");
     if (input && typeof data.value !== "undefined") {
         input.value = data.value;
     }
@@ -864,16 +1094,18 @@ function connectToLifecycle() {
     connectToLifecycle();
 
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.target === 'panel' && message.type === 'PANEL_STATE_UPDATE') {
+    if ((message.type === 'PANEL_STATE_UPDATE' || message.type === 'UPDATE_PANEL_STATE') &&
+        (!message.target || message.target === 'panel')) {
         if (message.state) updatePanelState(message.state);
     }
     if (message.type === "updatePanel") {
         updatePanelState(message.state);
     }
-    if (message.type === "macroStopped") {
-        updatePanelState("idle");
-    }
-    if (message.type === "UPDATE_PANEL_VIEWS") {
+	    if (message.type === "macroStopped") {
+	        updatePanelState("idle");
+	        releaseCommandLock();
+	    }
+    if (message.type === "UPDATE_PANEL_VIEWS" || message.type === "REFRESH_PANEL_TREE") {
         refreshTreeView();
         sendResponse({ success: true });
         return true;
@@ -887,6 +1119,24 @@ function connectToLifecycle() {
 
     if (message.type === "PANEL_SHOW_LINES") {
         handlePanelShowLines(message.data);
+        sendResponse && sendResponse({ success: true });
+        return true;
+    }
+
+    if (message.type === "PANEL_ADD_LINE") {
+        handlePanelAddLine(message.data);
+        sendResponse && sendResponse({ success: true });
+        return true;
+    }
+
+    if (message.type === "PANEL_REMOVE_LAST_LINE") {
+        handlePanelRemoveLastLine();
+        sendResponse && sendResponse({ success: true });
+        return true;
+    }
+
+    if (message.type === "PANEL_SHOW_MACRO_TREE") {
+        handlePanelShowMacroTree();
         sendResponse && sendResponse({ success: true });
         return true;
     }
@@ -915,6 +1165,7 @@ function connectToLifecycle() {
 
     // ウィンドウIDを初期化
     windowIdReadyPromise = initWindowId();
+    panelWindowIdReadyPromise = initPanelWindowId();
 
     // イベントリスナーの登録
     const addListener = (id, handler) => {
@@ -927,9 +1178,9 @@ function connectToLifecycle() {
     addListener("stop-replaying-button", stop);
     addListener("stop-recording-button", stop);
     addListener("pause-button", pause);
-    addListener("loop-button", playLoop);
     addListener("saveas-button", saveAs);
     addListener("capture-button", capture);
+    addListener("loop-button", playLoop);
     addListener("settings-button", openSettings);
     addListener("edit-button", edit);
     addListener("help-button", openHelp);
@@ -938,6 +1189,7 @@ function connectToLifecycle() {
     addListener("info-close-button", closeInfoPanel);
 
     requestStateUpdate();
+    notifyPanelLoaded();
 
     const filesRadio = document.getElementById("radio-files-tree");
     const bookmarksRadio = document.getElementById("radio-bookmarks-tree");
@@ -984,6 +1236,10 @@ function connectToLifecycle() {
 
     // 広告などの読み込み
     if (typeof setAdDetails === "function") setAdDetails();
+
+    window.addEventListener("beforeunload", () => {
+        notifyPanelClosing(getPanelBoxSnapshot());
+    });
     });
 } else {
     console.info("[Panel] iframe context detected; skipping panel initialization:", window.location.href);
