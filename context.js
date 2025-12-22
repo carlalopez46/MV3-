@@ -239,14 +239,15 @@ const context = {
         }
 
         // 安全にチェックして登録
+        // Use _globalContextListeners for stable references that can be removed later
         if (typeof chrome.windows !== 'undefined' && chrome.windows.onCreated) {
-            chrome.windows.onCreated.addListener(context.onCreated.bind(context));
+            chrome.windows.onCreated.addListener(_globalContextListeners.onCreated);
         }
         if (typeof chrome.windows !== 'undefined' && chrome.windows.onRemoved) {
-            chrome.windows.onRemoved.addListener(context.onRemoved.bind(context));
+            chrome.windows.onRemoved.addListener(_globalContextListeners.onRemoved);
         }
         if (typeof chrome.tabs !== 'undefined' && chrome.tabs.onUpdated) {
-            chrome.tabs.onUpdated.addListener(context.onTabUpdated.bind(context));
+            chrome.tabs.onUpdated.addListener(_globalContextListeners.onTabUpdated);
         }
 
         // chrome.downloads API のチェック
@@ -271,6 +272,12 @@ const context = {
 
         if (chrome.tabs.onUpdated.hasListener(_globalContextListeners.onTabUpdated))
             chrome.tabs.onUpdated.removeListener(_globalContextListeners.onTabUpdated);
+
+        // Remove downloads listener if attached
+        if (this._boundOnDf && chrome.downloads && chrome.downloads.onDeterminingFilename) {
+            chrome.downloads.onDeterminingFilename.removeListener(this._boundOnDf);
+            delete this._boundOnDf;
+        }
 
         this._listenersAttached = false;
     },

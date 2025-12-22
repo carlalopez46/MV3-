@@ -4749,6 +4749,10 @@ MacroPlayer.prototype.stop = function () {    // Stop playing
     this.pauseIsPending = false
     this.paused = false
     this.removeListeners();
+
+    // Always stop global timer to prevent orphaned timeouts
+    this.globalTimer.stop();
+
     if (this.errorCode != 1) // save stopwatch result in case of error
         this.saveStopwatchResults();
 
@@ -4778,6 +4782,8 @@ MacroPlayer.prototype.stop = function () {    // Stop playing
     if (this.writeProfilerData) {
         this.saveProfilerData();
     }
+    // clear profiler data to prevent memory accumulation
+    this.profiler.profiler_data = new Array();
 
     // tell content script do some clean-up
     communicator.postMessage("stop-replaying", {}, this.tab_id,
@@ -4786,6 +4792,11 @@ MacroPlayer.prototype.stop = function () {    // Stop playing
     // clear user-set variables
     this.vars = new Array();
     this.userVars.clear();
+
+    // clear stopwatch and extract data to prevent memory leaks
+    this.watchTable = new Object();
+    this.clearExtractData();
+
     context.updateState(this.win_id, "idle");
 
     // restore proxy settings

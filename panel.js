@@ -1039,6 +1039,14 @@ if (isTopFrame) {
     if (event.data.type === "playMacro") {
         play();
     }
+    if (event.data.type === "editMacro") {
+        edit();
+    }
+    if (event.data.type === "convertMacro") {
+        // Convert between bookmark and file storage
+        // TODO: Implement MV3 compatible convert functionality
+        alert("Convert functionality is not yet implemented in MV3.");
+    }
     });
 
 // --- Extension Reload Detection ---
