@@ -127,10 +127,20 @@ Communicator.prototype._execHandlers = function (msg, tab_id, win_id, sendRespon
             // Special case for recording-related messages: if win_id is not provided,
             // try to route to any registered recorder. This can happen when
             // messages come from iframes or when tab info is unavailable.
-            // Only process if this handler is for a window that's actually recording.
-            handled = true;
-            x.handler(msg.data, tab_id, sendResponse);
-            // Don't break - we want to try all handlers in case one is actually recording
+
+            // Check if context and recorder exist and are recording
+            // This prevents routing to an idle recorder which would reject the action
+            let isActive = true;
+            if (typeof context !== 'undefined' && context[handlerWinId] && context[handlerWinId].recorder) {
+                if (!context[handlerWinId].recorder.recording) {
+                    isActive = false;
+                }
+            }
+
+            if (isActive) {
+                handled = true;
+                x.handler(msg.data, tab_id, sendResponse);
+            }
         }
     }
     // If no handler matched (e.g., win_id mismatch), still send a response to close the channel
