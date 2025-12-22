@@ -289,6 +289,11 @@ function saveAs() {
     sendCommand("CALL_CONTEXT_METHOD", {
         method: "recorder.saveAs",
         args: []
+    }).then((response) => {
+        if (response && response.success === false) {
+            console.error("[Panel] saveAs command failed, stopping recorder");
+            stop();
+        }
     }).catch(() => {
         console.error("[Panel] saveAs command failed, stopping recorder");
         stop();
@@ -304,6 +309,11 @@ function capture() {
     sendCommand("CALL_CONTEXT_METHOD", {
         method: "recorder.capture",
         args: []
+    }).then((response) => {
+        if (response && response.success === false) {
+            console.error("[Panel] capture command failed, stopping recorder");
+            stop();
+        }
     }).catch(() => {
         console.error("[Panel] capture command failed, stopping recorder");
         stop();
