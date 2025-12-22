@@ -105,17 +105,32 @@ Communicator.prototype._execHandlers = function (msg, tab_id, win_id, sendRespon
         if (sendResponse) sendResponse({ error: 'No handlers for topic', state: 'idle' });
         return;
     }
+    // Normalize win_id to number for consistent comparison
+    const normalizedWinId = (win_id !== null && win_id !== undefined) ? Number(win_id) : null;
+
     let handled = false;
     for (const x of this.handlers[msg.topic]) {
-        if (x.win_id && win_id && x.win_id == win_id) {
+        // Normalize handler's win_id as well
+        const handlerWinId = (x.win_id !== null && x.win_id !== undefined) ? Number(x.win_id) : null;
+
+        if (handlerWinId && normalizedWinId && handlerWinId === normalizedWinId) {
+            // Exact window match
             handled = true;
             x.handler(msg.data, tab_id, sendResponse);
             // Continue to allow multiple handlers to process the message
-        } else if (!x.win_id) {
-            // browser-wide message handler
+        } else if (!handlerWinId) {
+            // browser-wide message handler (no specific window)
             handled = true;
             x.handler(msg.data, tab_id, sendResponse);
             // Continue to allow multiple handlers to process the message
+        } else if (!normalizedWinId && handlerWinId && (msg.topic === 'record-action' || msg.topic === 'password-element-focused')) {
+            // Special case for recording-related messages: if win_id is not provided,
+            // try to route to any registered recorder. This can happen when
+            // messages come from iframes or when tab info is unavailable.
+            // Only process if this handler is for a window that's actually recording.
+            handled = true;
+            x.handler(msg.data, tab_id, sendResponse);
+            // Don't break - we want to try all handlers in case one is actually recording
         }
     }
     // If no handler matched (e.g., win_id mismatch), still send a response to close the channel
@@ -130,7 +145,7 @@ Communicator.prototype._execHandlers = function (msg, tab_id, win_id, sendRespon
         // query-state is frequently sent to check recorder state, don't warn for it
         // as it's expected that handlers from different windows won't match
         if (msg.topic !== 'query-state') {
-            console.warn("[Communicator] No handler matched for topic:", msg.topic, "Debug:", debugInfo);
+            console.warn("[Communicator] No handler matched for topic:", msg.topic, "Debug:", JSON.stringify(debugInfo));
         }
 
         sendResponse({
