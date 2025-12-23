@@ -402,7 +402,7 @@ class FileSystemAccessService {
             if (err.name === 'AbortError') {
                 console.log('User cancelled directory selection');
             } else {
-                fsAccessLogError('FileSystemAccessService.selectDirectory', err);
+                fsAccessLogError('FileSystemAccessService.promptForDirectory', err);
             }
             return false;
         }
