@@ -477,7 +477,7 @@ EditArea.prototype.execCommand = function (cmd, param) {
 		case "re_sync":
 			if (!this.do_highlight)
 				break;
-			break;
+		// intentional fallthrough to file_switch_on
 		case "file_switch_on":
 			if (this.settings["EA_file_switch_on_callback"].length > 0)
 				parent[this.settings["EA_file_switch_on_callback"]](param);
