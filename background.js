@@ -204,7 +204,7 @@ function ignoreExtensionIframeSender(sender, sendResponse) {
 function needsLocalStoragePolyfill() {
     try {
         return (typeof localStorage === 'undefined' || localStorage === null ||
-                localStorage.__isMinimalLocalStorageShim || localStorage.__isInMemoryShim);
+            localStorage.__isMinimalLocalStorageShim || localStorage.__isInMemoryShim);
     } catch (err) {
         return true;
     }
@@ -1528,11 +1528,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         switch (method) {
             case 'setBackgroundColor':
-                forAllTabs(winId, (tab) => {
-                    try {
-                        actionApi.setBadgeBackgroundColor({ tabId: tab.id, color: arg });
-                    } catch (e) { /* ignore */ }
-                });
+                // Check if arg is provided (color array)
+                if (arg) {
+                    forAllTabs(winId, (tab) => {
+                        try {
+                            actionApi.setBadgeBackgroundColor({ tabId: tab.id, color: arg });
+                        } catch (e) { /* ignore */ }
+                    });
+                }
                 break;
             case 'setText':
                 forAllTabs(winId, (tab) => {
@@ -1542,11 +1545,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 });
                 break;
             case 'setIcon':
-                forAllTabs(winId, (tab) => {
-                    try {
-                        actionApi.setIcon({ tabId: tab.id, path: arg });
-                    } catch (e) { /* ignore */ }
-                });
+                // For setIcon, arg is path string
+                if (arg) {
+                    forAllTabs(winId, (tab) => {
+                        try {
+                            actionApi.setIcon({ tabId: tab.id, path: arg });
+                        } catch (e) { /* ignore */ }
+                    });
+                }
                 break;
             default:
                 console.warn('[iMacros SW] Unknown badge method:', method);
@@ -2278,7 +2284,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     // --- Helper: パネルウィンドウIDから親ウィンドウIDを解決 ---
-async function resolveTargetWindowId(msgWinId, sender) {
+    async function resolveTargetWindowId(msgWinId, sender) {
         // 1. メッセージに含まれるwin_idをチェック
         if (msgWinId) {
             // パネルウィンドウのIDの場合、親ウィンドウを探す
@@ -2444,19 +2450,19 @@ async function resolveTargetWindowId(msgWinId, sender) {
                     } else {
                         sendResponse({ success: true });
                     }
-        }).catch(err => {
-            console.error("[iMacros SW] playFile error:", err);
-            clearPlayInFlight(win_id);
-            sendResponse({ success: false, error: (err && err.message) || String(err) });
+                }).catch(err => {
+                    console.error("[iMacros SW] playFile error:", err);
+                    clearPlayInFlight(win_id);
+                    sendResponse({ success: false, error: (err && err.message) || String(err) });
+                });
+            });
+        }).catch((error) => {
+            console.warn('[iMacros SW] Failed to restore execution ID before playMacro check:', error);
+            sendResponse({ success: false, error: 'Failed to restore execution ID', details: (error && error.message) || String(error) });
         });
-        });
-    }).catch((error) => {
-        console.warn('[iMacros SW] Failed to restore execution ID before playMacro check:', error);
-        sendResponse({ success: false, error: 'Failed to restore execution ID', details: (error && error.message) || String(error) });
-    });
 
-    return true;
-}
+        return true;
+    }
 
     // --- 編集 (editMacro) ---
     if (msg.command === "editMacro") {
@@ -3105,3 +3111,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     return false;
 });
+// Monitor tab updates to handle recording across page navigations
+if (chrome.webNavigation && chrome.webNavigation.onCompleted) {
+    chrome.webNavigation.onCompleted.addListener((details) => {
+        // Only interested in main frame navigations
+        if (details.frameId === 0) {
+            // Get tab info to determine correct window ID
+            chrome.tabs.get(details.tabId, (tab) => {
+                if (chrome.runtime.lastError || !tab) return;
+
+                // Notify Offscreen document about the tab update
+                // Offscreen will check if recording is active for this window and re-inject recorder if needed
+                sendMessageToOffscreen({
+                    type: 'TAB_UPDATED',
+                    win_id: tab.windowId,
+                    tab_id: details.tabId,
+                    url: details.url
+                }).catch(err => {
+                    // Ignore errors if offscreen is not ready
+                });
+            });
+        }
+    });
+}

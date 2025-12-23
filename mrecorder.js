@@ -255,6 +255,7 @@ Recorder.prototype.start = function () {
 
 
 Recorder.prototype.stop = function () {
+    console.log(`[mrecorder] Stop called. Total actions before stop: ${this.actions ? this.actions.length : 'undefined'}`);
     // console.info("stop recording");
     // notify content script that recording was stopped
     communicator.broadcastMessage("stop-recording", {}, this.win_id);
@@ -344,6 +345,7 @@ Recorder.prototype.recordAction = function (cmd) {
         });
     } catch (e) { /* ignore */ }
     this.actions.push(cmd);
+    console.log(`[mrecorder] Action added: "${cmd}". Total actions: ${this.actions.length}`);
 
     badge.set(this.win_id, {
         status: "recording",
@@ -1614,3 +1616,25 @@ Recorder.prototype.restoreState = function () {
         }
     });
 };
+
+Recorder.prototype.onTabUpdated = function (tabId) {
+    if (!this.recording) return;
+
+    // Re-inject recording logic into the updated tab
+    var recordMode = Storage.getChar("record-mode");
+    if (!recordMode || recordMode === '') {
+        recordMode = 'conventional';
+    }
+
+    console.log('[Recorder] Re-sending start-recording to updated tab:', tabId);
+
+    // Use communicator.postMessage to target specific tab
+    communicator.postMessage("start-recording", {
+        args: {
+            favorId: Storage.getBool("recording-prefer-id"),
+            cssSelectors: Storage.getBool("recording-prefer-css-selectors"),
+            recordMode: recordMode
+        }
+    }, tabId, function () { });
+};
+
