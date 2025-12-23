@@ -34,10 +34,17 @@ var SecurityManager = (function () {
                 chrome.storage.local.get(['master_secret'], function (items) {
                     let secret = items.master_secret;
                     if (!secret) {
-                        // Generate a random-like secret if it doesn't exist
-                        secret = Math.random().toString(36).substring(2) + Date.now().toString(36);
+                        // Generate a cryptographically secure random secret
+                        const array = new Uint8Array(32);
+                        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+                            crypto.getRandomValues(array);
+                            secret = Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
+                        } else {
+                            // Fallback for extremely rare cases where Web Crypto is unavailable
+                            secret = Math.random().toString(36).substring(2) + Date.now().toString(36);
+                        }
                         chrome.storage.local.set({ 'master_secret': secret });
-                        console.info("[SecurityManager] Generated new master secret.");
+                        console.info("[SecurityManager] Generated new secure master secret.");
                     }
                     _masterKey = deriveKey(secret, extensionId);
                     resolve(_masterKey);

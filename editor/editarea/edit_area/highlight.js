@@ -125,7 +125,7 @@ EditArea.prototype.maj_highlight = function (infos) {
 		// we do the syntax optimisation
 		if (doSyntaxOpti) {
 
-			var tps_middle_opti = new Date().getTime();
+			tps_middle_opti = new Date().getTime();
 
 			stay_begin = t.last_hightlighted_text.split("\n").slice(0, changes.lineStart).join("\n");
 			if (changes.lineStart > 0)
@@ -164,7 +164,6 @@ EditArea.prototype.maj_highlight = function (infos) {
 			//debug_opti+="changed: "+ textToHighlight.substring(stay_begin_len, textToHighlight.length-stay_end_len)+" \n";
 
 			//debug_opti+="changed: "+ stay_begin.substr(stay_begin.length-200)+ "----------"+ textToHighlight+"------------------"+ stay_end.substr(0,200) +"\n";
-			+"\n";
 		}
 
 
@@ -243,6 +242,7 @@ EditArea.prototype.maj_highlight = function (infos) {
 					}
 
 					// find the position of the last opended tag
+					var tmpMaxStartOffset, tmpMaxEndOffset;
 					while (parentSpan.parentNode != t.content_highlight && parentSpan.parentNode.tagName != 'PRE' && (tmpMaxStartOffset = Math.max(0, beginStr.lastIndexOf('<span', maxStartOffset - 1))) < (tmpMaxEndOffset = Math.max(0, beginStr.lastIndexOf('</span', maxEndOffset - 1)))) {
 						maxStartOffset = tmpMaxStartOffset;
 						maxEndOffset = tmpMaxEndOffset;

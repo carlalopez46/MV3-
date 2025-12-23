@@ -40,7 +40,7 @@ if (typeof registerSharedBackgroundHandlers === 'function') {
 
 // Initialize SecurityManager
 if (typeof SecurityManager !== 'undefined' && typeof SecurityManager.init === 'function') {
-    SecurityManager.init().then(key => {
+    SecurityManager.init().then(_key => {
         console.info("[bg.js] SecurityManager initialized.");
     }).catch(err => {
         console.error("[bg.js] Failed to initialize SecurityManager:", err);
