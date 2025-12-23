@@ -296,8 +296,10 @@ const context = {
 
     on_df: function (dl, suggest) {
         for (let i = 0; i < this.df_handlers.length; i++) {
-            const mplayer = context[this.df_handlers[i]].mplayer;
-            if (mplayer && mplayer.onDeterminingFilename(dl, suggest))
+            const ctx = context[this.df_handlers[i]];
+            // Guard against removed window contexts
+            if (!ctx || !ctx.mplayer) continue;
+            if (ctx.mplayer.onDeterminingFilename(dl, suggest))
                 return;
         }
     }
