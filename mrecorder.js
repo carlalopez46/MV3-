@@ -909,6 +909,7 @@ Recorder.prototype.onTabUpdated = function (tab_id, changeInfo, tab) {
         return;
     }
 
+    const hasChangeInfo = changeInfo && typeof changeInfo === 'object';
     const safeChangeInfo = changeInfo || {};
 
     // Prefer provided tab info but fall back to querying the tab if needed
@@ -917,6 +918,9 @@ Recorder.prototype.onTabUpdated = function (tab_id, changeInfo, tab) {
         getTab(tab_id);
 
     ensureTab.then(function (resolvedTab) {
+        if (!recorder.recording)
+            return;
+
         if (!resolvedTab || resolvedTab.windowId !== recorder.win_id)
             return;
 
@@ -927,9 +931,11 @@ Recorder.prototype.onTabUpdated = function (tab_id, changeInfo, tab) {
 
         // Only capture meaningful navigations signaled by loading state or an
         // explicit URL change payload.
-        const isNavigationSignal = safeChangeInfo.status === "loading" || Boolean(safeChangeInfo.url);
+        const isNavigationSignal = hasChangeInfo &&
+            (safeChangeInfo.status === "loading" || Boolean(safeChangeInfo.url));
+        const shouldReinject = !hasChangeInfo || isNavigationSignal;
 
-        if (isNavigationSignal) {
+        if (shouldReinject) {
             // Re-inject recording logic into the updated tab when possible.
             if (typeof communicator !== 'undefined' &&
                 communicator &&
@@ -939,6 +945,9 @@ Recorder.prototype.onTabUpdated = function (tab_id, changeInfo, tab) {
                     recordMode = 'conventional';
                 }
 
+                if (Storage.getBool("debug")) {
+                    console.log('[Recorder] Re-sending start-recording to updated tab:', tab_id);
+                }
                 communicator.postMessage("start-recording", {
                     args: {
                         favorId: Storage.getBool("recording-prefer-id"),
@@ -949,6 +958,10 @@ Recorder.prototype.onTabUpdated = function (tab_id, changeInfo, tab) {
             } else if (Storage.getBool("debug")) {
                 console.warn('[Recorder] communicator not available; skipping start-recording reinjection');
             }
+        }
+
+        if (!hasChangeInfo) {
+            return;
         }
 
         // Determine the navigated URL. changeInfo.url is the most accurate signal

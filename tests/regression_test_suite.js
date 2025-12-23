@@ -105,7 +105,7 @@
             // Verify the fix pattern: add should come right after the has check block
             // Pattern: return true after has check, then add immediately
             const hasCheckPattern = /if\s*\(\s*playInFlight\.has\s*\(\s*win_id\s*\)\s*\)/;
-            const addPattern = /playInFlight\.add\s*\(\s*win_id\s*\)/g;
+            const addPattern = /playInFlight\.add\s*\(/g;
 
             const hasMatch = source.match(hasCheckPattern);
             const addMatches = [...source.matchAll(addPattern)];

@@ -236,6 +236,7 @@ var TagHandler = {
     // with tagName and atts
     find: function (doc, root, pos, relative, tagName, atts, form_atts) {
         var nodes = new Array();
+        var ctx;
 
         if (relative) {         // is positioning relative?
             var xpath = pos > 0 ? "following" : "preceding";
@@ -302,20 +303,17 @@ var TagHandler = {
             if (seen.has(currentRoot)) continue;
             seen.add(currentRoot);
 
-            // Get elements in the current scope
-            var inScope = (tagName === "*" || tagName === "") ?
-                currentRoot.querySelectorAll('*') :
-                currentRoot.getElementsByTagName(tagName);
-
-            for (var i = 0; i < inScope.length; i++) {
-                elements.push(inScope[i]);
-            }
-
-            // Find all elements with shadow roots in this scope to explore them later
+            // Get all elements in one pass to find both matches and shadow hosts
             var allInScope = currentRoot.querySelectorAll('*');
-            for (var j = 0; j < allInScope.length; j++) {
-                if (allInScope[j].shadowRoot) {
-                    roots.push(allInScope[j].shadowRoot);
+            for (var i = 0; i < allInScope.length; i++) {
+                var el = allInScope[i];
+                // Check if it matches the tagName
+                if (tagName === "*" || tagName === "" || el.tagName.toUpperCase() === tagNameUpper) {
+                    elements.push(el);
+                }
+                // If it has a shadow root, queue it for exploration
+                if (el.shadowRoot) {
+                    roots.push(el.shadowRoot);
                 }
             }
         }
@@ -404,6 +402,9 @@ var TagHandler = {
 
         for (var i = 0; i < parts.length; i++) {
             var xpathPart = parts[i].trim();
+            if (!xpathPart) {
+                throw new RuntimeError("Empty XPath part in Shadow DOM delimiter: " + shadowXPath, 781);
+            }
 
             try {
                 // Use document.evaluate for ShadowRoot/DocumentFragment compatibility
@@ -504,7 +505,10 @@ var TagHandler = {
         var currentElement = null;
 
         for (var i = 0; i < parts.length; i++) {
-            var selectorPart = parts[i];
+            var selectorPart = parts[i].trim();
+            if (!selectorPart) {
+                throw new RuntimeError("Empty CSS selector part in Shadow DOM delimiter: " + shadowSelector, 783);
+            }
             // If not the first part, we are inside a shadow root
             if (i > 0) {
                 currentElement = currentContext.querySelector(selectorPart);

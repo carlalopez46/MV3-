@@ -1202,15 +1202,17 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             return "#" + StrUtils.escapeLine(this.escapeIdForSelector(el.id));
         }
 
+        var i, selector;
+
         // 2. Try unique attributes (name, aria-label, etc.)
         if (this.cssSelectors) {
             var uniqueAttrs = ['name', 'aria-label', 'placeholder', 'data-testid', 'role', 'title', 'alt'];
-            for (var i = 0; i < uniqueAttrs.length; i++) {
+            for (i = 0; i < uniqueAttrs.length; i++) {
                 var attr = uniqueAttrs[i];
                 var val = el.getAttribute(attr);
                 if (val) {
                     var safeVal = val.replace(/"/g, '\\"');
-                    var selector = el.tagName + '[' + attr + '="' + safeVal + '"]';
+                    selector = el.tagName + '[' + attr + '="' + safeVal + '"]';
                     // Verify uniqueness in the current context
                     try {
                         if (searchContext.querySelectorAll(selector).length === 1) {
@@ -1223,10 +1225,10 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             // 3. Try unique class
             if (el.className && typeof el.className === 'string') {
                 var classes = el.className.trim().split(/\s+/);
-                for (var i = 0; i < classes.length; i++) {
+                for (i = 0; i < classes.length; i++) {
                     var cls = classes[i];
                     if (!cls) continue;
-                    var selector = el.tagName + '.' + cls.replace(/([!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~])/g, "\\$1");
+                    selector = el.tagName + '.' + cls.replace(/([!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~])/g, "\\$1");
                     try {
                         if (searchContext.querySelectorAll(selector).length === 1) {
                             return selector;
@@ -1239,7 +1241,8 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         }
 
         // 4. Fallback: walk up the tree until we find element with id or reach context root
-        var selector = "", temp = el;
+        selector = "";
+        var temp = el;
         while (temp && temp !== searchContext && temp.parentNode) {
             if (temp.id && this.favorIds) {
                 selector = "#" +
@@ -1251,7 +1254,7 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             var siblings = temp.parentNode.children;
             var count = 0;
             if (siblings) {
-                for (var i = 0; i < siblings.length; i++) {
+                for (i = 0; i < siblings.length; i++) {
                     if (siblings[i] == temp)
                         break;
                     if (siblings[i].tagName == temp.tagName)

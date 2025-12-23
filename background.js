@@ -418,7 +418,9 @@ try {
 // NOTE: All code below runs synchronously at top level to comply with MV3 requirements.
 // Event listeners MUST be registered synchronously - they cannot be inside .then() callbacks.
 // Handlers that need hydrated localStorage can await globalThis.localStorageInitPromise internally.
-const localStorageInitPromise = initializeLocalStoragePolyfill();
+const localStorageInitPromise = (typeof globalThis !== 'undefined' && globalThis.localStorageInitPromise)
+    ? globalThis.localStorageInitPromise
+    : initializeLocalStoragePolyfill();
 globalThis.localStorageInitPromise = localStorageInitPromise;
 
 localStorageInitPromise.catch((err) => {

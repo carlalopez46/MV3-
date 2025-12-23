@@ -233,7 +233,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             const rec = context[win_id].recorder;
             if (!rec) {
                 sendResponse({ success: false, error: `Recorder not initialized for window ${win_id}` });
-                return;
+                return true;
             }
             try {
                 rec.start();
@@ -246,7 +246,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             const rec = context[win_id].recorder;
             if (!rec || typeof rec.saveAs !== 'function') {
                 sendResponse({ success: false, error: `Recorder saveAs not available for window ${win_id}` });
-                return;
+                return true;
             }
             try {
                 rec.saveAs();
@@ -259,7 +259,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             const rec = context[win_id].recorder;
             if (!rec || typeof rec.capture !== 'function') {
                 sendResponse({ success: false, error: `Recorder capture not available for window ${win_id}` });
-                return;
+                return true;
             }
             try {
                 rec.capture();
@@ -324,7 +324,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             const mplayer = context[win_id].mplayer;
             if (!mplayer) {
                 sendResponse({ success: false, error: 'mplayer not available for pause' });
-                return;
+                return true;
             }
             const pausedState = mplayer.paused;
             console.log('[Offscreen] Current paused state:', pausedState);
@@ -359,11 +359,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             const mplayer = context[win_id].mplayer;
             if (!mplayer) {
                 sendResponse({ success: false, error: 'mplayer not available for unpause' });
-                return;
+                return true;
             }
             if (!mplayer.paused) {
                 sendResponse({ success: false, error: 'mplayer is not paused' });
-                return;
+                return true;
             }
             if (typeof mplayer.unpause === 'function') {
                 try {
@@ -381,7 +381,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             const mplayer = context[win_id].mplayer;
             if (!mplayer) {
                 sendResponse({ success: false, error: 'mplayer not available for play' });
-                return;
+                return true;
             }
             try {
                 mplayer.play(args[0], args[1], function (result) {
@@ -395,7 +395,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             } catch (e) {
                 console.error("[Offscreen] Play error:", e);
                 sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
-                return;
+                return true;
             }
             return true;
         } else if (method === "playFile") {
@@ -1026,7 +1026,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             const tryGetArgs = (attemptsLeft) => {
                 if (typeof dialogUtils === 'undefined') {
                     sendResponse({ success: false, error: "dialogUtils undefined" });
-                    return;
+                    return true;
                 }
                 try {
                     const args = dialogUtils.getDialogArgs(winId);
@@ -1673,7 +1673,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
             if (ctx.mplayer && ctx.mplayer.playing) {
                 console.warn('[iMacros Offscreen] PLAY_MACRO ignored: macro already playing', { win_id });
                 sendResponse({ success: false, ignored: true, reason: 'already_playing' });
-                return;
+                return true;
             }
             // Note: We only use mplayer.playing check here, not playInFlight,
             // because PLAY_MACRO doesn't have a completion callback to clear playInFlight.
@@ -2294,7 +2294,7 @@ if (!chrome.notifications.clear) {
 function executeContextMethod(win_id, method, sendResponse, args = [], requestId = null) {
     if (!context[win_id]) {
         if (sendResponse) sendResponse({ success: false, error: `Context not found for window ${win_id}` });
-        return;
+        return true;
     }
 
     const parts = method.split('.');
@@ -2318,7 +2318,7 @@ function executeContextMethod(win_id, method, sendResponse, args = [], requestId
             }
 
             if (sendResponse) sendResponse({ success: false, error: `Object ${part} not found in context` });
-            return;
+            return true;
         }
     }
 

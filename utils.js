@@ -7,7 +7,10 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // MV3 Service Worker Polyfill for localStorage
 // _localStorageData is exposed globally so it can be hydrated from chrome.storage.local
 // Use Object.create(null) to avoid prototype pollution issues
-var _localStorageData = Object.create(null);
+var _global = typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : {});
+var _localStorageData = (_global && _global._localStorageData)
+    ? _global._localStorageData
+    : Object.create(null);
 // Namespace prefix to avoid conflicts with other chrome.storage.local data
 var _LOCALSTORAGE_PREFIX = 'localStorage_';
 var _LEGACY_LOCALSTORAGE_PREFIX = '__imacros_ls__:';
@@ -24,7 +27,10 @@ try {
 
 if (_needsLocalStoragePolyfill) {
     // Define properly on global scope
-    var _global = typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : {});
+    if (_global) {
+        _global._localStorageData = _localStorageData;
+        _global._LOCALSTORAGE_PREFIX = _LOCALSTORAGE_PREFIX;
+    }
 
     _global.localStorage = {
         getItem: function (key) {

@@ -675,8 +675,8 @@ var ABOUT_URL_PATTERN = /^about:/i;
  *
  * @param {string} url - URL to evaluate.
  * @returns {boolean} True when the URL uses a browser-internal or extension
- *   scheme (chrome, edge, brave, opera, vivaldi variants), Chrome devtools or
- *   chrome-search helpers, or an about: URL.
+ *   scheme (chrome, edge, brave, opera, vivaldi variants), Chrome devtools,
+ *   chrome-search helpers, the imacros: scheme, or an about: URL.
  */
 MacroPlayer.prototype.isInternalURL = function (url) {
     if (!url || typeof url !== "string") return false;
