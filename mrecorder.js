@@ -66,6 +66,9 @@ function Recorder(win_id) {
     this.recording = false;
     this.actions = [];
     this.lastTabUrls = new Map();
+    // Deduplication state for preventing duplicate action recording
+    this._lastRecordedAction = null;
+    this._lastRecordedTime = 0;
     communicator.registerHandler("record-action",
         this.onRecordAction.bind(this), win_id);
     communicator.registerHandler("password-element-focused",
@@ -276,6 +279,8 @@ Recorder.prototype.stop = function () {
     // this.actions = []; // Fix: Do not clear actions here, they are needed for saving. Cleared in start().
     this.lastTabUrls.clear();
     delete this.prevTarget;
+    this._lastRecordedAction = null;
+    this._lastRecordedTime = 0;
 
     // remove text from badge
     badge.clearText(this.win_id);
@@ -462,6 +467,18 @@ Recorder.prototype.onRecordAction = function (data, tab_id, callback) {
         typeof callback === "function" && callback({ error: "not-recording" });
         return;
     }
+
+    // Deduplication guard: prevent processing the same action multiple times
+    // due to multiple message paths in MV3 architecture
+    const now = Date.now();
+    const dedupeKey = data.action + (data._frame && data._frame.number !== undefined ? ':f' + data._frame.number : '');
+    if (this._lastRecordedAction === dedupeKey && (now - this._lastRecordedTime) < 100) {
+        // Same action within 100ms - likely a duplicate from another message path
+        typeof callback === "function" && callback({ ok: true, deduplicated: true });
+        return;
+    }
+    this._lastRecordedAction = dedupeKey;
+    this._lastRecordedTime = now;
 
     console.log("[DEBUG] onRecordAction called - action:", data.action, "tab_id:", tab_id);
 
