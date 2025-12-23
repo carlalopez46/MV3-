@@ -751,7 +751,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 function addTab(url, win_id) {
     var args = { url: url };
     if (win_id)
-        args.windowId = parseInt(win_id);
+        args.windowId = parseInt(win_id, 10);
 
     chrome.tabs.create(args, function (tab) {
         if (chrome.runtime.lastError) {
@@ -780,7 +780,7 @@ function showNotification(win_id, args) {
 // Note: chrome.notifications is not available in Offscreen Document
 if (typeof chrome !== 'undefined' && chrome.notifications && chrome.notifications.onClicked) {
     chrome.notifications.onClicked.addListener(function (n_id) {
-        var w_id = parseInt(n_id);
+        var w_id = parseInt(n_id, 10);
         if (isNaN(w_id) || !context[w_id] || !context[w_id].info_args)
             return;
         var info = context[w_id].info_args;
@@ -997,9 +997,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             // by checking which context has this panelId
             let found_win_id = null;
             for (let win_id in context) {
-                win_id = parseInt(win_id);
-                if (!isNaN(win_id) && context[win_id].panelId === panelWindowId) {
-                    found_win_id = win_id;
+                let parsed_win_id = parseInt(win_id, 10);
+                if (!isNaN(parsed_win_id) && context[parsed_win_id].panelId === panelWindowId) {
+                    found_win_id = parsed_win_id;
                     break;
                 }
             }

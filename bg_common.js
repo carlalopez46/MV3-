@@ -129,7 +129,7 @@ globalScope.makeBookmarklet = function (name, code) {
         "}) ();";
 
     var macro_name = name || "Unnamed Macro", source = code;
-    macro_name = btoa(encodeURIComponent(name));
+    macro_name = btoa(encodeURIComponent(macro_name));
     macro_name = imns.escapeLine(macro_name);
     pattern = pattern.replace("{{name}}", macro_name);
     source = btoa(encodeURIComponent(source));
@@ -160,7 +160,7 @@ function sharedSave(save_data, overwrite, callback) {
             if (installed && typeof window !== 'undefined' && window && typeof window.open === 'function') {
                 // Open saveAs dialog to let user choose file location
                 // Use storage + URL key strategy for robust MV3/Offscreen support
-                var dialogKey = 'saveAs_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                var dialogKey = 'saveAs_' + Date.now() + '_' + Math.random().toString(36).substring(2, 11);
                 var storage = chrome.storage.session || chrome.storage.local;
 
                 var data = {};
@@ -768,7 +768,11 @@ globalScope.save_file = function (save_data, overwrite, callback) {
                 } catch (e) { /* ignore in SW */ }
             }
         });
-    }).catch(console.error.bind(console));
+    }).catch(function (err) {
+        console.error("[iMacros] save_file error:", err);
+        save_data.error = err.message || String(err);
+        typeof callback === "function" && callback(save_data);
+    });
 };
 
 

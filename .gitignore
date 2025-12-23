@@ -31,3 +31,8 @@ tmp/
 # Test artifacts
 coverage/
 .nyc_output/
+
+# iMacros specific
+Downloads/
+Chrome_Profiler_*.xml
+Macros/#Current.iim

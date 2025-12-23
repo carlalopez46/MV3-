@@ -13,10 +13,10 @@ var SOAPClient = (function () {
 
     var WSDL_cache = new Object();
 
-    var xmlns_schema="http://www.w3.org/2001/XMLSchema";
-    var xmlns_wsdl="http://schemas.xmlsoap.org/wsdl/";
+    var xmlns_schema = "http://www.w3.org/2001/XMLSchema";
+    var xmlns_wsdl = "http://schemas.xmlsoap.org/wsdl/";
 
-    
+
     function WSDLObject(url, xmlDoc) {
         this.url = url;
         this.doc = xmlDoc;
@@ -34,11 +34,11 @@ var SOAPClient = (function () {
 
         // query method names
         this.methods = new Object();
-        
+
         var wsdl_prefix = this.reverseNsTable[xmlns_wsdl] ?
-            this.reverseNsTable[xmlns_wsdl]+":" : "";
+            this.reverseNsTable[xmlns_wsdl] + ":" : "";
         var operations = this.doc.evaluate(
-            "//"+wsdl_prefix+"portType/"+wsdl_prefix+"operation",
+            "//" + wsdl_prefix + "portType/" + wsdl_prefix + "operation",
             this.doc, this.resolveNS.bind(this),
             // XPathResult.ORDERED_NODE_ITERATOR_TYPE
             5,
@@ -49,13 +49,13 @@ var SOAPClient = (function () {
         while (op = operations.iterateNext()) {
             if (!op.hasAttribute('name'))
                 continue;       // unlikely but for peace of mind
-            var op_name = op.getAttribute('name'); 
+            var op_name = op.getAttribute('name');
             this.methods[op_name] = {};
             // assume that the operation contains input/output specifiers which
             // is not always true as they can be specified in bindings 
-            var input_tagName = wsdl_prefix+"input";
-            var output_tagName = wsdl_prefix+"output";
-            for(var i = 0; i < op.children.length; i++) {
+            var input_tagName = wsdl_prefix + "input";
+            var output_tagName = wsdl_prefix + "output";
+            for (var i = 0; i < op.children.length; i++) {
                 var tagName = op.children[i].tagName;
                 if (tagName == input_tagName) {
                     if (op.children[i].hasAttribute('message')) {
@@ -78,12 +78,12 @@ var SOAPClient = (function () {
     };
 
 
-    WSDLObject.prototype.getType = function(messageName) {
+    WSDLObject.prototype.getType = function (messageName) {
         var schema_prefix = this.reverseNsTable[xmlns_schema] ?
-            this.reverseNsTable[xmlns_schema]+":" : "";
+            this.reverseNsTable[xmlns_schema] + ":" : "";
         var wsdl_prefix = this.reverseNsTable[xmlns_wsdl] ?
-            this.reverseNsTable[xmlns_wsdl]+":" : "";
-        
+            this.reverseNsTable[xmlns_wsdl] + ":" : "";
+
         // Implementation limitation: This code assumes <wsdl:message>/<wsdl:part>
         // elements refer to Schema elements containing type definitions.
         // Alternative WSDL pattern using <wsdl:part> elements with 'type'
@@ -97,66 +97,71 @@ var SOAPClient = (function () {
         // <wsdl:message> 'name' attributes do not use prefixes
         var msg_name = messageName.replace(/^\w+:/, "");
         var part_element = this.doc.evaluate(
-            "//"+wsdl_prefix+"message[@name=\""+msg_name+"\"]/"+
-                wsdl_prefix+"part",
+            "//" + wsdl_prefix + "message[@name=\"" + msg_name + "\"]/" +
+            wsdl_prefix + "part",
             this.doc, this.resolveNS.bind(this),
             // XPathResult.FIRST_ORDERED_NODE_TYPE
             9, null
         ).singleNodeValue;
-        
+
         if (!part_element) {
-            throw new Error("No type definition for "+messageName);
+            throw new Error("No type definition for " + messageName);
         }
-        // see above for that .replace
-        var el_name = part_element.getAttribute("element").replace(/^\w+:/, "");
+        var elementAttr = part_element.getAttribute("element");
+        if (!elementAttr) {
+            throw new Error("Message part for " + messageName + " is missing 'element' attribute");
+        }
+        var el_name = elementAttr.replace(/^\w+:/, "");
         var schema_element = this.doc.evaluate(
-            "//"+schema_prefix+"element[@name=\""+el_name+"\"]",
+            "//" + schema_prefix + "element[@name=\"" + el_name + "\"]",
             this.doc, this.resolveNS.bind(this),
             // XPathResult.FIRST_ORDERED_NODE_TYPE
             9, null
         ).singleNodeValue;
 
         if (!schema_element) {
-            throw new Error("No type definition for "+messageName);
+            throw new Error("No type definition for " + messageName);
         }
-        
+
         // NOTE: we use very simplistic approach here assuming that element is
         // of complex type consisting only of simple types and has no
         // additional complex members
         var typeObject = {};
         var nodes = this.doc.evaluate(
-            "./"+schema_prefix+"complexType/"+schema_prefix+"sequence/"+
-                schema_prefix+"element",
+            "./" + schema_prefix + "complexType/" + schema_prefix + "sequence/" +
+            schema_prefix + "element",
             schema_element, this.resolveNS.bind(this),
             /* XPathResult.ORDERED_NODE_ITERATOR_TYPE */ 5, null
         )
         var n = null;
-        while(n = nodes.iterateNext()){
+        while (n = nodes.iterateNext()) {
             // ignore Schema restriction and any other complexities here
             // just assume it is one of primitive types
-            typeObject[n.getAttribute('name')] = {
-                type: n.getAttribute('type').replace(
-                    new RegExp("^"+schema_prefix), ""
-                )
-            };
+            var attrName = n.getAttribute('name');
+            var attrType = n.getAttribute('type');
+            if (attrName && attrType) {
+                typeObject[attrName] = {
+                    type: attrType.replace(new RegExp("^" + schema_prefix), "")
+                };
+            }
         }
 
         return typeObject;
     };
 
-    WSDLObject.prototype.resolveNS = function(ns) {
+    WSDLObject.prototype.resolveNS = function (ns) {
         var uri = this.nsTable[ns];
         if (!uri)
-            throw Error("Unable to resolve namespace "+ns);
+            throw Error("Unable to resolve namespace " + ns);
         return uri;
     };
 
     // assume that args is a plain JS object
-    WSDLObject.prototype.argsToXML = function(method, args) {
+    WSDLObject.prototype.argsToXML = function (method, args) {
         // __loginf("argsToXML, method="+method+", args="+args.toSource());
         var m = this.methods[method];
         if (!m || !m.input || !m.input.typeObject) {
-            throw new Error("Input type not specified for method "+method);
+            throw new Error("Input type not specified for method " + method);
         }
         var type_object = m.input.typeObject;
         var s = "";
@@ -167,25 +172,28 @@ var SOAPClient = (function () {
         // __loginf("input type object="+type_object.toSource());
         var tns = this.doc.documentElement.getAttribute("targetNamespace");
         var prefix = this.reverseNsTable[tns] ?
-            this.reverseNsTable[tns]+":" : "";
-        
+            this.reverseNsTable[tns] + ":" : "";
+
         for (var x in args) {
-            if (type_object[x].type == "string" ) {
-                s += "<"+prefix+x+">"+
+            if (!type_object[x]) {
+                throw new Error("Property " + x + " is not defined in the type schema for " + method);
+            }
+            if (type_object[x].type == "string") {
+                s += "<" + prefix + x + ">" +
                     args[x].replace(/&/g, "&amp;").
-                    replace(/</g, "&lt;").
-                    replace(/>/g, "&gt;")+
-                    "</"+prefix+x+">";
+                        replace(/</g, "&lt;").
+                        replace(/>/g, "&gt;") +
+                    "</" + prefix + x + ">";
             } else if (type_object[x].type == "boolean") {
-                s += "<"+prefix+x+">"+
-                    (args[x] ? "true" : "false")+
-                    "</"+prefix+x+">";
+                s += "<" + prefix + x + ">" +
+                    (args[x] ? "true" : "false") +
+                    "</" + prefix + x + ">";
             } else if (type_object[x].type == "integer") {
-                s += "<"+prefix+x+">"+
-                    args[x].toString()+
-                    "</"+prefix+x+">";
+                s += "<" + prefix + x + ">" +
+                    args[x].toString() +
+                    "</" + prefix + x + ">";
             } else {
-                throw new Error("Unsupported type "+type_object[x]);
+                throw new Error("Unsupported type " + type_object[x]);
             }
         }
         //__loginf("argsToXML result="+s);
@@ -193,37 +201,37 @@ var SOAPClient = (function () {
     };
 
 
-    WSDLObject.prototype.makeSoapEnvelope = function(method, args) {
+    WSDLObject.prototype.makeSoapEnvelope = function (method, args) {
         var targetNamespace = this.doc.documentElement.
             getAttribute("targetNamespace");
 
-        var env = "<?xml version=\"1.0\" encoding=\"utf-8\"?>"+
-            "<soap-env:Envelope"+
-            " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\""+
-            " xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\""+
+        var env = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+            "<soap-env:Envelope" +
+            " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"" +
+            " xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\"" +
             " xmlns:soap-env=\"http://www.w3.org/2003/05/soap-envelope\"";
         for (var x in this.nsTable) {
-            env += " xmlns:"+x+"=\""+this.nsTable[x]+"\"";
+            env += " xmlns:" + x + "=\"" + this.nsTable[x] + "\"";
         }
         env += ">";
         var prefix = this.reverseNsTable[targetNamespace] ?
-            this.reverseNsTable[targetNamespace]+":" : "";
+            this.reverseNsTable[targetNamespace] + ":" : "";
         var suffix = this.reverseNsTable[targetNamespace] ?
-            ":"+this.reverseNsTable[targetNamespace] : "";
-        env += "<soap-env:Body>"+
-            "<"+prefix+method+" xmlns"+suffix+"=\""+targetNamespace+"\">"+
-            this.argsToXML(method, args)+
-            "</"+prefix+method+"></soap-env:Body>"+
+            ":" + this.reverseNsTable[targetNamespace] : "";
+        env += "<soap-env:Body>" +
+            "<" + prefix + method + " xmlns" + suffix + "=\"" + targetNamespace + "\">" +
+            this.argsToXML(method, args) +
+            "</" + prefix + method + "></soap-env:Body>" +
             "</soap-env:Envelope>";
 
         return env;
     };
-        
-    WSDLObject.prototype.parseRetObject = function(method, xml) {
+
+    WSDLObject.prototype.parseRetObject = function (method, xml) {
         var m = this.methods[method];
         if (!m || !m.output)
             return null;        // no response is assumed
-        
+
         var type_object = m.output.typeObject;
         var rv = {};
 
@@ -236,16 +244,16 @@ var SOAPClient = (function () {
         //         reverseNsTable[atts[i].value] = RegExp.$1;
         //     }
         // }
-        
+
         // var resolveNS = function(prefix) {
         //     return nsTable[prefix];
         // };
-        
+
         var tns = this.doc.documentElement.getAttribute("targetNamespace");
         for (var x in type_object) {
             var n = xml.getElementsByTagNameNS(tns, x);
             if (!n.length) {
-                throw new Error("No value for parameter "+x+" in response");
+                throw new Error("No value for parameter " + x + " in response");
             }
             var param = n[0];
             var value = param.textContent;
@@ -256,8 +264,8 @@ var SOAPClient = (function () {
             } else if (type_object[x].type == "integer") {
                 rv[x] = Number(value);
             } else {
-                throw new Error("Data type "+type_object[x].type+
-                                " is not supported");
+                throw new Error("Data type " + type_object[x].type +
+                    " is not supported");
             }
         }
 
@@ -265,50 +273,50 @@ var SOAPClient = (function () {
         return rv;
     };
 
-    WSDLObject.prototype.invoke = function(method, args, callback) {
+    WSDLObject.prototype.invoke = function (method, args, callback) {
         // console.log("WSDLObject.invoke, method="+method+", args="+
         //             JSON.stringify(args));
         try {
             var m = this.methods[method];
             if (!m)
-                throw Error("No "+method+" method found");
+                throw Error("No " + method + " method found");
 
             var req = new XMLHttpRequest();
             req.open('POST', this.url, true);
             req.onreadystatechange = () => {
                 if (req.readyState == 4) {
-                    if(req.status == 200) {
+                    if (req.status == 200) {
                         try {
                             // console.log("response="+req.responseText);
                             var rv = this.parseRetObject(
                                 method, req.responseXML
                             );
                             callback(rv);
-                        } catch(e) {
+                        } catch (e) {
                             callback(null, e);
                         }
                     } else {
-                        var err = new Error("Method "+method+" call failed"+
-                                            ", status: "+req.statusText+
-                                            " ("+req.status+")");
+                        var err = new Error("Method " + method + " call failed" +
+                            ", status: " + req.statusText +
+                            " (" + req.status + ")");
                         callback(null, err);
                     }
                 }
             };
             var targetNamespace = this.doc.documentElement.
                 getAttribute("targetNamespace");
-            req.setRequestHeader("SOAPAction", targetNamespace+method);
+            req.setRequestHeader("SOAPAction", targetNamespace + method);
             req.setRequestHeader("Content-Type", "text/xml; charset=utf-8");
-            
+
             var env = this.makeSoapEnvelope(method, args);
             // __loginf("WSDLObject.invoke request="+env);
             req.send(env);
-            
-        } catch(e) {
+
+        } catch (e) {
             callback(null, e);
         }
     };
-    
+
 
     function retrieveWSDL(ws_url, callback) {
         var url = ws_url;
@@ -316,19 +324,19 @@ var SOAPClient = (function () {
             url += "?WSDL";
         var req = new XMLHttpRequest();
         req.open('GET', url, true);
-        req.onreadystatechange = function() {
+        req.onreadystatechange = function () {
             if (req.readyState == 4) {
-                if(req.status == 200) {
+                if (req.status == 200) {
                     try {
                         var wsdl = new WSDLObject(ws_url, req.responseXML);
                         WSDL_cache[ws_url] = wsdl;
                         callback(wsdl);
-                    } catch(e) {
+                    } catch (e) {
                         callback(null, e);
                     }
                 } else {
-                    var err = new Error("Request failed status: "+
-                                        req.statusText+" ("+req.status+")");
+                    var err = new Error("Request failed status: " +
+                        req.statusText + " (" + req.status + ")");
                     callback(null, err);
                 }
             }
@@ -338,12 +346,12 @@ var SOAPClient = (function () {
     }
 
 
-    function SOAPClientImp(){}
-    
-    SOAPClientImp.prototype.invoke = function(ws_url, method, args, callback) {
+    function SOAPClientImp() { }
+
+    SOAPClientImp.prototype.invoke = function (ws_url, method, args, callback) {
         var wsdl = WSDL_cache[ws_url];
         if (!wsdl) {
-            retrieveWSDL(ws_url, function(_wsdl, err) {
+            retrieveWSDL(ws_url, function (_wsdl, err) {
                 if (!_wsdl && err) {
                     callback(null, err);
                 } else {
@@ -356,4 +364,4 @@ var SOAPClient = (function () {
     };
 
     return new SOAPClientImp();
-}) ();
+})();

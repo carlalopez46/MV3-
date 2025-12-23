@@ -1493,7 +1493,7 @@ function isPersonalVersion() {
     return getLimits()
         //制限解除
         .then(limits =>
-            Object.values(limits).every(x => x == "unlimited")
+            Object.values(limits).every(x => x === "unlimited")
             //return Promise.resolve(true);
         )
 }
