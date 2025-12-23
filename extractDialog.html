@@ -1,0 +1,31 @@
+<html translate="no">
+<head>
+ <meta charset="UTF-8">
+    <title>iMacros extract dialog</title>
+    <link rel="stylesheet" type="text/css"
+          href="skin/common.css" />
+    <link rel="stylesheet" type="text/css"
+          href="skin/extractDialog.css" />
+    <script src="errorLogger.js"></script>
+    <script src="utils.js"></script>
+    <script src="extractDialog.js"></script>
+  </head>
+  <body>
+    <div id="container" class="vbox">
+      <span id="caption">Extracted Data</span>
+      <div class="hbox centered">
+        <textarea class="hbox" id="data-field"></textarea>
+      </div>
+
+      <div id="note"><span>このポップアップはテスト用です。 IM がスクリプト インターフェイスによって制御されている場合は<b>表示されません</b>。 マクロを手動で実行する場合は、<code>SET&nbsp;!EXTRACT_TEST_POPUP&nbsp;NO</code> をマクロに追加することで、このポップアップを無効にできます</span>
+      </div>
+    </div>
+    <div id="buttons" class="hbox centered">
+      <div id="ok-button" class="button icon-button" role="button" tabindex="0">
+        <span>OK</span>
+      </div>
+    </div>
+    <div>
+
+  </body>
+</html>

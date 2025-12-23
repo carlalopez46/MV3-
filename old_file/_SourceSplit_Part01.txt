@@ -1,0 +1,2 @@
+        this._path += this._path[this._path.length-1] == __psep() ?
+        this._path += this._path[this._path.length-1] == __psep() ?

@@ -1,0 +1,17 @@
+﻿TAB T=1
+TAB CLOSEALLOTHERS
+URL GOTO=http://demo.imacros.net/Automate/TestForm1
+'Macro that makes use of Css Selector while recording
+TAG SELECTOR="#name" CONTENT=iMacros<SP>user
+'Drop down
+TAG SELECTOR="#food" CONTENT=%Bread<SP>and<SP>Butter
+TAG SELECTOR="#drink" CONTENT=%Coke
+'Radio button
+TAG SELECTOR="#large"
+TAG SELECTOR="#dessert" CONTENT=%cranberry
+TAG SELECTOR="#demo>FIELDSET>OL>LI:nth-of-type(6)>INPUT"
+SET !ENCRYPTION NO
+TAG SELECTOR="#demo>FIELDSET>OL>LI:nth-of-type(6)>INPUT:nth-of-type(2)" CONTENT=trial
+TAG SELECTOR="#demo>FIELDSET>OL>LI:nth-of-type(7)>TEXTAREA" CONTENT=Order<SP>placed
+'
+TAG SELECTOR="#demo>FIELDSET:nth-of-type(2)>BUTTON"

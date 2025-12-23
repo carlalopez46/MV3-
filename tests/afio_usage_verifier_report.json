@@ -1,0 +1,10 @@
+{
+  "filesUsingAfio": 8,
+  "totalAfioCalls": 89,
+  "uniqueMethods": 11,
+  "uncoveredMethods": [],
+  "expectedCalls": 89,
+  "matchesExpectedCount": true,
+  "expectedFiles": 8,
+  "matchesExpectedFiles": true
+}

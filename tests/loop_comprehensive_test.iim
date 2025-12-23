@@ -1,0 +1,178 @@
+VERSION BUILD=9.0.1
+' Comprehensive test for LOOP NEST with BREAK and CONTINUE
+' Tests the corrected implementation of LOOP command
+
+' ============================================
+' Test 1: Basic single LOOP
+' ============================================
+PROMPT Test_1:_Basic_single_LOOP_(should_count_1,_2,_3)
+LOOP NEST 3
+    PROMPT Iteration:_{{!LOOP}}
+LOOP
+PROMPT Test_1_completed
+
+' ============================================
+' Test 2: Basic nested LOOP (2 levels)
+' ============================================
+PROMPT Test_2:_Basic_nested_LOOP_(2x3_grid)
+SET !VAR1 ""
+LOOP NEST 2
+    LOOP NEST 3
+        SET !VAR1 {{!VAR1}}[{{!LOOP1}},{{!LOOP2}}]
+    LOOP
+LOOP
+PROMPT Result:_{{!VAR1}}
+' Expected: [1,1][1,2][1,3][2,1][2,2][2,3]
+
+' ============================================
+' Test 3: LOOP with inner BREAK
+' ============================================
+PROMPT Test_3:_LOOP_with_inner_BREAK
+SET !VAR2 ""
+LOOP NEST 2
+    LOOP NEST 5
+        SET !VAR2 {{!VAR2}}[{{!LOOP1}},{{!LOOP2}}]
+        ' Break inner loop at iteration 3
+        SET !EVAL {{!EVAL("{{!LOOP2}} == 3")}}
+        IF EVAL({{!EVAL}})
+            LOOP BREAK
+        ENDIF
+    LOOP
+LOOP
+PROMPT Result:_{{!VAR2}}
+' Expected: [1,1][1,2][1,3][2,1][2,2][2,3]
+
+' ============================================
+' Test 4: LOOP with outer BREAK
+' ============================================
+PROMPT Test_4:_LOOP_with_outer_BREAK
+SET !VAR3 ""
+LOOP NEST 5
+    LOOP NEST 3
+        SET !VAR3 {{!VAR3}}[{{!LOOP1}},{{!LOOP2}}]
+    LOOP
+    ' Break outer loop at iteration 2
+    SET !EVAL {{!EVAL("{{!LOOP1}} == 2")}}
+    IF EVAL({{!EVAL}})
+        LOOP BREAK
+    ENDIF
+LOOP
+PROMPT Result:_{{!VAR3}}
+' Expected: [1,1][1,2][1,3][2,1][2,2][2,3]
+
+' ============================================
+' Test 5: LOOP with inner CONTINUE
+' ============================================
+PROMPT Test_5:_LOOP_with_inner_CONTINUE
+SET !VAR4 ""
+LOOP NEST 2
+    LOOP NEST 4
+        ' Skip inner loop iteration 2
+        SET !EVAL {{!EVAL("{{!LOOP2}} == 2")}}
+        IF EVAL({{!EVAL}})
+            LOOP CONTINUE
+        ENDIF
+        SET !VAR4 {{!VAR4}}[{{!LOOP1}},{{!LOOP2}}]
+    LOOP
+LOOP
+PROMPT Result:_{{!VAR4}}
+' Expected: [1,1][1,3][1,4][2,1][2,3][2,4]
+
+' ============================================
+' Test 6: LOOP with outer CONTINUE
+' ============================================
+PROMPT Test_6:_LOOP_with_outer_CONTINUE
+SET !VAR5 ""
+LOOP NEST 3
+    ' Skip outer loop iteration 2
+    SET !EVAL {{!EVAL("{{!LOOP1}} == 2")}}
+    IF EVAL({{!EVAL}})
+        LOOP CONTINUE
+    ENDIF
+    LOOP NEST 2
+        SET !VAR5 {{!VAR5}}[{{!LOOP1}},{{!LOOP2}}]
+    LOOP
+LOOP
+PROMPT Result:_{{!VAR5}}
+' Expected: [1,1][1,2][3,1][3,2]
+
+' ============================================
+' Test 7: Triple nested LOOP
+' ============================================
+PROMPT Test_7:_Triple_nested_LOOP_(2x2x2)
+SET !VAR6 ""
+LOOP NEST 2
+    LOOP NEST 2
+        LOOP NEST 2
+            SET !VAR6 {{!VAR6}}[{{!LOOP1}},{{!LOOP2}},{{!LOOP3}}]
+        LOOP
+    LOOP
+LOOP
+PROMPT Result:_{{!VAR6}}
+' Expected: [1,1,1][1,1,2][1,2,1][1,2,2][2,1,1][2,1,2][2,2,1][2,2,2]
+
+' ============================================
+' Test 8: Triple nested with middle BREAK
+' ============================================
+PROMPT Test_8:_Triple_nested_with_middle_BREAK
+SET !VAR7 ""
+LOOP NEST 2
+    LOOP NEST 3
+        LOOP NEST 2
+            SET !VAR7 {{!VAR7}}[{{!LOOP1}},{{!LOOP2}},{{!LOOP3}}]
+        LOOP
+        ' Break middle loop at iteration 2
+        SET !EVAL {{!EVAL("{{!LOOP2}} == 2")}}
+        IF EVAL({{!EVAL}})
+            LOOP BREAK
+        ENDIF
+    LOOP
+LOOP
+PROMPT Result:_{{!VAR7}}
+' Expected: [1,1,1][1,1,2][1,2,1][1,2,2][2,1,1][2,1,2][2,2,1][2,2,2]
+
+' ============================================
+' Test 9: Complex nested with BREAK and CONTINUE
+' ============================================
+PROMPT Test_9:_Complex_nested_with_BREAK_and_CONTINUE
+SET !VAR8 ""
+LOOP NEST 3
+    ' Skip outer iteration 2
+    SET !EVAL {{!EVAL("{{!LOOP1}} == 2")}}
+    IF EVAL({{!EVAL}})
+        LOOP CONTINUE
+    ENDIF
+    LOOP NEST 5
+        ' Skip inner iteration 3
+        SET !EVAL {{!EVAL("{{!LOOP2}} == 3")}}
+        IF EVAL({{!EVAL}})
+            LOOP CONTINUE
+        ENDIF
+        ' Break inner loop at iteration 4
+        SET !EVAL {{!EVAL("{{!LOOP2}} == 4")}}
+        IF EVAL({{!EVAL}})
+            SET !VAR8 {{!VAR8}}[{{!LOOP1}},{{!LOOP2}}]
+            LOOP BREAK
+        ENDIF
+        SET !VAR8 {{!VAR8}}[{{!LOOP1}},{{!LOOP2}}]
+    LOOP
+LOOP
+PROMPT Result:_{{!VAR8}}
+' Expected: [1,1][1,2][1,4][3,1][3,2][3,4]
+
+' ============================================
+' Test 10: LOOP NEXT (synonym for CONTINUE)
+' ============================================
+PROMPT Test_10:_LOOP_NEXT_(synonym_for_CONTINUE)
+SET !VAR9 ""
+LOOP NEST 4
+    SET !EVAL {{!EVAL("{{!LOOP}} == 2")}}
+    IF EVAL({{!EVAL}})
+        LOOP NEXT
+    ENDIF
+    SET !VAR9 {{!VAR9}}{{!LOOP}}
+LOOP
+PROMPT Result:_{{!VAR9}}
+' Expected: 134
+
+PROMPT All_LOOP_tests_completed!
