@@ -215,6 +215,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     function executeContextMethod(win_id, method, sendResponse, args, requestId) {
         if (method === "recorder.start") {
             console.log("[Offscreen] Starting recorder...");
+            try {
+                if (context[win_id].mplayer && context[win_id].mplayer.playing) {
+                    console.log("[Offscreen] Stopping active playback before recording");
+                    context[win_id].mplayer.stop();
+                }
+            } catch (e) { }
             const rec = context[win_id].recorder;
             if (!rec) {
                 sendResponse({ success: false, error: `Recorder not initialized for window ${win_id}` });
@@ -608,6 +614,20 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         return true;
     }
 
+    if (request.type === 'TAB_UPDATED') {
+        const winId = request.win_id;
+        const tabId = request.tab_id;
+        const ctx = context[winId];
+
+        if (ctx && ctx.recorder && ctx.recorder.recording) {
+            console.log(`[Offscreen] Tab updated in recording window ${winId}. Triggering recorder reinjection for tab ${tabId}`);
+            if (typeof ctx.recorder.onTabUpdated === 'function') {
+                ctx.recorder.onTabUpdated(tabId);
+            }
+        }
+        return;
+    }
+
     if (request.command === 'panelCreated') {
         const win_id = request.win_id;
         if (context[win_id]) {
@@ -680,7 +700,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     } else if (req.type === 'TAB_DETACHED') {
                         if (recorder && recorder.onDetached) recorder.onDetached(req.tabId, req.detachInfo);
                     } else if (req.type === 'WEB_NAVIGATION_ERROR') {
-                        if (mplayer && mplayer.onNavigationErrorOccured) mplayer.onNavigationErrorOccured(req.details);
+                        if (mplayer && mplayer.onNavigationErrorOccurred) mplayer.onNavigationErrorOccurred(req.details);
                     } else if (req.type === 'WEB_NAVIGATION_COMMITTED') {
                         if (recorder && recorder.onCommitted) recorder.onCommitted(req.details);
                     }
@@ -1154,6 +1174,7 @@ function handleActionClicked(tab) {
             if (mplayer.playing) {
                 mplayer.stop();
             } else if (recorder && recorder.recording) {
+                console.log(`[offscreen_bg] Saving macro. Recorder actions: ${recorder.actions ? recorder.actions.length : 'undefined'}`);
                 // Actions must be copied BEFORE calling stop(), as stop() clears the actions array
                 var recorded_actions = (recorder.actions || []).slice();
                 recorder.stop();
@@ -1721,6 +1742,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 // This replaces the window.open based implementation from bg.js which doesn't work in Offscreen Document
 globalScope.edit = function (macro, overwrite, line) {
     console.log("[iMacros Offscreen] Requesting Service Worker to open editor for:", macro.name);
+    console.log("[iMacros Offscreen] Macro source length:", macro.source ? macro.source.length : "undefined");
 
     if (!chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
         console.error("[iMacros Offscreen] chrome.runtime messaging not available");
@@ -1733,22 +1755,55 @@ globalScope.edit = function (macro, overwrite, line) {
         "editorStartLine": line || 0
     };
 
-    chrome.runtime.sendMessage({
-        command: "openEditorWindow",
-        editorData
-    }, (response) => {
-        // ★Refactor: Consolidated error checking with robust message construction
-        if (chrome.runtime.lastError || (response && response.success === false)) {
-            const errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
-                (response && response.error) ||
-                "Unknown error opening editor";
+    // Helper to send message
+    const sendOpenEditorMessage = (data) => {
+        chrome.runtime.sendMessage({
+            command: "openEditorWindow",
+            editorData: data
+        }, (response) => {
+            if (chrome.runtime.lastError || (response && response.success === false)) {
+                const errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
+                    (response && response.error) ||
+                    "Unknown error opening editor";
 
-            console.error("[iMacros Offscreen] Failed to open editor:", errorMsg);
-            return;
+                console.error("[iMacros Offscreen] Failed to open editor:", errorMsg);
+                return;
+            }
+            // Success - editor window opened
+            console.log("[iMacros Offscreen] Editor window requested successfully");
+        });
+    };
+
+    // Safely check for storage availability
+    let storage = null;
+    try {
+        if (typeof chrome !== 'undefined' && chrome.storage) {
+            if (chrome.storage.session) storage = chrome.storage.session;
+            else if (chrome.storage.local) storage = chrome.storage.local;
         }
-        // Success - editor window opened
-        console.log("[iMacros Offscreen] Editor window requested successfully");
-    });
+    } catch (e) {
+        console.error("[iMacros Offscreen] Error accessing chrome.storage properties:", e);
+    }
+
+    if (!storage) {
+        console.warn("[iMacros Offscreen] No storage backend available/accessible in Offscreen. Relying on Background persistence.");
+        sendOpenEditorMessage(editorData);
+    } else {
+        try {
+            storage.set(editorData, () => {
+                if (chrome.runtime.lastError) {
+                    console.error("[iMacros Offscreen] Failed to save editor data to storage:", chrome.runtime.lastError.message);
+                } else {
+                    console.log("[iMacros Offscreen] Editor data saved to storage. Opening window...");
+                }
+                // Send message regardless of storage result (background.js might also try to save, which is fine)
+                sendOpenEditorMessage(editorData);
+            });
+        } catch (e) {
+            console.error("[iMacros Offscreen] Exception writing to storage:", e);
+            sendOpenEditorMessage(editorData);
+        }
+    }
 };
 
 // Override save function if needed (bg.js implementation usually works if it uses message passing/afio, but let's be sure)
@@ -2221,4 +2276,81 @@ if (!chrome.notifications.clear) {
         // Optional: implement clear logic
         if (callback) callback();
     };
+}
+
+/*
+ * Execute a method on a context object (mplayer, recorder, etc.)
+ * Used by background.js to proxy commands to Offscreen Document.
+ */
+function executeContextMethod(win_id, method, sendResponse, args = [], requestId = null) {
+    if (!context[win_id]) {
+        if (sendResponse) sendResponse({ success: false, error: `Context not found for window ${win_id}` });
+        return;
+    }
+
+    const parts = method.split('.');
+    let obj = context[win_id];
+    let funcName = parts.pop();
+
+    // Navigate to the object
+    for (const part of parts) {
+        if (obj[part]) {
+            obj = obj[part];
+        } else {
+            // Check if it's a top-level command that belongs to mplayer or recorder
+            if (obj === context[win_id] && parts.length === 1) {
+                if (obj.mplayer && typeof obj.mplayer[funcName] === 'function') {
+                    obj = obj.mplayer;
+                    break;
+                } else if (obj.recorder && typeof obj.recorder[funcName] === 'function') {
+                    obj = obj.recorder;
+                    break;
+                }
+            }
+
+            if (sendResponse) sendResponse({ success: false, error: `Object ${part} not found in context` });
+            return;
+        }
+    }
+
+    // Special logic for top-level commands like 'stop', 'pause' which might be on mplayer
+    if (obj === context[win_id]) {
+        if (funcName === 'stop') {
+            // Dispatch 'stop' based on what is currently active
+            if (obj.recorder && obj.recorder.recording) {
+                obj = obj.recorder;
+            } else if (obj.mplayer) {
+                // Default to mplayer (it handles idle/playing states)
+                obj = obj.mplayer;
+            }
+        } else if (typeof obj[funcName] !== 'function') {
+            // Fallback: Check mplayer
+            if (obj.mplayer && typeof obj.mplayer[funcName] === 'function') {
+                obj = obj.mplayer;
+            } else if (obj.recorder && typeof obj.recorder[funcName] === 'function') {
+                obj = obj.recorder;
+            }
+        }
+    }
+
+    if (typeof obj[funcName] === 'function') {
+        try {
+            const result = obj[funcName].apply(obj, args);
+            if (result && typeof result.then === 'function') {
+                result.then(val => {
+                    if (sendResponse) sendResponse({ success: true, result: val });
+                }).catch(err => {
+                    if (sendResponse) sendResponse({ success: false, error: err.message || String(err) });
+                });
+            } else {
+                if (sendResponse) sendResponse({ success: true, result: result });
+            }
+        } catch (err) {
+            console.error(`[Offscreen] Error executing ${method}:`, err);
+            if (sendResponse) sendResponse({ success: false, error: err.message || String(err) });
+        }
+    } else {
+        console.error(`[Offscreen] Method ${method} not found on target object`);
+        if (sendResponse) sendResponse({ success: false, error: `Method ${method} not found` });
+    }
 }

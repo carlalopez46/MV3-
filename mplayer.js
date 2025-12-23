@@ -93,7 +93,7 @@ function MacroPlayer(win_id) {
     this._onScriptError = this.onErrorOccurred.bind(this);
     // this._onBeforeNavigate = this.onBeforeNavigate.bind(this);
     // this._onCompleted = this.onNavigationCompleted.bind(this);
-    this._onErrorOccured = this.onNavigationErrorOccured.bind(this);
+    this._onErrorOccurred = this.onNavigationErrorOccurred.bind(this);
     // this._onCommitted = this.onNavigationCommitted.bind(this);
     // this._onCreatedNavTarget = this.onCreatedNavigationTarget.bind(this);
     // this._onDOMLoaded = this.onDOMContentLoaded.bind(this);
@@ -560,7 +560,7 @@ MacroPlayer.prototype.addListeners = function () {
     if (!isOffscreenDocument && typeof chrome.webNavigation !== 'undefined' && chrome.webNavigation.onErrorOccurred) {
         // chrome.webNavigation.onBeforeNavigate.addListener(this._onBeforeNavigate);
         // chrome.webNavigation.onCompleted.addListener(this._onCompleted);
-        chrome.webNavigation.onErrorOccurred.addListener(this._onErrorOccured);
+        chrome.webNavigation.onErrorOccurred.addListener(this._onErrorOccurred);
     }
 
     // chrome.webNavigation.onCommitted.addListener(this._onCommitted);
@@ -636,7 +636,7 @@ MacroPlayer.prototype.removeListeners = function () {
     // chrome.webNavigation.onBeforeNavigate.removeListener(this._onBeforeNavigate);
     // chrome.webNavigation.onCompleted.removeListener(this._onCompleted);
     if (typeof chrome.webNavigation !== 'undefined' && chrome.webNavigation.onErrorOccurred) {
-        chrome.webNavigation.onErrorOccurred.removeListener(this._onErrorOccured);
+        chrome.webNavigation.onErrorOccurred.removeListener(this._onErrorOccurred);
     }
 
     // chrome.webNavigation.onCommitted.removeListener(this._onCommitted);
@@ -726,7 +726,7 @@ MacroPlayer.prototype.isInternalURL = function (url) {
 // };
 
 
-MacroPlayer.prototype.onNavigationErrorOccured = function (details) {
+MacroPlayer.prototype.onNavigationErrorOccurred = function (details) {
     if (details.tabId != this.tab_id)
         return;
 
@@ -4740,6 +4740,32 @@ MacroPlayer.prototype.saveProfilerData = function () {
             return afio.writeTextFile(file, x);
         }
     }).catch(console.error.bind(console));
+};
+
+
+
+MacroPlayer.prototype.pause = function (force) {
+    if (this.paused && !force) return;
+    this.pauseIsPending = true;
+    notifyPanel(this.win_id, "PANEL_STATE_UPDATE", { state: "paused" });
+    if (typeof context !== 'undefined' && context[this.win_id]) {
+        context[this.win_id].state = "paused";
+        context[this.win_id].pausedTabId = this.tab_id;
+    }
+    // No explicit stop needed, playNextAction handles pauseIsPending
+};
+
+
+MacroPlayer.prototype.unpause = function () {
+    if (!this.paused) return;
+    this.paused = false;
+    this.pauseIsPending = false;
+    notifyPanel(this.win_id, "PANEL_STATE_UPDATE", { state: "playing" });
+    if (typeof context !== 'undefined' && context[this.win_id]) {
+        context[this.win_id].state = "playing";
+    }
+    // Resume execution
+    this.next("unpause");
 };
 
 

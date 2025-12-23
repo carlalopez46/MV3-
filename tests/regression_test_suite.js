@@ -7,7 +7,7 @@
  * - Message handler completeness (panel.js)
  */
 
-(function() {
+(function () {
     'use strict';
 
     const results = { passed: 0, failed: 0, skipped: 0 };
@@ -163,25 +163,25 @@
             return;
         }
 
-            const requiredHandlers = [
-                'PANEL_ADD_LINE',
-                'PANEL_REMOVE_LAST_LINE',
-                'PANEL_SHOW_MACRO_TREE'
-            ];
+        const requiredHandlers = [
+            'PANEL_ADD_LINE',
+            'PANEL_REMOVE_LAST_LINE',
+            'PANEL_SHOW_MACRO_TREE'
+        ];
 
-            const missingHandlers = [];
-            for (const handler of requiredHandlers) {
-                const pattern = new RegExp(`message\\.type\\s*===\\s*["']${handler}["']`);
-                if (!pattern.test(source)) {
-                    missingHandlers.push(handler);
-                }
+        const missingHandlers = [];
+        for (const handler of requiredHandlers) {
+            const pattern = new RegExp(`message\\.type\\s*===\\s*["']${handler}["']`);
+            if (!pattern.test(source)) {
+                missingHandlers.push(handler);
             }
+        }
 
-            if (missingHandlers.length === 0) {
-                pass(testName, 'All required message handlers are present');
-            } else {
-                fail(testName, `Missing handlers: ${missingHandlers.join(', ')}`);
-            }
+        if (missingHandlers.length === 0) {
+            pass(testName, 'All required message handlers are present');
+        } else {
+            fail(testName, `Missing handlers: ${missingHandlers.join(', ')}`);
+        }
     }
 
     /**
@@ -226,6 +226,52 @@
     }
 
     /**
+     * Test: Method name spelling is correct in offscreen_bg.js
+     * Bug: Was misspelled as onNavigationErrorOccured (one 'r')
+     * Fix: Renamed to onNavigationErrorOccurred
+     */
+    function testOnNavigationErrorOccurredSpelling() {
+        const testName = 'Method name is correctly spelled as onNavigationErrorOccurred';
+
+        // Check if we're in Node.js environment with require available
+        let fs, path, source;
+        try {
+            const requireFn = typeof require !== 'undefined' ? require : null;
+            if (!requireFn) {
+                skip(testName, 'require() not available in this environment');
+                return;
+            }
+            fs = requireFn('fs');
+            path = requireFn('path');
+            const testDir = typeof __dirname !== 'undefined' ? __dirname : '.';
+            const offscreenPath = path.join(testDir, '..', 'offscreen_bg.js');
+            source = fs.readFileSync(offscreenPath, 'utf8');
+        } catch (e) {
+            if (e.code === 'MODULE_NOT_FOUND' || e.code === 'ENOENT') {
+                skip(testName, 'Cannot read offscreen_bg.js in this environment');
+                return;
+            }
+            fail(testName, `Exception: ${e.message}`);
+            return;
+        }
+
+        const typoPattern = /onNavigationErrorOccured(?!r)/;
+        const correctPattern = /onNavigationErrorOccurred/;
+
+        if (typoPattern.test(source)) {
+            fail(testName, 'Found typo "onNavigationErrorOccured" (missing double r)');
+            return;
+        }
+
+        if (!correctPattern.test(source)) {
+            fail(testName, 'Correct spelling "onNavigationErrorOccurred" not found in offscreen_bg.js');
+            return;
+        }
+
+        pass(testName, 'Method name is correctly spelled as onNavigationErrorOccurred');
+    }
+
+    /**
      * Run all regression tests
      */
     function run() {
@@ -243,6 +289,7 @@
         testPlayInFlightGuardLocation();
         testPanelMessageHandlersExist();
         testAsyncHandlerReturnTrue();
+        testOnNavigationErrorOccurredSpelling();
 
         log('');
         log(`Summary: ${results.passed} passed, ${results.failed} failed, ${results.skipped} skipped`);
