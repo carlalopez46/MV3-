@@ -2113,6 +2113,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 console.error("[iMacros SW] startRecording error:", err);
                 sendResponse({ success: false, error: (err && err.message) || String(err) });
             });
+        }).catch(err => {
+            console.error("[iMacros SW] Failed to resolve window ID for startRecording:", err);
+            sendResponse({ success: false, error: 'Failed to resolve window ID', details: (err && err.message) || String(err) });
         });
 
         return true;
@@ -2146,6 +2149,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 console.error("[iMacros SW] stop error:", err);
                 sendResponse({ success: false, error: (err && err.message) || String(err) });
             });
+        }).catch(err => {
+            console.error("[iMacros SW] Failed to resolve window ID for stop:", err);
+            sendResponse({ success: false, error: 'Failed to resolve window ID', details: (err && err.message) || String(err) });
         });
 
         return true;
@@ -2179,6 +2185,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 console.error("[iMacros SW] pause error:", err);
                 sendResponse({ success: false, error: (err && err.message) || String(err) });
             });
+        }).catch(err => {
+            console.error("[iMacros SW] Failed to resolve window ID for pause:", err);
+            sendResponse({ success: false, error: 'Failed to resolve window ID', details: (err && err.message) || String(err) });
         });
 
         return true;
@@ -2212,6 +2221,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
                 console.error("[iMacros SW] unpause error:", err);
                 sendResponse({ success: false, error: (err && err.message) || String(err) });
             });
+        }).catch(err => {
+            console.error("[iMacros SW] Failed to resolve window ID for unpause:", err);
+            sendResponse({ success: false, error: 'Failed to resolve window ID', details: (err && err.message) || String(err) });
         });
 
         return true;
@@ -2444,12 +2456,16 @@ async function resolveTargetWindowId(msgWinId, sender) {
                     } else {
                         sendResponse({ success: true });
                     }
-        }).catch(err => {
-            console.error("[iMacros SW] playFile error:", err);
-            clearPlayInFlight(win_id);
-            sendResponse({ success: false, error: (err && err.message) || String(err) });
-        });
-        });
+                }).catch(err => {
+                    console.error("[iMacros SW] playFile error:", err);
+                    clearPlayInFlight(win_id);
+                    sendResponse({ success: false, error: (err && err.message) || String(err) });
+                });
+            }).catch(err => {
+                // Handle resolveTargetWindowId failure
+                console.error("[iMacros SW] Failed to resolve target window ID:", err);
+                sendResponse({ success: false, error: 'Failed to resolve window ID', details: (err && err.message) || String(err) });
+            });
     }).catch((error) => {
         console.warn('[iMacros SW] Failed to restore execution ID before playMacro check:', error);
         sendResponse({ success: false, error: 'Failed to restore execution ID', details: (error && error.message) || String(error) });
@@ -2484,6 +2500,9 @@ async function resolveTargetWindowId(msgWinId, sender) {
             });
 
             sendResponse({ success: true });
+        }).catch(err => {
+            console.error("[iMacros SW] Failed to resolve window ID for editMacro:", err);
+            sendResponse({ success: false, error: 'Failed to resolve window ID', details: (err && err.message) || String(err) });
         });
 
         return true;

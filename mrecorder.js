@@ -461,14 +461,23 @@ Recorder.prototype.onRecordAction = function (data, tab_id, callback) {
         return;
     }
 
-    console.log("[DEBUG] onRecordAction called - action:", data.action, "tab_id:", tab_id);
+    // Deduplication guard: prevent processing the same action multiple times
+    // due to multiple message paths in MV3 architecture
+    const now = Date.now();
+    const dedupeKey = data.action + (data._frame ? JSON.stringify(data._frame) : '');
+    if (this._lastRecordedAction === dedupeKey && (now - this._lastRecordedTime) < 100) {
+        // Same action within 100ms - likely a duplicate from another message path
+        typeof callback === "function" && callback({ ok: true, deduplicated: true });
+        return;
+    }
+    this._lastRecordedAction = dedupeKey;
+    this._lastRecordedTime = now;
 
     if (data._frame) {
         this.checkForFrameChange(data._frame);
     }
 
     let in_event_mode = Storage.getChar("record-mode") == "event"
-    console.log("[DEBUG] Recording action, in_event_mode:", in_event_mode);
 
     const recorded = this.recordAction(data.action)
     if (!recorded) {
