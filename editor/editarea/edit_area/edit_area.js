@@ -111,7 +111,8 @@ EditArea.prototype.init = function () {
 	var syntax_selec;
 	if (syntax_selec = _$("syntax_selection")) {
 		// set up syntax selection lsit in the toolbar
-		for (var i = 0; i < t.syntax_list.length; i++) {
+		var i, i2;
+		for (i = 0; i < t.syntax_list.length; i++) {
 			var syntax = t.syntax_list[i];
 			var option = document.createElement("option");
 			option.value = syntax;
@@ -125,7 +126,7 @@ EditArea.prototype.init = function () {
 	// add plugins buttons in the toolbar
 	var spans = parent.getChildren(_$("toolbar_1"), "span", "", "", "all", -1);
 
-	for (var i = 0; i < spans.length; i++) {
+	for (i = 0; i < spans.length; i++) {
 		var id = spans[i].id.replace(/tmp_tool_(.*)/, "$1");
 		if (id != spans[i].id) {
 			for (var j in t.plugins) {
@@ -158,7 +159,7 @@ EditArea.prototype.init = function () {
 
 	// insert css rules for highlight mode		
 	if (typeof (parent.editAreaLoader.syntax[s["syntax"]]) != "undefined") {
-		for (var i in parent.editAreaLoader.syntax) {
+		for (i in parent.editAreaLoader.syntax) {
 			if (typeof (parent.editAreaLoader.syntax[i]["styles"]) != "undefined") {
 				t.add_style(parent.editAreaLoader.syntax[i]["styles"]);
 			}
@@ -171,7 +172,7 @@ EditArea.prototype.init = function () {
 	else
 		_$("editor").onkeydown = keyDown;
 
-	for (var i = 0; i < t.inlinePopup.length; i++) {
+	for (i = 0; i < t.inlinePopup.length; i++) {
 		if (t.isOpera)
 			_$(t.inlinePopup[i]["popup_id"]).onkeypress = keyDown;
 		else
@@ -193,7 +194,7 @@ EditArea.prototype.init = function () {
 
 	// set unselectable text
 	var children = parent.getChildren(document.body, "", "selec", "none", "all", -1);
-	for (var i = 0; i < children.length; i++) {
+	for (i = 0; i < children.length; i++) {
 		if (t.isIE)
 			children[i].unselectable = true; // IE
 		else
@@ -293,7 +294,7 @@ EditArea.prototype.init = function () {
 	t.check_line_selection(true);
 	t.scroll_to_view();
 
-	for (var i in t.plugins) {
+	for (i in t.plugins) {
 		if (typeof (t.plugins[i].onload) == "function")
 			t.plugins[i].onload();
 	}
@@ -344,7 +345,7 @@ EditArea.prototype.update_size = function () {
 		//alert("result h: "+ height+" w: "+width+"\ntoolbar h: "+this.get_all_toolbar_height()+"\nbody_h: "+document.body.offsetHeight);
 
 		// check that the popups don't get out of the screen
-		for (i = 0; i < editArea.inlinePopup.length; i++) {
+		for (var i = 0; i < editArea.inlinePopup.length; i++) {
 			popup = _$(editArea.inlinePopup[i]["popup_id"]);
 			maxLeft = d.body.offsetWidth - popup.offsetWidth;
 			maxTop = d.body.offsetHeight - popup.offsetHeight;
@@ -387,7 +388,7 @@ EditArea.prototype.manage_size = function (onlyOneTime) {
 		}
 		// manage wrap width
 		if (this.settings['word_wrap']) {
-			newW = this.textarea.offsetWidth;
+			var newW = this.textarea.offsetWidth;
 			if (this.isFirefox || this.isIE)
 				newW -= 2;
 			if (this.isSafari)
@@ -414,7 +415,7 @@ EditArea.prototype.manage_size = function (onlyOneTime) {
 		//3) if there is new lines, we add new line numbers in the line numeration area
 		if (this.last_selection["nb_line"] >= this.line_number) {
 			var newLines = '', destDiv = _$("line_number"), start = this.line_number, end = this.last_selection["nb_line"] + 100;
-			for (i = start + 1; i < end; i++) {
+			for (var i = start + 1; i < end; i++) {
 				newLines += '<div id="line_' + i + '">' + i + "</div>";
 				this.line_number++;
 			}
@@ -523,12 +524,12 @@ EditArea.prototype.add_plugin = function (plug_name, plug_obj) {
 
 EditArea.prototype.load_css = function (url) {
 	try {
-		link = document.createElement("link");
+		var link = document.createElement("link");
 		link.type = "text/css";
 		link.rel = "stylesheet";
 		link.media = "all";
 		link.href = url;
-		head = document.getElementsByTagName("head");
+		var head = document.getElementsByTagName("head");
 		head[0].appendChild(link);
 	} catch (e) {
 		document.write("<link href='" + url + "' rel='stylesheet' type='text/css' />");
@@ -537,11 +538,11 @@ EditArea.prototype.load_css = function (url) {
 
 EditArea.prototype.load_script = function (url) {
 	try {
-		script = document.createElement("script");
+		var script = document.createElement("script");
 		script.type = "text/javascript";
 		script.src = url;
 		script.charset = "UTF-8";
-		head = document.getElementsByTagName("head");
+		var head = document.getElementsByTagName("head");
 		head[0].appendChild(script);
 	} catch (e) {
 		document.write("<script type='text/javascript' src='" + url + "' charset=\"UTF-8\"><" + "/script>");

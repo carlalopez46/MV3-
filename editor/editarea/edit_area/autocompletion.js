@@ -340,7 +340,8 @@ var EditArea_autocompletion = {
 			var results = [];
 
 
-			for (var i in this.curr_syntax) {
+			var i, prefix, j, hasMatch, before;
+			for (i in this.curr_syntax) {
 				var last_chars = str.substring(Math.max(0, start - this.curr_syntax[i]["max_text_length"]), start);
 				var matchNextletter = str.substring(start, start + 1).match(this.curr_syntax[i]["match_next_letter"]);
 				// if not writting in the middle of a word or if forcing display
@@ -356,15 +357,15 @@ var EditArea_autocompletion = {
 						var begin_word = match_word[1];
 						var match_curr_word = new RegExp("^" + parent.editAreaLoader.get_escaped_regexp(begin_word), this.curr_syntax[i]["modifiers"]);
 						//console.log( match_curr_word );
-						for (var prefix in this.curr_syntax[i]["keywords"]) {
+						for (prefix in this.curr_syntax[i]["keywords"]) {
 							//	parent.console.log( this.curr_syntax[i]["keywords"][prefix] );
-							for (var j = 0; j < this.curr_syntax[i]["keywords"][prefix]['datas'].length; j++) {
+							for (j = 0; j < this.curr_syntax[i]["keywords"][prefix]['datas'].length; j++) {
 								//		parent.console.log( this.curr_syntax[i]["keywords"][prefix]['datas'][j]['is_typing'] );
 								// the key word match or force display 
 								if (this.curr_syntax[i]["keywords"][prefix]['datas'][j]['is_typing'].match(match_curr_word)) {
 									//		parent.console.log('match');
-									var hasMatch = false;
-									var before = last_chars.substr(0, last_chars.length - begin_word.length);
+									hasMatch = false;
+									before = last_chars.substr(0, last_chars.length - begin_word.length);
 
 									// no prefix to match => it's valid
 									if (!match_prefix_separator && this.curr_syntax[i]["keywords"][prefix]['prefix'].length == 0) {
@@ -386,16 +387,16 @@ var EditArea_autocompletion = {
 					// it doesn't match any possible word but we want to display something
 					// we'll display to list of all available words
 					else if (this.forceDisplay || match_prefix_separator) {
-						for (var prefix in this.curr_syntax[i]["keywords"]) {
-							for (var j = 0; j < this.curr_syntax[i]["keywords"][prefix]['datas'].length; j++) {
-								var hasMatch = false;
+						for (prefix in this.curr_syntax[i]["keywords"]) {
+							for (j = 0; j < this.curr_syntax[i]["keywords"][prefix]['datas'].length; j++) {
+								hasMatch = false;
 								// no prefix to match => it's valid
 								if (!match_prefix_separator && this.curr_syntax[i]["keywords"][prefix]['prefix'].length == 0) {
 									hasMatch = true;
 								}
 								// we still need to check the prefix if there is one
 								else if (match_prefix_separator && this.curr_syntax[i]["keywords"][prefix]['prefix'].length > 0) {
-									var before = last_chars; //.substr( 0, last_chars.length );
+									before = last_chars; //.substr( 0, last_chars.length );
 									if (before.match(this.curr_syntax[i]["keywords"][prefix]['prefix_reg']))
 										hasMatch = true;
 								}
@@ -419,7 +420,7 @@ var EditArea_autocompletion = {
 			else {
 				// build the suggestion box content
 				var lines = [];
-				for (var i = 0; i < results.length; i++) {
+				for (i = 0; i < results.length; i++) {
 					var line = "<li><a href=\"#\" class=\"entry\" onmousedown=\"EditArea_autocompletion._select('" + results[i][1]['replace_with'].replace(new RegExp('"', "g"), "&quot;") + "');return false;\">" + results[i][1]['comment'];
 					if (results[i][0]['prefix_name'].length > 0)
 						line += '<span class="prefix">' + results[i][0]['prefix_name'] + '</span>';
