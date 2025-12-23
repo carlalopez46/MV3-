@@ -147,7 +147,7 @@ var EditArea_autocompletion = {
 	 */
 	, execCommand: function (cmd, param) {
 		switch (cmd) {
-			case 'toggle_autocompletion':
+			case 'toggle_autocompletion': {
 				var icon = document.getElementById("autocompletion");
 				if (!this.enabled) {
 					if (icon != null) {
@@ -161,6 +161,7 @@ var EditArea_autocompletion = {
 						editArea.switchClassSticky(icon, 'editAreaButtonNormal', false);
 				}
 				return true;
+			}
 		}
 		return true;
 	}

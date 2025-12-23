@@ -1,4 +1,4 @@
-// change_to: "on" or "off"
+// change_to: true (enable) or false (disable)
 EditArea.prototype.change_highlight = function (change_to) {
 	if (this.settings["syntax"].length == 0 && change_to == false) {
 		this.switchClassSticky(_$("highlight"), 'editAreaButtonDisabled', true);

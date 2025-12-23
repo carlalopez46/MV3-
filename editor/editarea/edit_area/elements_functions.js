@@ -306,7 +306,7 @@ function IE_textarea_blur() {
 
 // select the text for IE (take into account the \r difference)
 function set_IE_selection(t) {
-	var nbLineStart, nbLineStart, nbLineEnd, range;
+	var nbLineStart, nbLineEnd, range;
 	if (!window.closed) {
 		nbLineStart = t.value.substr(0, t.selectionStart).split("\n").length - 1;
 		nbLineEnd = t.value.substr(0, t.selectionEnd).split("\n").length - 1;

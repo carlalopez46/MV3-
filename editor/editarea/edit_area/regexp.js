@@ -58,7 +58,7 @@ EditArea.prototype.apply_syntax = function (text, lang) {
     sy = parent.editAreaLoader.syntax[lang];
     if (sy["custom_regexp"]['before']) {
         for (i in sy["custom_regexp"]['before']) {
-            var convert = "$1µ__" + sy["custom_regexp"]['before'][i]['class'] + "__µ$2µ_END_µ$3";
+            convert = "$1µ__" + sy["custom_regexp"]['before'][i]['class'] + "__µ$2µ_END_µ$3";
             text = text.replace(sy["custom_regexp"]['before'][i]['regexp'], convert);
         }
     }

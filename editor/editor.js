@@ -43,9 +43,7 @@ var Editor = {
         bypass.setAttribute("file_id", file.file_id || "");
         console.log("[iMacros Editor] bypass setAttribute file_id:", bypass.getAttribute("file_id"));
         console.log("[iMacros Editor] Setting content. Source length:", file.source ? file.source.length : "undefined");
-        if (file.source && file.source.length > 0) {
-            console.log("[iMacros Editor] Source preview:", file.source.substring(0, 100));
-        } else {
+        if (!(file.source && file.source.length > 0)) {
             console.warn("[iMacros Editor] Source is empty or undefined!");
         }
         bypass.setAttribute("content", file.source);
