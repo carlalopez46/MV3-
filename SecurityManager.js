@@ -30,18 +30,15 @@ var SecurityManager = (function () {
         init: async function () {
             if (_initPromise) return _initPromise;
 
+            const extensionId = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id)
+                ? chrome.runtime.id : null;
+
+            if (!extensionId) {
+                console.error("[SecurityManager] Initialization failed: No runtime ID.");
+                return Promise.reject(new Error("SecurityManager: chrome.runtime.id is unavailable."));
+            }
+
             _initPromise = new Promise((resolve, reject) => {
-                const extensionId = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id)
-                    ? chrome.runtime.id : null;
-
-                if (!extensionId) {
-                    const err = new Error("SecurityManager: chrome.runtime.id is unavailable.");
-                    console.error("[SecurityManager] Initialization failed: No runtime ID.");
-                    _initPromise = null; // Allow retry if it failed due to some transient reason
-                    reject(err);
-                    return;
-                }
-
                 chrome.storage.local.get(['master_secret'], function (items) {
                     if (chrome.runtime.lastError) {
                         console.error("[SecurityManager] Storage access failed.");

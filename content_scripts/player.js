@@ -1602,8 +1602,13 @@ CSPlayer.prototype.handleTagCommand = function (args, callback) {
 
                 // Try to infer tagName from selector/xpath if empty
                 if (!args.tagName && descriptor) {
-                    var m = descriptor.match(/^([a-zA-Z0-9\-]+)/);
-                    if (m) args.tagName = m[1];
+                    // For CSS selectors, extract the tag before class/id/attribute
+                    var cssMatch = descriptor.match(/^([a-zA-Z][a-zA-Z0-9\-]*)/);
+                    // For XPath, try to find last element name or specific node test
+                    var xpathMatch = descriptor.match(/::([a-zA-Z][a-zA-Z0-9\-]*)(?:\[|$)/);
+                    if (cssMatch) args.tagName = cssMatch[1];
+                    else if (xpathMatch) args.tagName = xpathMatch[1];
+                    else args.tagName = 'element';
                 }
 
                 var msg = "element " + args.tagName.toUpperCase() +
