@@ -418,7 +418,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 if (sendResponse) {
                     sendResponse({ success: false, error: 'Macro already playing', state: 'playing' });
                 }
-                return true; // Keep channel open for async response
+                return false; // Response already sent synchronously
             }
 
             // Use isDuplicatePlayStart for comprehensive duplicate detection
@@ -427,7 +427,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 if (sendResponse) {
                     sendResponse({ success: false, error: 'Duplicate play request', state: 'starting' });
                 }
-                return true; // Keep channel open for async response
+                return false; // Response already sent synchronously
             }
 
             recordPlayStart(win_id, filePath);
@@ -605,7 +605,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         if (sendResponse) {
             sendResponse(response);
         }
-        return true;
+        return false; // Response sent synchronously
     }
 
     if (request.command === 'panelCreated') {
@@ -614,7 +614,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             context[win_id].panelId = request.panelId;
         }
         if (sendResponse) sendResponse({ success: true });
-        return true;
+        return false; // Response sent synchronously
     }
 
     if (request.command === 'panelClosed') {
@@ -626,7 +626,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
         }
         if (sendResponse) sendResponse({ success: true });
-        return true;
+        return false; // Response sent synchronously
     }
 
     // Download events
@@ -652,7 +652,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
         }
         if (sendResponse) sendResponse({ success: true });
-        return true;
+        return false; // Response sent synchronously
     }
 
     // Tab events
@@ -689,7 +689,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
         }
         if (sendResponse) sendResponse({ success: true });
-        return true;
+        return false; // Response sent synchronously
     }
 
     if (request.command === 'FORWARD_MESSAGE') {
@@ -697,7 +697,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         if (typeof communicator !== 'undefined') {
             const msg = { topic: topic, data: data };
             if (communicator.handlers && communicator.handlers[topic]) {
+                // _execHandlers may call sendResponse asynchronously
                 communicator._execHandlers(msg, tab_id, win_id, sendResponse);
+                return true; // Keep channel open for async response
             } else {
                 if (sendResponse) sendResponse({
                     success: true,
@@ -705,6 +707,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     error: 'No handler found',
                     notHandled: true
                 });
+                return false; // Response sent synchronously
             }
         } else {
             if (sendResponse) sendResponse({
@@ -712,8 +715,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 state: 'idle',
                 error: 'Communicator not available'
             });
+            return false; // Response sent synchronously
         }
-        return true;
     }
 
     if (request.command === 'runMacroByUrl') {

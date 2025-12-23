@@ -186,8 +186,12 @@ Communicator.prototype.postMessage = function (topic, data, tab_id, callback, fr
             (response) => {
                 if (chrome.runtime.lastError) {
                     console.warn('[Communicator] Direct sendMessage error:', chrome.runtime.lastError.message);
+                    // Pass error to callback instead of undefined response
+                    if (callback) callback({ error: chrome.runtime.lastError.message, found: false });
+                } else if (callback) {
+                    if (typeof response !== 'undefined') callback(response);
+                    else callback({ error: 'No response from content script', found: false });
                 }
-                if (callback) callback(response);
             }
         );
     } else {
