@@ -168,7 +168,7 @@ window.updatePanels = function () {
 function onPanelLoaded(panel, panelWindowId) {
     if (panelWindowId) {
         for (var win_id in context) {
-            win_id = parseInt(win_id);
+            win_id = parseInt(win_id, 10);
             if (!isNaN(win_id) && context[win_id].panelId === panelWindowId) {
                 context[win_id].panelWindow = panel;
                 return win_id;
@@ -178,7 +178,7 @@ function onPanelLoaded(panel, panelWindowId) {
 
     const contextPanelIds = {};
     for (var id in context) {
-        const numId = parseInt(id);
+        const numId = parseInt(id, 10);
         if (!isNaN(numId) && context[numId]) {
             contextPanelIds[numId] = context[numId].panelId || 'undefined';
         }
@@ -633,7 +633,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (['DOWNLOAD_CREATED', 'DOWNLOAD_CHANGED'].includes(request.type)) {
         const targetWinIds = request.win_id ? [request.win_id] : Object.keys(context);
         for (let win_id of targetWinIds) {
-            win_id = parseInt(win_id);
+            win_id = parseInt(win_id, 10);
             if (context[win_id]) {
                 const mplayer = context[win_id].mplayer;
                 try {
@@ -1088,7 +1088,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
             case 'notificationClicked': {
                 var n_id = request.notificationId;
-                var w_id = parseInt(n_id);
+                var w_id = parseInt(n_id, 10);
                 if (isNaN(w_id) || !context[w_id] || !context[w_id].info_args) break;
                 var info = context[w_id].info_args;
                 if (info.errorCode == 1) break;
@@ -1232,7 +1232,7 @@ function handleActionClicked(tab) {
 function addTab(url, win_id) {
     var args = { url: url };
     if (win_id)
-        args.windowId = parseInt(win_id);
+        args.windowId = parseInt(win_id, 10);
 
     chrome.tabs.create(args, function (tab) {
         if (chrome.runtime.lastError) {
@@ -1981,7 +1981,7 @@ function showNotification(win_id, args) {
 // Global notification click listener
 if (chrome.notifications && chrome.notifications.onClicked) {
     chrome.notifications.onClicked.addListener(function (n_id) {
-        var w_id = parseInt(n_id);
+        var w_id = parseInt(n_id, 10);
         if (isNaN(w_id) || !context[w_id] || !context[w_id].info_args)
             return;
         var info = context[w_id].info_args;
@@ -2123,7 +2123,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             // by checking which context has this panelId
             let found_win_id = null;
             for (let win_id in context) {
-                win_id = parseInt(win_id);
+                win_id = parseInt(win_id, 10);
                 if (!isNaN(win_id) && context[win_id].panelId === panelWindowId) {
                     found_win_id = win_id;
                     break;

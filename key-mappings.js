@@ -57,7 +57,7 @@ const SPECIAL_KEY_MAPPINGS = {
 
 const KEY_NAME_TO_CODE = {};
 for (const [code, name] of Object.entries(SPECIAL_KEY_MAPPINGS)) {
-    KEY_NAME_TO_CODE[name] = parseInt(code);
+    KEY_NAME_TO_CODE[name] = parseInt(code, 10);
 }
 
 // 短縮形もサポート

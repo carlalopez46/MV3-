@@ -1717,8 +1717,8 @@ function getXYOffset(w) {
         try {
             let style = w.getComputedStyle(w.document.body);
             return {
-                x_offset: parseInt(style.marginLeft) || 0,
-                y_offset: parseInt(style.marginTop) || 0
+                x_offset: parseInt(style.marginLeft, 10) || 0,
+                y_offset: parseInt(style.marginTop, 10) || 0
             };
         } catch (e) {
             console.warn("[iMacros] Error getting body style in top frame:", e);
@@ -1742,8 +1742,8 @@ function getXYOffset(w) {
         let rect = frameElement.getBoundingClientRect();
 
         return {
-            x_offset: rect.left + x_offset + (parseInt(style.borderLeftWidth) || 0),
-            y_offset: rect.top + y_offset + (parseInt(style.borderTopWidth) || 0)
+            x_offset: rect.left + x_offset + (parseInt(style.borderLeftWidth, 10) || 0),
+            y_offset: rect.top + y_offset + (parseInt(style.borderTopWidth, 10) || 0)
         };
     } catch (e) {
         // Suppress errors for cross-origin frames

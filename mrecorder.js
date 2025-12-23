@@ -661,7 +661,7 @@ Recorder.prototype.packKeyboardEvents = function (extra) {
         cur_match[5] == prv_match[5]) {
         let keys = prv_match[2] == "KEYS" ?
             JSON.parse(prv_match[4]) : [JSON.parse(prv_match[3])]
-        keys.push(parseInt(cur_match[2]))
+        keys.push(parseInt(cur_match[2], 10))
         this.recordAction(
             "EVENTS TYPE=KEYPRESS SELECTOR=\"" + cur_match[1] + "\"" +
             " KEYS=" + "\"" + JSON.stringify(keys) + "\"" +
