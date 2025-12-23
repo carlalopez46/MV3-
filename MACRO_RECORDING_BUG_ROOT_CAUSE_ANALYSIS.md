@@ -212,7 +212,7 @@ connector.postMessage(
 
 確認してください:
 ```bash
-grep -A 20 "Recorder.prototype.onRecordAction" /Users/sam/Downloads/iMacrosMV3-main/mrecorder.js
+grep -A 20 "Recorder.prototype.onRecordAction" ./mrecorder.js
 ```
 
 **期待される処理**:

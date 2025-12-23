@@ -9,7 +9,7 @@ var SecurityManager = (function () {
     // For MV3, we should ideally use a key stored in secure storage.
     const DEFAULT_MASTER_KEY = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id)
         ? "iMacros_" + chrome.runtime.id
-        : "iMacros_Fallback_Common_Key";
+        : (function () { throw new Error("Security Error: Unable to determine a unique installation key for encryption."); })();
 
     return {
         /**

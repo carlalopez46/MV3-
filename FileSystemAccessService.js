@@ -402,7 +402,7 @@ class FileSystemAccessService {
             if (err.name === 'AbortError') {
                 console.log('User cancelled directory selection');
             } else {
-                console.error('Failed to select directory:', err);
+                fsAccessLogError('FileSystemAccessService.selectDirectory', err);
             }
             return false;
         }
@@ -734,7 +734,7 @@ class FileSystemAccessService {
                 throw err;
             }
         } catch (err) {
-            console.error('node_exists error:', err);
+            fsAccessLogError('FileSystemAccessService.node_exists', err);
             return false;
         }
     }
@@ -834,11 +834,12 @@ class FileSystemAccessService {
                     resolve(reader.result); // data:mime/type;base64,... 形式
                 };
                 reader.onerror = () => {
-                    const error = new Error(`Failed to read binary file: ${path}`);
+                    const error = new Error(`Failed to read binary file: ${path}. Original error: ${reader.error ? reader.error.message : 'Unknown'}`);
                     fsAccessLogError('FileSystemAccessService.readBinaryFile', error, {
                         path: path,
                         severity: 'HIGH',
-                        category: 'FILE_READ'
+                        category: 'FILE_READ',
+                        readerError: reader.error
                     });
                     reject(error);
                 };

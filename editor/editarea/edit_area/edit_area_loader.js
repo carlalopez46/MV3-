@@ -93,7 +93,7 @@ function EditAreaLoader() {
 	// navigator identification
 	t.set_browser_infos(t);
 
-	if (t.isIE >= 6 || t.isGecko || (t.isWebKit && !t.isSafari < 3) || t.isOpera >= 9 || t.isCamino)
+	if (t.isIE >= 6 || t.isGecko || (t.isWebKit && t.isSafari >= 3) || t.isOpera >= 9 || t.isCamino)
 		t.isValidBrowser = true;
 	else
 		t.isValidBrowser = false;
@@ -322,7 +322,7 @@ EditAreaLoader.prototype = {
 			span = d.createElement("span");
 			span.id = "EditAreaArroundInfos_" + id;
 			if (editAreas[id]["settings"]["allow_toggle"]) {
-				checked = (editAreas[id]["settings"]["display"] == "onload") ? "checked='checked'" : "";
+				var checked = (editAreas[id]["settings"]["display"] == "onload") ? "checked='checked'" : "";
 				html += "<div id='edit_area_toggle_" + i + "'>";
 				html += "<input id='edit_area_toggle_checkbox_" + id + "' class='toggle_" + id + "' type='checkbox' onclick='editAreaLoader.toggle(\"" + id + "\");' accesskey='e' " + checked + " />";
 				html += "<label for='edit_area_toggle_checkbox_" + id + "'>{$toggle}</label></div>";
@@ -352,7 +352,7 @@ EditAreaLoader.prototype = {
 		}
 
 		// get toolbar content
-		area = editAreas[id];
+		var area = editAreas[id];
 
 		for (i = 0; i < area["settings"]["tab_toolbar"].length; i++) {
 			//	alert(this.tab_toolbar[i]+"\n"+ this.get_control_html(this.tab_toolbar[i]));
