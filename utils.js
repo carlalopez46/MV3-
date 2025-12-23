@@ -9,7 +9,8 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 // Use Object.create(null) to avoid prototype pollution issues
 var _localStorageData = Object.create(null);
 // Namespace prefix to avoid conflicts with other chrome.storage.local data
-var _LOCALSTORAGE_PREFIX = '__imacros_ls__:';
+var _LOCALSTORAGE_PREFIX = 'localStorage_';
+var _LEGACY_LOCALSTORAGE_PREFIX = '__imacros_ls__:';
 // Flag to track if hydration has been completed (exposed globally for external checks)
 
 // Check if localStorage needs polyfill - use try-catch to safely handle ReferenceError in Service Workers
@@ -47,7 +48,11 @@ if (_needsLocalStoragePolyfill) {
             delete _localStorageData[key];
             // Remove from chrome.storage.local as well (with namespace prefix)
             if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-                chrome.storage.local.remove(_LOCALSTORAGE_PREFIX + key, function () {
+                var keysToRemove = [_LOCALSTORAGE_PREFIX + key];
+                if (_LEGACY_LOCALSTORAGE_PREFIX && _LEGACY_LOCALSTORAGE_PREFIX !== _LOCALSTORAGE_PREFIX) {
+                    keysToRemove.push(_LEGACY_LOCALSTORAGE_PREFIX + key);
+                }
+                chrome.storage.local.remove(keysToRemove, function () {
                     if (chrome.runtime && chrome.runtime.lastError) {
                         console.warn('[localStorage polyfill] Failed to remove:', key, chrome.runtime.lastError);
                     }
@@ -67,7 +72,10 @@ if (_needsLocalStoragePolyfill) {
                         return;
                     }
                     var keysToRemove = Object.keys(items || {}).filter(function (k) {
-                        return k.indexOf(_LOCALSTORAGE_PREFIX) === 0;
+                        if (k.indexOf(_LOCALSTORAGE_PREFIX) === 0) return true;
+                        return _LEGACY_LOCALSTORAGE_PREFIX &&
+                            _LEGACY_LOCALSTORAGE_PREFIX !== _LOCALSTORAGE_PREFIX &&
+                            k.indexOf(_LEGACY_LOCALSTORAGE_PREFIX) === 0;
                     });
                     if (keysToRemove.length === 0) return;
                     chrome.storage.local.remove(keysToRemove, function () {
@@ -129,6 +137,8 @@ if (_needsLocalStoragePolyfill) {
                     }
 
                     var hydratedCount = 0;
+                    var pendingMigration = Object.create(null);
+
                     Object.keys(items || {}).forEach(function (storageKey) {
                         if (storageKey.indexOf(_LOCALSTORAGE_PREFIX) !== 0) return;
                         var key = storageKey.slice(_LOCALSTORAGE_PREFIX.length);
@@ -138,6 +148,28 @@ if (_needsLocalStoragePolyfill) {
                             hydratedCount++;
                         }
                     });
+
+                    Object.keys(items || {}).forEach(function (storageKey) {
+                        if (!_LEGACY_LOCALSTORAGE_PREFIX || _LEGACY_LOCALSTORAGE_PREFIX === _LOCALSTORAGE_PREFIX) return;
+                        if (storageKey.indexOf(_LEGACY_LOCALSTORAGE_PREFIX) !== 0) return;
+                        var key = storageKey.slice(_LEGACY_LOCALSTORAGE_PREFIX.length);
+                        if (!Object.prototype.hasOwnProperty.call(_localStorageData, key)) {
+                            _localStorageData[key] = String(items[storageKey]);
+                            hydratedCount++;
+                        }
+                        var newKey = _LOCALSTORAGE_PREFIX + key;
+                        if (!Object.prototype.hasOwnProperty.call(items, newKey)) {
+                            pendingMigration[newKey] = String(items[storageKey]);
+                        }
+                    });
+
+                    if (Object.keys(pendingMigration).length) {
+                        chrome.storage.local.set(pendingMigration, function () {
+                            if (chrome.runtime && chrome.runtime.lastError) {
+                                console.warn('[localStorage polyfill] Failed to migrate legacy keys:', chrome.runtime.lastError);
+                            }
+                        });
+                    }
 
                     _global.localStorageHydrated = true;
                     console.log('[localStorage polyfill] Hydrated', hydratedCount, 'items from chrome.storage.local');

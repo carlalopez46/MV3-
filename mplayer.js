@@ -666,7 +666,7 @@ MacroPlayer.prototype.removeListeners = function () {
 };
 
 // Hoisted regexes to avoid recreating them on every isInternalURL invocation.
-var INTERNAL_URL_PATTERN = /^(?:(?:chrome|edge|brave|opera|vivaldi)(?:-(?:extension|untrusted))?|devtools|chrome-search):\/\//i;
+var INTERNAL_URL_PATTERN = /^(?:(?:chrome|edge|brave|opera|vivaldi)(?:-(?:extension|untrusted))?|devtools|chrome-search|imacros):\/\//i;
 var ABOUT_URL_PATTERN = /^about:/i;
 
 /**

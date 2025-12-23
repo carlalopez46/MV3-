@@ -2,7 +2,8 @@
 /*
 Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiaries or affiliates. All rights reserved.
 */
-const LOCALSTORAGE_PREFIX = '__imacros_ls__:';
+const LOCALSTORAGE_PREFIX = 'localStorage_';
+const LEGACY_LOCALSTORAGE_PREFIX = '__imacros_ls__:';
 const SW_INSTANCE_ID = Math.random().toString(36).slice(2, 8);
 let lastProcessedExecutionId = null;
 let executionIdRestorePromise = null;
@@ -249,7 +250,11 @@ function createLocalStoragePolyfill(cache, prefix) {
             delete cache[key];
 
             if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-                chrome.storage.local.remove(prefix + key, function () {
+                const keysToRemove = [prefix + key];
+                if (LEGACY_LOCALSTORAGE_PREFIX && LEGACY_LOCALSTORAGE_PREFIX !== prefix) {
+                    keysToRemove.push(LEGACY_LOCALSTORAGE_PREFIX + key);
+                }
+                chrome.storage.local.remove(keysToRemove, function () {
                     if (chrome.runtime && chrome.runtime.lastError) {
                         console.warn('[iMacros SW] Failed to remove localStorage key:', key, chrome.runtime.lastError);
                     }
@@ -269,7 +274,10 @@ function createLocalStoragePolyfill(cache, prefix) {
                     }
 
                     const keysToRemove = Object.keys(items || {}).filter(function (storageKey) {
-                        return storageKey.indexOf(prefix) === 0;
+                        if (storageKey.indexOf(prefix) === 0) return true;
+                        return LEGACY_LOCALSTORAGE_PREFIX &&
+                            LEGACY_LOCALSTORAGE_PREFIX !== prefix &&
+                            storageKey.indexOf(LEGACY_LOCALSTORAGE_PREFIX) === 0;
                     });
                     if (!keysToRemove.length) return;
 
@@ -328,12 +336,35 @@ async function initializeLocalStoragePolyfill() {
             });
 
             let hydratedCount = 0;
+            const pendingMigration = Object.create(null);
             Object.keys(items).forEach((storageKey) => {
                 if (storageKey.indexOf(LOCALSTORAGE_PREFIX) !== 0) return;
                 const key = storageKey.slice(LOCALSTORAGE_PREFIX.length);
                 cache[key] = String(items[storageKey]);
                 hydratedCount++;
             });
+
+            Object.keys(items).forEach((storageKey) => {
+                if (!LEGACY_LOCALSTORAGE_PREFIX || LEGACY_LOCALSTORAGE_PREFIX === LOCALSTORAGE_PREFIX) return;
+                if (storageKey.indexOf(LEGACY_LOCALSTORAGE_PREFIX) !== 0) return;
+                const key = storageKey.slice(LEGACY_LOCALSTORAGE_PREFIX.length);
+                if (!Object.prototype.hasOwnProperty.call(cache, key)) {
+                    cache[key] = String(items[storageKey]);
+                    hydratedCount++;
+                }
+                const newKey = LOCALSTORAGE_PREFIX + key;
+                if (!Object.prototype.hasOwnProperty.call(items, newKey)) {
+                    pendingMigration[newKey] = String(items[storageKey]);
+                }
+            });
+
+            if (Object.keys(pendingMigration).length) {
+                chrome.storage.local.set(pendingMigration, function () {
+                    if (chrome.runtime && chrome.runtime.lastError) {
+                        console.warn('[iMacros SW] Failed to migrate legacy localStorage keys:', chrome.runtime.lastError);
+                    }
+                });
+            }
             console.log(`[iMacros SW] localStorage cache loaded asynchronously: ${hydratedCount} items`);
         } catch (err) {
             console.error('[iMacros SW] Failed to hydrate localStorage cache:', err);
@@ -365,6 +396,8 @@ async function initializeLocalStoragePolyfill() {
 try {
     importScripts(
         'utils.js',
+        'rijndael.js',
+        'SecurityManager.js',
         'bg_common.js',
         'badge.js',
         'promise-utils.js',

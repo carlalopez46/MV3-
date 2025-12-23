@@ -1175,13 +1175,34 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
     };
 
     CSRecorder.prototype.getSelectorForElement = function (el) {
+        var parts = [];
+        var current = el;
+
+        while (current) {
+            var root = current.getRootNode();
+            var partSelector = this._getSelectorInContext(current, root);
+            parts.unshift(partSelector);
+
+            if (root instanceof ShadowRoot) {
+                current = root.host;
+            } else {
+                break;
+            }
+        }
+
+        return parts.join(' >> ');
+    };
+
+    CSRecorder.prototype._getSelectorInContext = function (el, context) {
+        // Use document if context is just the document node
+        var searchContext = (context instanceof ShadowRoot || context instanceof Document) ? context : document;
+
         // 1. Try ID directly on the element
         if (el.id && this.favorIds) {
             return "#" + StrUtils.escapeLine(this.escapeIdForSelector(el.id));
         }
 
         // 2. Try unique attributes (name, aria-label, etc.)
-        // Only if cssSelectors is enabled (which is implied for TAG SELECTOR)
         if (this.cssSelectors) {
             var uniqueAttrs = ['name', 'aria-label', 'placeholder', 'data-testid', 'role', 'title', 'alt'];
             for (var i = 0; i < uniqueAttrs.length; i++) {
@@ -1190,9 +1211,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
                 if (val) {
                     var safeVal = val.replace(/"/g, '\\"');
                     var selector = el.tagName + '[' + attr + '="' + safeVal + '"]';
-                    // Verify uniqueness
+                    // Verify uniqueness in the current context
                     try {
-                        if (document.querySelectorAll(selector).length === 1) {
+                        if (searchContext.querySelectorAll(selector).length === 1) {
                             return selector;
                         }
                     } catch (e) { /* ignore invalid selectors */ }
@@ -1205,10 +1226,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
                 for (var i = 0; i < classes.length; i++) {
                     var cls = classes[i];
                     if (!cls) continue;
-                    // Escape class name if necessary
                     var selector = el.tagName + '.' + cls.replace(/([!"#$%&'()*+,.\/:;<=>?@[\\\]^`{|}~])/g, "\\$1");
                     try {
-                        if (document.querySelectorAll(selector).length === 1) {
+                        if (searchContext.querySelectorAll(selector).length === 1) {
                             return selector;
                         }
                     } catch (e) {
@@ -1218,9 +1238,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
             }
         }
 
-        // 4. Fallback: walk up the tree until we find element with id or reach HTML element
+        // 4. Fallback: walk up the tree until we find element with id or reach context root
         var selector = "", temp = el;
-        while (temp.parentNode) {
+        while (temp && temp !== searchContext && temp.parentNode) {
             if (temp.id && this.favorIds) {
                 selector = "#" +
                     StrUtils.escapeLine(this.escapeIdForSelector(temp.id)) +
@@ -1228,26 +1248,31 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
                 return selector;
             }
 
-            var siblings = temp.parentNode.childNodes, count = 0;
-            for (var i = 0; i < siblings.length; i++) {
-                if (siblings[i].nodeType != window.Node.ELEMENT_NODE)
-                    continue;
-                if (siblings[i] == temp)
-                    break;
-                if (siblings[i].tagName == temp.tagName)
-                    count++;
-            }
+            var siblings = temp.parentNode.children;
+            var count = 0;
+            if (siblings) {
+                for (var i = 0; i < siblings.length; i++) {
+                    if (siblings[i] == temp)
+                        break;
+                    if (siblings[i].tagName == temp.tagName)
+                        count++;
+                }
 
-            if (count) {
-                selector = temp.tagName +
-                    ":nth-of-type(" + (count + 1) + ")" +
-                    (selector.length ? ">" + selector : "");
+                if (count) {
+                    selector = temp.tagName +
+                        ":nth-of-type(" + (count + 1) + ")" +
+                        (selector.length ? ">" + selector : "");
+                } else {
+                    selector = temp.tagName +
+                        (selector.length ? ">" + selector : "");
+                }
             } else {
-                selector = temp.tagName +
-                    (selector.length ? ">" + selector : "");
+                // Fallback for nodes without children property (unlikely for element nodes)
+                selector = temp.tagName + (selector.length ? ">" + selector : "");
             }
 
             temp = temp.parentNode;
+            if (temp instanceof ShadowRoot) break; // Don't cross shadow boundary here
         }
 
         return selector;

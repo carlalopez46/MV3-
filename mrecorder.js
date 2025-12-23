@@ -905,9 +905,14 @@ Recorder.prototype.onTabCreated = function (tab) {
 // // tab update
 Recorder.prototype.onTabUpdated = function (tab_id, changeInfo, tab) {
     const recorder = this;
+    if (!recorder.recording) {
+        return;
+    }
+
+    const safeChangeInfo = changeInfo || {};
 
     // Prefer provided tab info but fall back to querying the tab if needed
-    const ensureTab = tab && 'url' in tab ?
+    const ensureTab = tab && typeof tab === 'object' && 'url' in tab ?
         Promise.resolve(tab) :
         getTab(tab_id);
 
@@ -920,26 +925,44 @@ Recorder.prototype.onTabUpdated = function (tab_id, changeInfo, tab) {
             return;
         }
 
+        // Only capture meaningful navigations signaled by loading state or an
+        // explicit URL change payload.
+        const isNavigationSignal = safeChangeInfo.status === "loading" || Boolean(safeChangeInfo.url);
+
+        if (isNavigationSignal) {
+            // Re-inject recording logic into the updated tab when possible.
+            if (typeof communicator !== 'undefined' &&
+                communicator &&
+                typeof communicator.postMessage === 'function') {
+                var recordMode = Storage.getChar("record-mode");
+                if (!recordMode || recordMode === '') {
+                    recordMode = 'conventional';
+                }
+
+                communicator.postMessage("start-recording", {
+                    args: {
+                        favorId: Storage.getBool("recording-prefer-id"),
+                        cssSelectors: Storage.getBool("recording-prefer-css-selectors"),
+                        recordMode: recordMode
+                    }
+                }, tab_id, function () { });
+            } else if (Storage.getBool("debug")) {
+                console.warn('[Recorder] communicator not available; skipping start-recording reinjection');
+            }
+        }
+
         // Determine the navigated URL. changeInfo.url is the most accurate signal
         // for new top-level navigations, but fall back to tab.url to avoid
         // missing updates in environments that omit the url field.
-        const navigatedUrl = changeInfo.url || resolvedTab.pendingUrl || resolvedTab.url;
-
-        // Only record during active recording sessions to avoid restoring events
-        // while the recorder is idle or still initializing.
-        if (!recorder.recording || !navigatedUrl)
+        const navigatedUrl = safeChangeInfo.url || resolvedTab.pendingUrl || resolvedTab.url;
+        if (!navigatedUrl || !isNavigationSignal) {
             return;
+        }
 
         // Record once per URL per tab to avoid duplicate commands when multiple
         // update events fire for the same navigation lifecycle.
         const lastRecorded = recorder.lastTabUrls.get(tab_id);
         if (lastRecorded === navigatedUrl)
-            return;
-
-        // Only capture meaningful navigations signaled by loading state or an
-        // explicit URL change payload.
-        const isNavigationSignal = changeInfo.status === "loading" || Boolean(changeInfo.url);
-        if (!isNavigationSignal)
             return;
 
         recorder.lastTabUrls.set(tab_id, navigatedUrl);
@@ -1617,24 +1640,4 @@ Recorder.prototype.restoreState = function () {
     });
 };
 
-Recorder.prototype.onTabUpdated = function (tabId) {
-    if (!this.recording) return;
-
-    // Re-inject recording logic into the updated tab
-    var recordMode = Storage.getChar("record-mode");
-    if (!recordMode || recordMode === '') {
-        recordMode = 'conventional';
-    }
-
-    console.log('[Recorder] Re-sending start-recording to updated tab:', tabId);
-
-    // Use communicator.postMessage to target specific tab
-    communicator.postMessage("start-recording", {
-        args: {
-            favorId: Storage.getBool("recording-prefer-id"),
-            cssSelectors: Storage.getBool("recording-prefer-css-selectors"),
-            recordMode: recordMode
-        }
-    }, tabId, function () { });
-};
 
