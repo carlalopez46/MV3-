@@ -108,6 +108,7 @@ EditArea.prototype.init = function () {
 
 	t.set_show_line_colors(s['show_line_colors']);
 
+	var syntax_selec;
 	if (syntax_selec = _$("syntax_selection")) {
 		// set up syntax selection lsit in the toolbar
 		for (var i = 0; i < t.syntax_list.length; i++) {
@@ -122,15 +123,14 @@ EditArea.prototype.init = function () {
 	}
 
 	// add plugins buttons in the toolbar
-	spans = parent.getChildren(_$("toolbar_1"), "span", "", "", "all", -1);
+	var spans = parent.getChildren(_$("toolbar_1"), "span", "", "", "all", -1);
 
 	for (var i = 0; i < spans.length; i++) {
-
-		id = spans[i].id.replace(/tmp_tool_(.*)/, "$1");
+		var id = spans[i].id.replace(/tmp_tool_(.*)/, "$1");
 		if (id != spans[i].id) {
 			for (var j in t.plugins) {
 				if (typeof (t.plugins[j].get_control_html) == "function") {
-					html = t.plugins[j].get_control_html(id);
+					var html = t.plugins[j].get_control_html(id);
 					if (html != false) {
 						html = t.get_translation(html, "template");
 						var new_span = document.createElement("span");
@@ -192,7 +192,7 @@ EditArea.prototype.init = function () {
 	t.set_font(editArea.settings["font_family"], editArea.settings["font_size"]);
 
 	// set unselectable text
-	children = parent.getChildren(document.body, "", "selec", "none", "all", -1);
+	var children = parent.getChildren(document.body, "", "selec", "none", "all", -1);
 	for (var i = 0; i < children.length; i++) {
 		if (t.isIE)
 			children[i].unselectable = true; // IE

@@ -88,6 +88,7 @@ var EditArea_autocompletion = {
 		if (!this.enabled)
 			return true;
 
+		var letter;
 		if (EA_keys[e.keyCode])
 			letter = EA_keys[e.keyCode];
 		else
@@ -230,17 +231,17 @@ var EditArea_autocompletion = {
 	}
 
 	, _select: function (content) {
-		cursor_forced_position = content.indexOf('{@}');
+		var cursor_forced_position = content.indexOf('{@}');
 		content = content.replace(/{@}/g, '');
 		editArea.getIESelection();
 
 		// retrive the number of matching characters
 		var start_index = Math.max(0, editArea.textarea.selectionEnd - content.length);
 
-		line_string = editArea.textarea.value.substring(start_index, editArea.textarea.selectionEnd + 1);
-		limit = line_string.length - 1;
-		nbMatch = 0;
-		for (i = 0; i < limit; i++) {
+		var line_string = editArea.textarea.value.substring(start_index, editArea.textarea.selectionEnd + 1);
+		var limit = line_string.length - 1;
+		var nbMatch = 0;
+		for (var i = 0; i < limit; i++) {
 			if (line_string.substring(limit - i - 1, limit) == content.substring(0, i + 1))
 				nbMatch = i + 1;
 		}
@@ -249,8 +250,9 @@ var EditArea_autocompletion = {
 			parent.editAreaLoader.setSelectionRange(editArea.id, editArea.textarea.selectionStart - nbMatch, editArea.textarea.selectionEnd);
 
 		parent.editAreaLoader.setSelectedText(editArea.id, content);
-		range = parent.editAreaLoader.getSelectionRange(editArea.id);
+		var range = parent.editAreaLoader.getSelectionRange(editArea.id);
 
+		var new_pos;
 		if (cursor_forced_position != -1)
 			new_pos = range["end"] - (content.length - cursor_forced_position);
 		else
@@ -273,8 +275,8 @@ var EditArea_autocompletion = {
 				if (parent.editAreaLoader.load_syntax[lang]['AUTO_COMPLETION']) {
 					// parse them
 					for (var i in parent.editAreaLoader.load_syntax[lang]['AUTO_COMPLETION']) {
-						datas = parent.editAreaLoader.load_syntax[lang]['AUTO_COMPLETION'][i];
-						tmp = {};
+						var datas = parent.editAreaLoader.load_syntax[lang]['AUTO_COMPLETION'][i];
+						var tmp = {};
 						if (datas["CASE_SENSITIVE"] != "undefined" && datas["CASE_SENSITIVE"] == false)
 							tmp["modifiers"] = "i";
 						else
@@ -329,11 +331,11 @@ var EditArea_autocompletion = {
 		}
 
 		if (editArea.is_editable) {
-			time = new Date;
-			t1 = time.getTime();
+			var time = new Date;
+			var t1 = time.getTime();
 			editArea.getIESelection();
 			this.selectIndex = -1;
-			start = editArea.textarea.selectionStart;
+			var start = editArea.textarea.selectionStart;
 			var str = editArea.textarea.value;
 			var results = [];
 
@@ -361,7 +363,7 @@ var EditArea_autocompletion = {
 								// the key word match or force display 
 								if (this.curr_syntax[i]["keywords"][prefix]['datas'][j]['is_typing'].match(match_curr_word)) {
 									//		parent.console.log('match');
-									hasMatch = false;
+									var hasMatch = false;
 									var before = last_chars.substr(0, last_chars.length - begin_word.length);
 
 									// no prefix to match => it's valid
@@ -386,7 +388,7 @@ var EditArea_autocompletion = {
 					else if (this.forceDisplay || match_prefix_separator) {
 						for (var prefix in this.curr_syntax[i]["keywords"]) {
 							for (var j = 0; j < this.curr_syntax[i]["keywords"][prefix]['datas'].length; j++) {
-								hasMatch = false;
+								var hasMatch = false;
 								// no prefix to match => it's valid
 								if (!match_prefix_separator && this.curr_syntax[i]["keywords"][prefix]['prefix'].length == 0) {
 									hasMatch = true;
@@ -435,7 +437,7 @@ var EditArea_autocompletion = {
 
 			this.autoSelectIfOneResult = false;
 			time = new Date;
-			t2 = time.getTime();
+			var t2 = time.getTime();
 
 			//parent.console.log( begin_word +"\n"+ (t2-t1) +"\n"+ html );
 		}

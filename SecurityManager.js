@@ -27,11 +27,23 @@ var SecurityManager = (function () {
          * This should be called by the background script during startup.
          */
         init: async function () {
-            return new Promise((resolve) => {
+            return new Promise((resolve, reject) => {
                 const extensionId = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id)
-                    ? chrome.runtime.id : "fallback_id";
+                    ? chrome.runtime.id : null;
+
+                if (!extensionId) {
+                    const err = new Error("SecurityManager: chrome.runtime.id is unavailable.");
+                    console.error("[SecurityManager] Initialization failed: No runtime ID.");
+                    reject(err);
+                    return;
+                }
 
                 chrome.storage.local.get(['master_secret'], function (items) {
+                    if (chrome.runtime.lastError) {
+                        console.error("[SecurityManager] Storage access failed.");
+                        reject(new Error("Storage access failed during initialization."));
+                        return;
+                    }
                     let secret = items.master_secret;
                     if (!secret) {
                         // Generate a cryptographically secure random secret
@@ -40,7 +52,8 @@ var SecurityManager = (function () {
                             crypto.getRandomValues(array);
                             secret = Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
                         } else {
-                            // Fallback for extremely rare cases where Web Crypto is unavailable
+                            // Fallback for extremely rare environments where Web Crypto is unavailable but PRNG is needed
+                            console.warn("[SecurityManager] Web Crypto unavailable, using Math.random for secret.");
                             secret = Math.random().toString(36).substring(2) + Date.now().toString(36);
                         }
                         chrome.storage.local.set({ 'master_secret': secret });
@@ -74,7 +87,7 @@ var SecurityManager = (function () {
                 // and derives a byte array key using SHA256 internally.
                 return Rijndael.encryptString(text, _masterKey);
             } catch (e) {
-                console.error("Encryption failed:", e);
+                console.error("[SecurityManager] Encryption failed.");
                 throw new Error("Failed to encrypt data.");
             }
         },
@@ -93,7 +106,7 @@ var SecurityManager = (function () {
                 if (!cipherText) return "";
                 return Rijndael.decryptString(cipherText, _masterKey);
             } catch (e) {
-                console.error("Decryption failed:", e);
+                console.error("[SecurityManager] Decryption failed.");
                 throw new Error("Failed to decrypt data.");
             }
         }
