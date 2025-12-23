@@ -114,8 +114,12 @@ var afio = (function () {
                 category: 'INITIALIZATION'
             });
         } else if (typeof logInfo === 'function') {
-            // Fallback to old logInfo function
-            logInfo(message, { reason: reason || 'unknown', error: error ? error.message : '' });
+            try {
+                // Fallback to old logInfo function
+                logInfo(message, { reason: reason || 'unknown', error: error ? error.message : '' });
+            } catch (e) {
+                console.warn('[AsyncFileIO] Failed to log info:', e);
+            }
         }
     }
 

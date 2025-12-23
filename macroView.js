@@ -67,7 +67,7 @@ var mv = {
             console.error(e);
         }
         // select the proper one
-        xpath = "id('lines')//tr[position()=" + parseInt(linum, 10) + "]";
+        xpath = "id('lines')//tr[position()=" + parseInt(linum) + "]";
         try {
             result = document.evaluate(xpath, document, null,
                 XPathResult.FIRST_ORDERED_NODE_TYPE,

@@ -168,7 +168,7 @@ window.updatePanels = function () {
 function onPanelLoaded(panel, panelWindowId) {
     if (panelWindowId) {
         for (var win_id in context) {
-            win_id = parseInt(win_id, 10);
+            win_id = parseInt(win_id);
             if (!isNaN(win_id) && context[win_id].panelId === panelWindowId) {
                 context[win_id].panelWindow = panel;
                 return win_id;
@@ -178,7 +178,7 @@ function onPanelLoaded(panel, panelWindowId) {
 
     const contextPanelIds = {};
     for (var id in context) {
-        const numId = parseInt(id, 10);
+        const numId = parseInt(id);
         if (!isNaN(numId) && context[numId]) {
             contextPanelIds[numId] = context[numId].panelId || 'undefined';
         }
@@ -215,6 +215,12 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     function executeContextMethod(win_id, method, sendResponse, args, requestId) {
         if (method === "recorder.start") {
             console.log("[Offscreen] Starting recorder...");
+            try {
+                if (context[win_id].mplayer && context[win_id].mplayer.playing) {
+                    console.log("[Offscreen] Stopping active playback before recording");
+                    context[win_id].mplayer.stop();
+                }
+            } catch (e) { }
             const rec = context[win_id].recorder;
             if (!rec) {
                 sendResponse({ success: false, error: `Recorder not initialized for window ${win_id}` });
@@ -418,7 +424,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 if (sendResponse) {
                     sendResponse({ success: false, error: 'Macro already playing', state: 'playing' });
                 }
-                return false; // Response already sent synchronously
+                return true; // Keep channel open for async response
             }
 
             // Use isDuplicatePlayStart for comprehensive duplicate detection
@@ -427,7 +433,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 if (sendResponse) {
                     sendResponse({ success: false, error: 'Duplicate play request', state: 'starting' });
                 }
-                return false; // Response already sent synchronously
+                return true; // Keep channel open for async response
             }
 
             recordPlayStart(win_id, filePath);
@@ -605,7 +611,21 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         if (sendResponse) {
             sendResponse(response);
         }
-        return false; // Response sent synchronously
+        return true;
+    }
+
+    if (request.type === 'TAB_UPDATED') {
+        const winId = request.win_id;
+        const tabId = request.tab_id;
+        const ctx = context[winId];
+
+        if (ctx && ctx.recorder && ctx.recorder.recording) {
+            console.log(`[Offscreen] Tab updated in recording window ${winId}. Triggering recorder reinjection for tab ${tabId}`);
+            if (typeof ctx.recorder.onTabUpdated === 'function') {
+                ctx.recorder.onTabUpdated(tabId);
+            }
+        }
+        return;
     }
 
     if (request.command === 'panelCreated') {
@@ -614,7 +634,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             context[win_id].panelId = request.panelId;
         }
         if (sendResponse) sendResponse({ success: true });
-        return false; // Response sent synchronously
+        return true;
     }
 
     if (request.command === 'panelClosed') {
@@ -626,14 +646,14 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
         }
         if (sendResponse) sendResponse({ success: true });
-        return false; // Response sent synchronously
+        return true;
     }
 
     // Download events
     if (['DOWNLOAD_CREATED', 'DOWNLOAD_CHANGED'].includes(request.type)) {
         const targetWinIds = request.win_id ? [request.win_id] : Object.keys(context);
         for (let win_id of targetWinIds) {
-            win_id = parseInt(win_id, 10);
+            win_id = parseInt(win_id);
             if (context[win_id]) {
                 const mplayer = context[win_id].mplayer;
                 try {
@@ -652,7 +672,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
         }
         if (sendResponse) sendResponse({ success: true });
-        return false; // Response sent synchronously
+        return true;
     }
 
     // Tab events
@@ -665,6 +685,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 try {
                     if (req.type === 'TAB_UPDATED') {
                         if (mplayer && mplayer.onTabUpdated) mplayer.onTabUpdated(req.tabId, req.changeInfo, req.tab);
+                        if (recorder && recorder.onUpdated) recorder.onUpdated(req.tabId, req.changeInfo, req.tab);
                     } else if (req.type === 'TAB_ACTIVATED') {
                         if (mplayer && mplayer.onTabActivated) mplayer.onTabActivated(req.activeInfo);
                         if (recorder && recorder.onActivated) recorder.onActivated(req.activeInfo);
@@ -689,7 +710,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
         }
         if (sendResponse) sendResponse({ success: true });
-        return false; // Response sent synchronously
+        return true;
     }
 
     if (request.command === 'FORWARD_MESSAGE') {
@@ -697,9 +718,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         if (typeof communicator !== 'undefined') {
             const msg = { topic: topic, data: data };
             if (communicator.handlers && communicator.handlers[topic]) {
-                // _execHandlers may call sendResponse asynchronously
                 communicator._execHandlers(msg, tab_id, win_id, sendResponse);
-                return true; // Keep channel open for async response
             } else {
                 if (sendResponse) sendResponse({
                     success: true,
@@ -707,7 +726,6 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                     error: 'No handler found',
                     notHandled: true
                 });
-                return false; // Response sent synchronously
             }
         } else {
             if (sendResponse) sendResponse({
@@ -715,8 +733,8 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 state: 'idle',
                 error: 'Communicator not available'
             });
-            return false; // Response sent synchronously
         }
+        return true;
     }
 
     if (request.command === 'runMacroByUrl') {
@@ -1088,7 +1106,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             }
             case 'notificationClicked': {
                 var n_id = request.notificationId;
-                var w_id = parseInt(n_id, 10);
+                var w_id = parseInt(n_id);
                 if (isNaN(w_id) || !context[w_id] || !context[w_id].info_args) break;
                 var info = context[w_id].info_args;
                 if (info.errorCode == 1) break;
@@ -1156,14 +1174,17 @@ function handleActionClicked(tab) {
             if (mplayer.playing) {
                 mplayer.stop();
             } else if (recorder && recorder.recording) {
+                console.log(`[offscreen_bg] Saving macro. Recorder actions: ${recorder.actions ? recorder.actions.length : 'undefined'}`);
+                // Actions must be copied BEFORE calling stop(), as stop() clears the actions array
+                var recorded_actions = (recorder.actions || []).slice();
                 recorder.stop();
-                var recorded_macro = recorder.actions.join("\n");
+                var recorded_macro = recorded_actions.join("\n");
                 var macro = {
                     source: recorded_macro, win_id: win_id,
                     name: "#Current.iim"
                 };
 
-                console.log('[iMacros MV3] Recording stopped, saving macro with', recorder.actions.length, 'actions');
+                console.log('[iMacros MV3] Recording stopped, saving macro with', recorded_actions.length, 'actions');
 
                 var treeType = Storage.getChar("tree-type");
 
@@ -1232,7 +1253,7 @@ function handleActionClicked(tab) {
 function addTab(url, win_id) {
     var args = { url: url };
     if (win_id)
-        args.windowId = parseInt(win_id, 10);
+        args.windowId = parseInt(win_id);
 
     chrome.tabs.create(args, function (tab) {
         if (chrome.runtime.lastError) {
@@ -1721,6 +1742,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 // This replaces the window.open based implementation from bg.js which doesn't work in Offscreen Document
 globalScope.edit = function (macro, overwrite, line) {
     console.log("[iMacros Offscreen] Requesting Service Worker to open editor for:", macro.name);
+    console.log("[iMacros Offscreen] Macro source length:", macro.source ? macro.source.length : "undefined");
 
     if (!chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
         console.error("[iMacros Offscreen] chrome.runtime messaging not available");
@@ -1733,22 +1755,55 @@ globalScope.edit = function (macro, overwrite, line) {
         "editorStartLine": line || 0
     };
 
-    chrome.runtime.sendMessage({
-        command: "openEditorWindow",
-        editorData
-    }, (response) => {
-        // ★Refactor: Consolidated error checking with robust message construction
-        if (chrome.runtime.lastError || (response && response.success === false)) {
-            const errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
-                (response && response.error) ||
-                "Unknown error opening editor";
+    // Helper to send message
+    const sendOpenEditorMessage = (data) => {
+        chrome.runtime.sendMessage({
+            command: "openEditorWindow",
+            editorData: data
+        }, (response) => {
+            if (chrome.runtime.lastError || (response && response.success === false)) {
+                const errorMsg = (chrome.runtime.lastError && chrome.runtime.lastError.message) ||
+                    (response && response.error) ||
+                    "Unknown error opening editor";
 
-            console.error("[iMacros Offscreen] Failed to open editor:", errorMsg);
-            return;
+                console.error("[iMacros Offscreen] Failed to open editor:", errorMsg);
+                return;
+            }
+            // Success - editor window opened
+            console.log("[iMacros Offscreen] Editor window requested successfully");
+        });
+    };
+
+    // Safely check for storage availability
+    let storage = null;
+    try {
+        if (typeof chrome !== 'undefined' && chrome.storage) {
+            if (chrome.storage.session) storage = chrome.storage.session;
+            else if (chrome.storage.local) storage = chrome.storage.local;
         }
-        // Success - editor window opened
-        console.log("[iMacros Offscreen] Editor window requested successfully");
-    });
+    } catch (e) {
+        console.error("[iMacros Offscreen] Error accessing chrome.storage properties:", e);
+    }
+
+    if (!storage) {
+        console.warn("[iMacros Offscreen] No storage backend available/accessible in Offscreen. Relying on Background persistence.");
+        sendOpenEditorMessage(editorData);
+    } else {
+        try {
+            storage.set(editorData, () => {
+                if (chrome.runtime.lastError) {
+                    console.error("[iMacros Offscreen] Failed to save editor data to storage:", chrome.runtime.lastError.message);
+                } else {
+                    console.log("[iMacros Offscreen] Editor data saved to storage. Opening window...");
+                }
+                // Send message regardless of storage result (background.js might also try to save, which is fine)
+                sendOpenEditorMessage(editorData);
+            });
+        } catch (e) {
+            console.error("[iMacros Offscreen] Exception writing to storage:", e);
+            sendOpenEditorMessage(editorData);
+        }
+    }
 };
 
 // Override save function if needed (bg.js implementation usually works if it uses message passing/afio, but let's be sure)
@@ -1981,7 +2036,7 @@ function showNotification(win_id, args) {
 // Global notification click listener
 if (chrome.notifications && chrome.notifications.onClicked) {
     chrome.notifications.onClicked.addListener(function (n_id) {
-        var w_id = parseInt(n_id, 10);
+        var w_id = parseInt(n_id);
         if (isNaN(w_id) || !context[w_id] || !context[w_id].info_args)
             return;
         var info = context[w_id].info_args;
@@ -2123,7 +2178,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             // by checking which context has this panelId
             let found_win_id = null;
             for (let win_id in context) {
-                win_id = parseInt(win_id, 10);
+                win_id = parseInt(win_id);
                 if (!isNaN(win_id) && context[win_id].panelId === panelWindowId) {
                     found_win_id = win_id;
                     break;
@@ -2221,4 +2276,81 @@ if (!chrome.notifications.clear) {
         // Optional: implement clear logic
         if (callback) callback();
     };
+}
+
+/*
+ * Execute a method on a context object (mplayer, recorder, etc.)
+ * Used by background.js to proxy commands to Offscreen Document.
+ */
+function executeContextMethod(win_id, method, sendResponse, args = [], requestId = null) {
+    if (!context[win_id]) {
+        if (sendResponse) sendResponse({ success: false, error: `Context not found for window ${win_id}` });
+        return;
+    }
+
+    const parts = method.split('.');
+    let obj = context[win_id];
+    let funcName = parts.pop();
+
+    // Navigate to the object
+    for (const part of parts) {
+        if (obj[part]) {
+            obj = obj[part];
+        } else {
+            // Check if it's a top-level command that belongs to mplayer or recorder
+            if (obj === context[win_id] && parts.length === 1) {
+                if (obj.mplayer && typeof obj.mplayer[funcName] === 'function') {
+                    obj = obj.mplayer;
+                    break;
+                } else if (obj.recorder && typeof obj.recorder[funcName] === 'function') {
+                    obj = obj.recorder;
+                    break;
+                }
+            }
+
+            if (sendResponse) sendResponse({ success: false, error: `Object ${part} not found in context` });
+            return;
+        }
+    }
+
+    // Special logic for top-level commands like 'stop', 'pause' which might be on mplayer
+    if (obj === context[win_id]) {
+        if (funcName === 'stop') {
+            // Dispatch 'stop' based on what is currently active
+            if (obj.recorder && obj.recorder.recording) {
+                obj = obj.recorder;
+            } else if (obj.mplayer) {
+                // Default to mplayer (it handles idle/playing states)
+                obj = obj.mplayer;
+            }
+        } else if (typeof obj[funcName] !== 'function') {
+            // Fallback: Check mplayer
+            if (obj.mplayer && typeof obj.mplayer[funcName] === 'function') {
+                obj = obj.mplayer;
+            } else if (obj.recorder && typeof obj.recorder[funcName] === 'function') {
+                obj = obj.recorder;
+            }
+        }
+    }
+
+    if (typeof obj[funcName] === 'function') {
+        try {
+            const result = obj[funcName].apply(obj, args);
+            if (result && typeof result.then === 'function') {
+                result.then(val => {
+                    if (sendResponse) sendResponse({ success: true, result: val });
+                }).catch(err => {
+                    if (sendResponse) sendResponse({ success: false, error: err.message || String(err) });
+                });
+            } else {
+                if (sendResponse) sendResponse({ success: true, result: result });
+            }
+        } catch (err) {
+            console.error(`[Offscreen] Error executing ${method}:`, err);
+            if (sendResponse) sendResponse({ success: false, error: err.message || String(err) });
+        }
+    } else {
+        console.error(`[Offscreen] Method ${method} not found on target object`);
+        if (sendResponse) sendResponse({ success: false, error: `Method ${method} not found` });
+    }
 }

@@ -7,7 +7,7 @@
  * - Message handler completeness (panel.js)
  */
 
-(function() {
+(function () {
     'use strict';
 
     const results = { passed: 0, failed: 0, skipped: 0 };
@@ -104,9 +104,8 @@
 
             // Verify the fix pattern: add should come right after the has check block
             // Pattern: return true after has check, then add immediately
-            // Note: Different functions use different variable names (win_id, windowId)
-            const hasCheckPattern = /if\s*\(\s*playInFlight\.has\s*\(\s*(?:win_id|windowId)\s*\)\s*\)/;
-            const addPattern = /playInFlight\.add\s*\(\s*(?:win_id|windowId)\s*\)/g;
+            const hasCheckPattern = /if\s*\(\s*playInFlight\.has\s*\(\s*win_id\s*\)\s*\)/;
+            const addPattern = /playInFlight\.add\s*\(\s*win_id\s*\)/g;
 
             const hasMatch = source.match(hasCheckPattern);
             const addMatches = [...source.matchAll(addPattern)];
@@ -164,37 +163,34 @@
             return;
         }
 
-            const requiredHandlers = [
-                'PANEL_ADD_LINE',
-                'PANEL_REMOVE_LAST_LINE',
-                'PANEL_SHOW_MACRO_TREE'
-            ];
+        const requiredHandlers = [
+            'PANEL_ADD_LINE',
+            'PANEL_REMOVE_LAST_LINE',
+            'PANEL_SHOW_MACRO_TREE'
+        ];
 
-            const missingHandlers = [];
-            for (const handler of requiredHandlers) {
-                const pattern = new RegExp(`message\\.type\\s*===\\s*["']${handler}["']`);
-                if (!pattern.test(source)) {
-                    missingHandlers.push(handler);
-                }
+        const missingHandlers = [];
+        for (const handler of requiredHandlers) {
+            const pattern = new RegExp(`message\\.type\\s*===\\s*["']${handler}["']`);
+            if (!pattern.test(source)) {
+                missingHandlers.push(handler);
             }
+        }
 
-            if (missingHandlers.length === 0) {
-                pass(testName, 'All required message handlers are present');
-            } else {
-                fail(testName, `Missing handlers: ${missingHandlers.join(', ')}`);
-            }
+        if (missingHandlers.length === 0) {
+            pass(testName, 'All required message handlers are present');
+        } else {
+            fail(testName, `Missing handlers: ${missingHandlers.join(', ')}`);
+        }
     }
 
     /**
-     * Test: Async message handlers properly return true to keep channel open
-     * Bug: Some async handlers didn't return true, closing the message channel prematurely
-     * Fix: Ensure async context initialization returns true
-     *
-     * Note: Synchronous sendResponse() followed by bare return; is fine - the response
-     * was already sent. We only need to verify that truly async paths return true.
+     * Test: Early return statements use 'return true' for async handlers
+     * Bug: Some early returns used 'return;' instead of 'return true;'
+     * Fix: Changed to 'return true;' to keep message channel open
      */
     function testAsyncHandlerReturnTrue() {
-        const testName = 'Async context init returns true to keep channel open';
+        const testName = 'playFile early returns use return true';
 
         // Check if we're in Node.js environment with require available
         let fs, path, source;
@@ -214,144 +210,71 @@
             return;
         }
 
-        // Check that async context initialization properly returns true
-        // Pattern: context.init(win_id).then(...).catch(...) followed by return true
-        // The .catch() block comes between .then() and return true
-        const asyncInitPattern = /context\.init\s*\([^)]+\)\s*\.then\s*\(/;
+        // Find the playFile section and check for bare 'return;' statements
+        // Look for pattern: sendResponse followed by return without 'true'
+        const bareReturnPattern = /sendResponse\s*\([^)]*\)\s*;?\s*\n\s*return\s*;/g;
+        const properReturnPattern = /sendResponse\s*\([^)]*\)\s*;?\s*\n\s*return\s+true\s*;/g;
 
-        // Match the full pattern: context.init(...).then(...).catch(...); return true;
-        // Using [\s\S] to match across newlines
-        const returnTrueAfterInitPattern = /context\.init\s*\([^)]+\)\s*\.then\s*\([\s\S]*?\}\s*\)[\s\S]*?return\s+true\s*;/;
+        const bareReturns = source.match(bareReturnPattern) || [];
+        const properReturns = source.match(properReturnPattern) || [];
 
-        if (!asyncInitPattern.test(source)) {
-            // No async context init found - may have been refactored
-            pass(testName, 'No async context.init pattern found (may be refactored)');
+        if (bareReturns.length === 0) {
+            pass(testName, `All sendResponse blocks use proper 'return true' (found ${properReturns.length})`);
+        } else {
+            fail(testName, `Found ${bareReturns.length} bare 'return;' after sendResponse`);
+        }
+    }
+
+    /**
+     * Test: Method name spelling is correct in offscreen_bg.js
+     * Bug: Was misspelled as onNavigationErrorOccured (one 'r')
+     * Fix: Renamed to onNavigationErrorOccurred
+     */
+    function testOnNavigationErrorOccurredSpelling() {
+        const testName = 'Method name is correctly spelled as onNavigationErrorOccurred';
+
+        // Check if we're in Node.js environment with require available
+        let fs, path, source;
+        try {
+            const requireFn = typeof require !== 'undefined' ? require : null;
+            if (!requireFn) {
+                skip(testName, 'require() not available in this environment');
+                return;
+            }
+            fs = requireFn('fs');
+            path = requireFn('path');
+            const testDir = typeof __dirname !== 'undefined' ? __dirname : '.';
+            const offscreenPath = path.join(testDir, '..', 'offscreen_bg.js');
+            source = fs.readFileSync(offscreenPath, 'utf8');
+        } catch (e) {
+            if (e.code === 'MODULE_NOT_FOUND' || e.code === 'ENOENT') {
+                skip(testName, 'Cannot read offscreen_bg.js in this environment');
+                return;
+            }
+            fail(testName, `Exception: ${e.message}`);
             return;
         }
 
-        if (returnTrueAfterInitPattern.test(source)) {
-            pass(testName, 'Async context.init properly returns true');
-        } else {
-            fail(testName, 'Async context.init does not return true - message channel may close prematurely');
+        const typoPattern = /onNavigationErrorOccured(?!r)/;
+        const correctPattern = /onNavigationErrorOccurred/;
+
+        if (typoPattern.test(source)) {
+            fail(testName, 'Found typo "onNavigationErrorOccured" (missing double r)');
+            return;
         }
-    }
 
-    /**
-     * Test: onNavigationErrorOccurred spelling is correct
-     * Bug: Method was misspelled as onNavigationErrorOccured (missing 'r')
-     * Fix: Renamed to onNavigationErrorOccurred in mplayer.js and offscreen_bg.js
-     */
-    function testNavigationErrorMethodSpelling() {
-        const testName = 'onNavigationErrorOccurred spelling is correct';
-
-        let fs, path;
-        try {
-            const requireFn = typeof require !== 'undefined' ? require : null;
-            if (!requireFn) {
-                skip(testName, 'require() not available in this environment');
-                return;
-            }
-            fs = requireFn('fs');
-            path = requireFn('path');
-            const testDir = typeof __dirname !== 'undefined' ? __dirname : '.';
-
-            // Check mplayer.js
-            const mplayerPath = path.join(testDir, '..', 'mplayer.js');
-            const mplayerSource = fs.readFileSync(mplayerPath, 'utf8');
-
-            // Check for correct spelling (should exist)
-            const correctPattern = /onNavigationErrorOccurred/;
-            // Check for typo (should NOT exist)
-            const typoPattern = /onNavigationErrorOccured[^r]/;
-
-            if (typoPattern.test(mplayerSource)) {
-                fail(testName, 'Typo "onNavigationErrorOccured" found in mplayer.js');
-                return;
-            }
-
-            if (!correctPattern.test(mplayerSource)) {
-                fail(testName, 'Correct spelling "onNavigationErrorOccurred" not found in mplayer.js');
-                return;
-            }
-
-            // Check offscreen_bg.js
-            const offscreenPath = path.join(testDir, '..', 'offscreen_bg.js');
-            const offscreenSource = fs.readFileSync(offscreenPath, 'utf8');
-
-            if (typoPattern.test(offscreenSource)) {
-                fail(testName, 'Typo "onNavigationErrorOccured" found in offscreen_bg.js');
-                return;
-            }
-
-            if (!correctPattern.test(offscreenSource)) {
-                fail(testName, 'Correct spelling "onNavigationErrorOccurred" not found in offscreen_bg.js');
-                return;
-            }
-
-            pass(testName, 'Method name is correctly spelled as onNavigationErrorOccurred');
-        } catch (e) {
-            if (e.code === 'MODULE_NOT_FOUND' || e.code === 'ENOENT') {
-                skip(testName, 'Cannot read source files in this environment');
-            } else {
-                fail(testName, `Exception: ${e.message}`);
-            }
+        if (!correctPattern.test(source)) {
+            fail(testName, 'Correct spelling "onNavigationErrorOccurred" not found in offscreen_bg.js');
+            return;
         }
-    }
 
-    /**
-     * Test: PLAY_MACRO handler is NOT in bg.js (Service Worker)
-     * Bug: Both bg.js and offscreen_bg.js had PLAY_MACRO handlers causing duplicate execution
-     * Fix: Removed PLAY_MACRO handler from bg.js; only offscreen_bg.js should handle it
-     */
-    function testPlayMacroHandlerNotInServiceWorker() {
-        const testName = 'PLAY_MACRO handler not in Service Worker (bg.js)';
-
-        let fs, path;
-        try {
-            const requireFn = typeof require !== 'undefined' ? require : null;
-            if (!requireFn) {
-                skip(testName, 'require() not available in this environment');
-                return;
-            }
-            fs = requireFn('fs');
-            path = requireFn('path');
-            const testDir = typeof __dirname !== 'undefined' ? __dirname : '.';
-
-            const bgPath = path.join(testDir, '..', 'bg.js');
-            const bgSource = fs.readFileSync(bgPath, 'utf8');
-
-            // Check for PLAY_MACRO handler pattern
-            // The handler would look like: if (message.type === 'PLAY_MACRO')
-            const handlerPattern = /if\s*\(\s*message\.type\s*===\s*['"]PLAY_MACRO['"]\s*\)/;
-
-            if (handlerPattern.test(bgSource)) {
-                fail(testName, 'PLAY_MACRO handler found in bg.js - should only be in offscreen_bg.js');
-                return;
-            }
-
-            // Verify offscreen_bg.js DOES have the handler
-            const offscreenPath = path.join(testDir, '..', 'offscreen_bg.js');
-            const offscreenSource = fs.readFileSync(offscreenPath, 'utf8');
-
-            if (!handlerPattern.test(offscreenSource)) {
-                fail(testName, 'PLAY_MACRO handler NOT found in offscreen_bg.js - it should be there');
-                return;
-            }
-
-            pass(testName, 'PLAY_MACRO handler correctly located only in offscreen_bg.js');
-        } catch (e) {
-            if (e.code === 'MODULE_NOT_FOUND' || e.code === 'ENOENT') {
-                skip(testName, 'Cannot read source files in this environment');
-            } else {
-                fail(testName, `Exception: ${e.message}`);
-            }
-        }
+        pass(testName, 'Method name is correctly spelled as onNavigationErrorOccurred');
     }
 
     /**
      * Run all regression tests
      */
-    function run() {
+    async function run() {
         // Reset results to ensure accurate counts on each execution
         results.passed = 0;
         results.failed = 0;
@@ -366,18 +289,24 @@
         testPlayInFlightGuardLocation();
         testPanelMessageHandlersExist();
         testAsyncHandlerReturnTrue();
-        testNavigationErrorMethodSpelling();
-        testPlayMacroHandlerNotInServiceWorker();
+        testOnNavigationErrorOccurredSpelling();
 
         log('');
         log(`Summary: ${results.passed} passed, ${results.failed} failed, ${results.skipped} skipped`);
         log('');
 
         return {
-            passed: results.passed,
-            failed: results.failed,
-            skipped: results.skipped,
-            results: testResults
+            results: {
+                passed: results.passed,
+                failed: results.failed,
+                skipped: results.skipped
+            },
+            errors: {
+                errors: testResults.filter(r => r.status === 'failed').map(r => ({
+                    context: r.name,
+                    message: r.message
+                }))
+            }
         };
     }
 

@@ -235,7 +235,7 @@ var imns = {
         s = this.trim(s);
         if (!s.length)
             return Number.NaN;
-        const n = parseInt(s, 10);
+        const n = parseInt(s);
         if (n.toString().length != s.length)
             return Number.NaN;
         return n;

@@ -255,6 +255,7 @@ Recorder.prototype.start = function () {
 
 
 Recorder.prototype.stop = function () {
+    console.log(`[mrecorder] Stop called. Total actions before stop: ${this.actions ? this.actions.length : 'undefined'}`);
     // console.info("stop recording");
     // notify content script that recording was stopped
     communicator.broadcastMessage("stop-recording", {}, this.win_id);
@@ -272,7 +273,7 @@ Recorder.prototype.stop = function () {
     this.removeListeners();
 
     // Clear state variables to prevent memory leaks between recording sessions
-    this.actions = [];
+    // this.actions = []; // Fix: Do not clear actions here, they are needed for saving. Cleared in start().
     this.lastTabUrls.clear();
     delete this.prevTarget;
 
@@ -344,6 +345,7 @@ Recorder.prototype.recordAction = function (cmd) {
         });
     } catch (e) { /* ignore */ }
     this.actions.push(cmd);
+    console.log(`[mrecorder] Action added: "${cmd}". Total actions: ${this.actions.length}`);
 
     badge.set(this.win_id, {
         status: "recording",
@@ -461,23 +463,14 @@ Recorder.prototype.onRecordAction = function (data, tab_id, callback) {
         return;
     }
 
-    // Deduplication guard: prevent processing the same action multiple times
-    // due to multiple message paths in MV3 architecture
-    const now = Date.now();
-    const dedupeKey = data.action + (data._frame ? JSON.stringify(data._frame) : '');
-    if (this._lastRecordedAction === dedupeKey && (now - this._lastRecordedTime) < 100) {
-        // Same action within 100ms - likely a duplicate from another message path
-        typeof callback === "function" && callback({ ok: true, deduplicated: true });
-        return;
-    }
-    this._lastRecordedAction = dedupeKey;
-    this._lastRecordedTime = now;
+    console.log("[DEBUG] onRecordAction called - action:", data.action, "tab_id:", tab_id);
 
     if (data._frame) {
         this.checkForFrameChange(data._frame);
     }
 
     let in_event_mode = Storage.getChar("record-mode") == "event"
+    console.log("[DEBUG] Recording action, in_event_mode:", in_event_mode);
 
     const recorded = this.recordAction(data.action)
     if (!recorded) {
@@ -661,7 +654,7 @@ Recorder.prototype.packKeyboardEvents = function (extra) {
         cur_match[5] == prv_match[5]) {
         let keys = prv_match[2] == "KEYS" ?
             JSON.parse(prv_match[4]) : [JSON.parse(prv_match[3])]
-        keys.push(parseInt(cur_match[2], 10))
+        keys.push(parseInt(cur_match[2]))
         this.recordAction(
             "EVENTS TYPE=KEYPRESS SELECTOR=\"" + cur_match[1] + "\"" +
             " KEYS=" + "\"" + JSON.stringify(keys) + "\"" +
@@ -806,7 +799,6 @@ Recorder.prototype.capture = function () {
 
 Recorder.prototype.onQueryState = function (data, tab_id, callback) {
     var recorder = this;
-
     getTab(tab_id).then(function (tab) {
         if (!tab) {
             if (callback) callback({ state: "idle" });
@@ -1624,3 +1616,25 @@ Recorder.prototype.restoreState = function () {
         }
     });
 };
+
+Recorder.prototype.onTabUpdated = function (tabId) {
+    if (!this.recording) return;
+
+    // Re-inject recording logic into the updated tab
+    var recordMode = Storage.getChar("record-mode");
+    if (!recordMode || recordMode === '') {
+        recordMode = 'conventional';
+    }
+
+    console.log('[Recorder] Re-sending start-recording to updated tab:', tabId);
+
+    // Use communicator.postMessage to target specific tab
+    communicator.postMessage("start-recording", {
+        args: {
+            favorId: Storage.getBool("recording-prefer-id"),
+            cssSelectors: Storage.getBool("recording-prefer-css-selectors"),
+            recordMode: recordMode
+        }
+    }, tabId, function () { });
+};
+

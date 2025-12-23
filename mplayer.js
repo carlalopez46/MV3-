@@ -1628,22 +1628,22 @@ MacroPlayer.prototype.dispatchKeyboardEvent = function (details) {
 };
 
 function get_mouse_button_name(button) {
-    if (button === -1)
+    if (button == -1)
         return "none";
-    else if (button === 0)
+    else if (button == 0)
         return "left";
-    else if (button === 1)
+    else if (button == 1)
         return "middle";
-    else if (button === 2)
+    else if (button == 2)
         return "right";
     else
         return "none"; // TODO: should we handle other buttons as well?
 }
 
 function get_mouse_event_name(type) {
-    if (type === "mousedown")
+    if (type == "mousedown")
         return "mousePressed";
-    else if (type === "mouseup")
+    else if (type == "mouseup")
         return "mouseReleased";
     else
         return "mouseMoved";
@@ -3608,14 +3608,14 @@ MacroPlayer.prototype.parseContentStr = function (cs) {
                         replace(/\*/g, '(?:[\r\n]|.)*') + "\\s*$";
                     opts[i] = { typ: typ, re_str: re_str, str: val };
                 } else if (typ == "#") {
-                    var idx = parseInt(val, 10);
+                    var idx = parseInt(val);
                     if (isNaN(idx))
                         throw new RuntimeError(
                             "Wrong CONTENT specifier " + cs, 711);
                     opts[i] = { typ: "#", idx: idx };
                 }
             } else if (/^(\d+)$/i.test(opts[i])) { // indexes 1:2:...
-                var idx = parseInt(RegExp.$1, 10);
+                var idx = parseInt(RegExp.$1);
                 if (isNaN(idx))
                     throw new RuntimeError("Wrong CONTENT specifier " + cs,
                         711);
@@ -4740,6 +4740,32 @@ MacroPlayer.prototype.saveProfilerData = function () {
             return afio.writeTextFile(file, x);
         }
     }).catch(console.error.bind(console));
+};
+
+
+
+MacroPlayer.prototype.pause = function (force) {
+    if (this.paused && !force) return;
+    this.pauseIsPending = true;
+    notifyPanel(this.win_id, "PANEL_STATE_UPDATE", { state: "paused" });
+    if (typeof context !== 'undefined' && context[this.win_id]) {
+        context[this.win_id].state = "paused";
+        context[this.win_id].pausedTabId = this.tab_id;
+    }
+    // No explicit stop needed, playNextAction handles pauseIsPending
+};
+
+
+MacroPlayer.prototype.unpause = function () {
+    if (!this.paused) return;
+    this.paused = false;
+    this.pauseIsPending = false;
+    notifyPanel(this.win_id, "PANEL_STATE_UPDATE", { state: "playing" });
+    if (typeof context !== 'undefined' && context[this.win_id]) {
+        context[this.win_id].state = "playing";
+    }
+    // Resume execution
+    this.next("unpause");
 };
 
 

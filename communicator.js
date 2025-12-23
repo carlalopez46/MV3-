@@ -21,16 +21,10 @@ Communicator.prototype.addListeners = function () {
         (msg, sender, sendResponse) => {
             // 内部メッセージや他からのメッセージをフィルタリング
             if (!msg || !msg.topic) return;
-            // Skip FORWARD_MESSAGE commands - they are handled by offscreen_bg.js directly.
-            // The message may contain both 'command' and 'topic', but we should only
-            // process it once via the FORWARD_MESSAGE handler in offscreen_bg.js.
-            if (msg.command === 'FORWARD_MESSAGE' || msg.target === 'offscreen') {
-                return;
-            }
-            if (inOffscreenDocument && sender && sender.tab) {
-                // Offscreen must only handle content-script topics via SW forwarding.
-                return;
-            }
+            // if (inOffscreenDocument && sender && sender.tab) {
+            //    // Offscreen must only handle content-script topics via SW forwarding.
+            //    return;
+            // }
 
             // sender.tab がない場合はバックグラウンド/ポップアップからのメッセージの可能性がある
             // タブIDがない場合は -1 などを割り当てるか、ハンドラ側で対応
@@ -186,12 +180,8 @@ Communicator.prototype.postMessage = function (topic, data, tab_id, callback, fr
             (response) => {
                 if (chrome.runtime.lastError) {
                     console.warn('[Communicator] Direct sendMessage error:', chrome.runtime.lastError.message);
-                    // Pass error to callback instead of undefined response
-                    if (callback) callback({ error: chrome.runtime.lastError.message, found: false });
-                } else if (callback) {
-                    if (typeof response !== 'undefined') callback(response);
-                    else callback({ error: 'No response from content script', found: false });
                 }
+                if (callback) callback(response);
             }
         );
     } else {

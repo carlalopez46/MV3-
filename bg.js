@@ -102,15 +102,16 @@ function saveMacro(macro, overwrite = true) {
     });
 }
 
-async function persistRecordedMacro(ctx, win_id) {
-    const { recorder } = ctx;
-    const recorded_macro = recorder.actions.join("\n");
+async function persistRecordedMacro(ctx, win_id, recordedActions) {
+    // recordedActions came from slice() before stop() was called
+    const actions = recordedActions || [];
+    const recorded_macro = actions.join("\n");
     const macro = {
         source: recorded_macro, win_id: win_id,
         name: "#Current.iim"
     };
 
-    console.log('[iMacros MV3] Recording stopped, saving macro with', recorder.actions.length, 'actions');
+    console.log('[iMacros MV3] Recording stopped, saving macro with', actions.length, 'actions');
 
     const treeType = Storage.getChar("tree-type");
 
@@ -229,8 +230,10 @@ if (typeof chrome !== 'undefined' && chrome.action && chrome.action.onClicked) {
             }
 
             if (recorder.recording) {
+                // Copy actions before stop() clears them
+                const recordedActions = (recorder.actions || []).slice();
                 await Promise.resolve(recorder.stop());
-                await persistRecordedMacro(ctx, win_id);
+                await persistRecordedMacro(ctx, win_id, recordedActions);
             }
         } catch (err) {
             logError("Failed to handle action.onClicked: " + err.message, { win_id: win_id });
@@ -489,9 +492,42 @@ communicator.registerHandler("run-macro", function (data, tab_id) {
     });
 });
 
-// NOTE: PLAY_MACRO messages are handled by the Offscreen Document (offscreen_bg.js).
-// The MacroPlayer runs in the Offscreen Document context, not the Service Worker.
-// Do not add a PLAY_MACRO handler here to avoid duplicate execution.
+// Listen for PLAY_MACRO message from beforePlay.js
+chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (message.type === 'PLAY_MACRO') {
+        const { macro, win_id } = message;
+
+        // Ensure context is initialized (handles service worker restart)
+        const ctxPromise = context[win_id] && context[win_id]._initialized
+            ? Promise.resolve(context[win_id])
+            : context.init(win_id);
+
+        ctxPromise.then(ctx => {
+            return getLimits().then(
+                limits => asyncRun(function () {
+                    try {
+                        ctx.mplayer.play(macro, limits);
+                        sendResponse({ success: true });
+                    } catch (err) {
+                        logError("Failed to play macro: " + err.message, {
+                            win_id: win_id,
+                            macro_name: macro.name
+                        });
+                        sendResponse({ success: false, error: err.message });
+                    }
+                })
+            );
+        }).catch(err => {
+            logError("Failed to initialize context or play macro: " + err.message, {
+                win_id: win_id,
+                macro_name: macro.name
+            });
+            sendResponse({ success: false, error: err.message });
+        });
+
+        return true; // Keep message channel open for async response
+    }
+});
 
 // Listen for preference messages
 chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
@@ -715,7 +751,7 @@ chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
 function addTab(url, win_id) {
     var args = { url: url };
     if (win_id)
-        args.windowId = parseInt(win_id, 10);
+        args.windowId = parseInt(win_id);
 
     chrome.tabs.create(args, function (tab) {
         if (chrome.runtime.lastError) {
@@ -744,7 +780,7 @@ function showNotification(win_id, args) {
 // Note: chrome.notifications is not available in Offscreen Document
 if (typeof chrome !== 'undefined' && chrome.notifications && chrome.notifications.onClicked) {
     chrome.notifications.onClicked.addListener(function (n_id) {
-        var w_id = parseInt(n_id, 10);
+        var w_id = parseInt(n_id);
         if (isNaN(w_id) || !context[w_id] || !context[w_id].info_args)
             return;
         var info = context[w_id].info_args;
@@ -961,7 +997,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
             // by checking which context has this panelId
             let found_win_id = null;
             for (let win_id in context) {
-                win_id = parseInt(win_id, 10);
+                win_id = parseInt(win_id);
                 if (!isNaN(win_id) && context[win_id].panelId === panelWindowId) {
                     found_win_id = win_id;
                     break;

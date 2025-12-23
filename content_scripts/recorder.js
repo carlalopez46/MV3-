@@ -3,13 +3,13 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 */
 
 (function () {
-	    // MV3: content scripts can be injected multiple times by the SW retry logic.
-	    // Ensure we only create one CSRecorder instance per frame to avoid double recording.
-	    var __imacrosGlobal = (typeof globalThis !== 'undefined') ? globalThis : window;
-	    var __imacrosRecorderKey = '__imacros_mv3_cs_recorder_instance__';
-	    if (__imacrosGlobal && __imacrosGlobal[__imacrosRecorderKey]) {
-	        return;
-	    }
+    // MV3: content scripts can be injected multiple times by the SW retry logic.
+    // Ensure we only create one CSRecorder instance per frame to avoid double recording.
+    var __imacrosGlobal = (typeof globalThis !== 'undefined') ? globalThis : window;
+    var __imacrosRecorderKey = '__imacros_mv3_cs_recorder_instance__';
+    if (__imacrosGlobal && __imacrosGlobal[__imacrosRecorderKey]) {
+        return;
+    }
 
     // NOTE:  A small step towards unifying code base; at some later time
     // we'll have updated utils.js with better ns separation but for now
@@ -949,6 +949,24 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         }
 
         var elem = e.target;
+
+        // Helper: Traverse up to find interactive parent (A, BUTTON)
+        // This fixes cases where clicking an IMG inside an A tag records the IMG (which might have no action) instead of the A tag.
+        if (/^(?:IMG|SPAN|DIV|I|B|STRONG|EM|U|FONT|SMALL|BIG|LABEL)$/i.test(elem.tagName)) {
+            let p = elem.parentElement;
+            let depth = 0;
+            const MAX_DEPTH = 5;
+            while (p && p !== document.body && depth < MAX_DEPTH) {
+                if (/^(?:A|BUTTON)$/i.test(p.tagName)) {
+                    console.log("[DEBUG] onClick retargeted from", elem.tagName, "to parent", p.tagName);
+                    elem = p;
+                    break;
+                }
+                // Rare case: element inside a submit input? No, inputs are void elements.
+                p = p.parentElement;
+                depth++;
+            }
+        }
         var tagName = elem.tagName.toUpperCase();
 
         if (/^(?:select|option|textarea|form|html|body)$/i.test(tagName))
@@ -1611,12 +1629,12 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
     };
 
     var recorder = new CSRecorder();
-	    try {
-	        if (__imacrosGlobal) {
-	            __imacrosGlobal[__imacrosRecorderKey] = recorder;
-	        }
-	    } catch (e) {
-	        // ignore
-	    }
+    try {
+        if (__imacrosGlobal) {
+            __imacrosGlobal[__imacrosRecorderKey] = recorder;
+        }
+    } catch (e) {
+        // ignore
+    }
 
 })();

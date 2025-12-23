@@ -819,10 +819,9 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 	    // Create/reuse singleton instance (idempotent across MV3 re-injection).
 	    const existingLogger = window && window.ErrorLogger;
-	    const isNewInstance = !(existingLogger && typeof existingLogger.logError === 'function');
-	    const errorLogger = isNewInstance
-	        ? new ErrorLogger()
-	        : existingLogger;
+	    const errorLogger = existingLogger && typeof existingLogger.logError === 'function'
+	        ? existingLogger
+	        : new ErrorLogger();
 	    try {
 	        errorLogger.__imacrosErrorLoggerSingleton = true;
 	    } catch (e) {
@@ -863,18 +862,48 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         critical: createLegacyLogger(ErrorLevel.CRITICAL)
     };
 
-    /**
-     * Global helper functions for convenient logging
-     *
-     * These functions use extractCallerFromStack(stack, 1) to correctly identify
-     * the actual caller's location instead of the helper function's own location.
-     *
-     * Note: These may be overridden below if GlobalErrorLogger is available.
-     */
-    window.logError = legacyLoggers.error;
-    window.logWarning = legacyLoggers.warning;
-    window.logInfo = legacyLoggers.info;
-    window.logCritical = legacyLoggers.critical;
+    const hasGlobalErrorLogger = typeof GlobalErrorLogger !== 'undefined' &&
+        typeof GlobalErrorLogger.logError === 'function' &&
+        typeof GlobalErrorLogger.logWarning === 'function' &&
+        typeof GlobalErrorLogger.logInfo === 'function';
+
+    if (hasGlobalErrorLogger) {
+        console.info("[iMacros] GlobalErrorLogger detected - delegating legacy functions to it");
+
+        const delegateToGlobal = (methodName, legacyKey, extraDetails = {}) => {
+            const globalMethod = GlobalErrorLogger[methodName] || GlobalErrorLogger.logError;
+            return function (message, context, code) {
+                const { stack, caller } = createCallerContext();
+                const details = Object.assign({
+                    code: code || ErrorCodes.UNKNOWN,
+                    legacyCall: true,
+                    stack: stack,
+                    caller: caller
+                }, extraDetails || {});
+                try {
+                    return globalMethod.call(GlobalErrorLogger, context || 'Legacy', message, details);
+                } catch (err) {
+                    return legacyLoggers[legacyKey](message, context, code, stack, caller);
+                }
+            };
+        };
+
+        window.logError = delegateToGlobal('logError', 'error');
+        window.logWarning = delegateToGlobal('logWarning', 'warning');
+        window.logInfo = delegateToGlobal('logInfo', 'info');
+        window.logCritical = delegateToGlobal('logError', 'critical', { severity: 'CRITICAL' });
+    } else {
+        /**
+         * Global helper functions for convenient logging
+         *
+         * These functions use extractCallerFromStack(stack, 1) to correctly identify
+         * the actual caller's location instead of the helper function's own location.
+         */
+        window.logError = legacyLoggers.error;
+        window.logWarning = legacyLoggers.warning;
+        window.logInfo = legacyLoggers.info;
+        window.logCritical = legacyLoggers.critical;
+    }
 
     /**
      * Check and log chrome.runtime.lastError
@@ -1039,24 +1068,17 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         };
     }
 
-    // Only log initialization messages when a new instance is actually created
-    // This prevents duplicate messages across MV3 contexts (service worker, panel, content scripts, etc.)
-    if (isNewInstance) {
-        console.info("[iMacros] Error Logger initialized successfully");
-        console.info("[iMacros] Use ErrorLogger to access error logs");
-        console.info("[iMacros] Use logError(), logWarning(), logInfo(), logCritical() for logging");
-        console.info("[iMacros] Use checkChromeError(), wrapChromeCallback(), wrapPromise() for Chrome API error handling");
-    }
+    console.info("[iMacros] Error Logger initialized successfully");
+    console.info("[iMacros] Use ErrorLogger to access error logs");
+    console.info("[iMacros] Use logError(), logWarning(), logInfo(), logCritical() for logging");
+    console.info("[iMacros] Use checkChromeError(), wrapChromeCallback(), wrapPromise() for Chrome API error handling");
 
     // ========================================================================
     // Legacy Compatibility Layer - Delegates to GlobalErrorLogger
     // ========================================================================
     // If GlobalErrorLogger is available (loaded before this file), override the legacy
     // functions to use it as the backend for better stack trace parsing
-    // Track whether legacy compatibility has been set up to avoid duplicate messages
-    const legacyCompatKey = '__imacros_legacy_compat_logged';
-    if (typeof GlobalErrorLogger !== 'undefined' && !window[legacyCompatKey]) {
-        window[legacyCompatKey] = true;
+    if (typeof GlobalErrorLogger !== 'undefined') {
         console.info("[iMacros] GlobalErrorLogger detected - delegating legacy functions to it");
 
         // Override the legacy functions that were just defined above
