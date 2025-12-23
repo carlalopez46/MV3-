@@ -4,8 +4,6 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 // Context to store browser window-specific information
 
-// Context to store browser window-specific information
-
 // Define global listeners to ensure stable references
 const _globalContextListeners = {
     onCreated: function (w) {
@@ -201,6 +199,7 @@ const context = {
                 clearInterval(context[id].dockInterval);
                 context[id].dockInterval = null;
             }
+            this.unregisterDfHandler(id);
             delete context[id];
         }
     },

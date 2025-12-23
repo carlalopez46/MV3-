@@ -442,10 +442,7 @@ var TagHandler = {
                 // If not the last part, navigate into shadow root
                 if (i < parts.length - 1) {
                     if (!currentElement.shadowRoot) {
-                        throw new RuntimeError(
-                            "Element has no shadow root: " + xpathPart,
-                            781
-                        );
+                        return null;
                     }
                     currentContext = currentElement.shadowRoot;
                 }

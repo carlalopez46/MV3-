@@ -471,7 +471,7 @@ Recorder.prototype.onRecordAction = function (data, tab_id, callback) {
     // Deduplication guard: prevent processing the same action multiple times
     // due to multiple message paths in MV3 architecture
     const now = Date.now();
-    const dedupeKey = data.action + (data._frame && data._frame.number !== undefined ? ':f' + data._frame.number : '');
+    const dedupeKey = tab_id + ':' + data.action + (data._frame && data._frame.number !== undefined ? ':f' + data._frame.number : '');
     if (this._lastRecordedAction === dedupeKey && (now - this._lastRecordedTime) < 100) {
         // Same action within 100ms - likely a duplicate from another message path
         typeof callback === "function" && callback({ ok: true, deduplicated: true });

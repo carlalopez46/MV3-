@@ -478,7 +478,7 @@ EditArea.prototype.execCommand = function (cmd, param) {
 		case "re_sync":
 			if (!this.do_highlight)
 				break;
-		/* falls through */
+		// biome-ignore lint/style/noFallthrough: intentional
 		case "file_switch_on":
 			if (this.settings["EA_file_switch_on_callback"].length > 0)
 				parent[this.settings["EA_file_switch_on_callback"]](param);
@@ -499,7 +499,13 @@ EditArea.prototype.execCommand = function (cmd, param) {
 				else
 					try {
 						editArea[cmd](param);
-					} catch (e) { console.error("EditArea edit_area.js: Error executing command:", cmd, e); };
+					} catch (e) {
+						console.error("EditArea edit_area.js: Error executing command:", cmd, e);
+						if (typeof (parent.editAreaLoader) != "undefined" && typeof (parent.editAreaLoader.show_error) == "function")
+							parent.editAreaLoader.show_error("Error executing command: " + cmd + "\n" + e.message);
+						else
+							alert("Error executing command: " + cmd + "\n" + e.message);
+					};
 			}
 	}
 };

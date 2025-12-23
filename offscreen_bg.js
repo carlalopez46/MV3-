@@ -213,396 +213,22 @@ window.addEventListener('message', (event) => {
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (request.target !== 'offscreen') return;
 
-    const msgLabel = request.type || request.command;
-    if (msgLabel !== 'QUERY_STATE' && msgLabel !== 'TAB_UPDATED') {
-        console.log('[iMacros Offscreen] Received message:', msgLabel, request);
+    const type = request.type || request.command;
+    const win_id = parseInt(request.win_id || request.windowId);
+
+    if (type === 'CALL_CONTEXT_METHOD') {
+        executeContextMethod(win_id, request.method || request.methodName, sendResponse, request.args, request.requestId);
+        return true;
     }
 
-    // ★重要: executeContextMethod を try ブロックの外で定義（スコープ問題の修正）
-    // この関数は editMacro と CALL_CONTEXT_METHOD の両方から呼び出されるため、
-    // メッセージリスナーのトップレベルで定義する必要がある
-    function executeContextMethod(win_id, method, sendResponse, args, requestId) {
-        if (method === "recorder.start") {
-            console.log("[Offscreen] Starting recorder...");
-            try {
-                if (context[win_id].mplayer && context[win_id].mplayer.playing) {
-                    console.log("[Offscreen] Stopping active playback before recording");
-                    context[win_id].mplayer.stop();
-                }
-            } catch (e) { }
-            const rec = context[win_id].recorder;
-            if (!rec) {
-                sendResponse({ success: false, error: `Recorder not initialized for window ${win_id}` });
-                return true;
-            }
-            try {
-                rec.start();
-                sendResponse({ success: true });
-            } catch (e) {
-                console.error('[Offscreen] Error starting recorder:', e);
-                sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
-            }
-        } else if (method === "recorder.saveAs") {
-            const rec = context[win_id].recorder;
-            if (!rec || typeof rec.saveAs !== 'function') {
-                sendResponse({ success: false, error: `Recorder saveAs not available for window ${win_id}` });
-                return true;
-            }
-            try {
-                rec.saveAs();
-                sendResponse({ success: true });
-            } catch (e) {
-                console.error('[Offscreen] Error in recorder.saveAs:', e);
-                sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
-            }
-        } else if (method === "recorder.capture") {
-            const rec = context[win_id].recorder;
-            if (!rec || typeof rec.capture !== 'function') {
-                sendResponse({ success: false, error: `Recorder capture not available for window ${win_id}` });
-                return true;
-            }
-            try {
-                rec.capture();
-                sendResponse({ success: true });
-            } catch (e) {
-                console.error('[Offscreen] Error in recorder.capture:', e);
-                sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
-            }
-        } else if (method === "stop") {
-            console.log("[Offscreen] Stopping...");
-            if (win_id) {
-                playInFlight.delete(win_id);
-            }
-            const stopContext = (ctx, id) => {
-                let stoppedPlayer = false;
-                let stoppedRecorder = false;
-                if (ctx.mplayer) {
-                    try {
-                        if (typeof ctx.mplayer.stop === 'function') {
-                            ctx.mplayer.stop();
-                            stoppedPlayer = true;
-                        }
-                    } catch (e) {
-                        console.error(`[Offscreen] Error stopping mplayer for window ${id}:`, e);
-                    }
-                }
-                if (ctx.recorder) {
-                    try {
-                        if (typeof ctx.recorder.stop === 'function') {
-                            ctx.recorder.stop();
-                            stoppedRecorder = true;
-                        }
-                    } catch (e) {
-                        console.error(`[Offscreen] Error stopping recorder for window ${id}:`, e);
-                    }
-                }
-                return { stoppedPlayer, stoppedRecorder };
-            };
-
-            if (context[win_id]) {
-                const result = stopContext(context[win_id], win_id);
-                sendResponse({ success: true, ...result });
-            } else {
-                console.warn('[Offscreen] Stop target window not found. Scanning all contexts...');
-                const stoppedDetails = [];
-                for (let id in context) {
-                    if (Object.hasOwn(context, id) && context[id] && typeof context[id] === 'object') {
-                        const result = stopContext(context[id], id);
-                        if (result.stoppedPlayer || result.stoppedRecorder) {
-                            stoppedDetails.push({ id, ...result });
-                        }
-                    }
-                }
-                if (stoppedDetails.length > 0) {
-                    sendResponse({ success: true, message: "Stopped active processes in other windows", details: stoppedDetails });
-                } else {
-                    sendResponse({ success: false, message: "No active processes found to stop" });
-                }
-            }
-        } else if (method === "pause") {
-            console.log("[Offscreen] Pausing/Unpausing player...");
-            const mplayer = context[win_id].mplayer;
-            if (!mplayer) {
-                sendResponse({ success: false, error: 'mplayer not available for pause' });
-                return true;
-            }
-            const pausedState = mplayer.paused;
-            console.log('[Offscreen] Current paused state:', pausedState);
-
-            if (pausedState) {
-                if (typeof mplayer.unpause === 'function') {
-                    try {
-                        mplayer.unpause();
-                        sendResponse({ success: true, resumed: true });
-                    } catch (e) {
-                        console.error('[Offscreen] Error unpausing mplayer:', e);
-                        sendResponse({ success: false, error: 'Error unpausing mplayer', details: String(e) });
-                    }
-                } else {
-                    sendResponse({ success: false, error: 'unpause method not available' });
-                }
-            } else {
-                if (typeof mplayer.pause === 'function') {
-                    try {
-                        mplayer.pause();
-                        sendResponse({ success: true, resumed: false });
-                    } catch (e) {
-                        console.error('[Offscreen] Error pausing mplayer:', e);
-                        sendResponse({ success: false, error: 'Error pausing mplayer', details: String(e) });
-                    }
-                } else {
-                    sendResponse({ success: false, error: 'pause method not available' });
-                }
-            }
-        } else if (method === "unpause") {
-            console.log("[Offscreen] Unpausing player...");
-            const mplayer = context[win_id].mplayer;
-            if (!mplayer) {
-                sendResponse({ success: false, error: 'mplayer not available for unpause' });
-                return true;
-            }
-            if (!mplayer.paused) {
-                sendResponse({ success: false, error: 'mplayer is not paused' });
-                return true;
-            }
-            if (typeof mplayer.unpause === 'function') {
-                try {
-                    mplayer.unpause();
-                    sendResponse({ success: true, resumed: true });
-                } catch (e) {
-                    console.error('[Offscreen] Error unpausing mplayer:', e);
-                    sendResponse({ success: false, error: 'Error unpausing mplayer', details: String(e) });
-                }
-            } else {
-                sendResponse({ success: false, error: 'unpause method not available' });
-            }
-        } else if (method === "mplayer.play") {
-            console.log("[Offscreen] Calling mplayer.play with:", args[0].name);
-            const mplayer = context[win_id].mplayer;
-            if (!mplayer) {
-                sendResponse({ success: false, error: 'mplayer not available for play' });
-                return true;
-            }
-            try {
-                mplayer.play(args[0], args[1], function (result) {
-                    console.log("[Offscreen] mplayer.play completed:", result);
-                    if (result && result.error) {
-                        sendResponse({ success: false, error: result.error });
-                    } else {
-                        sendResponse({ success: true, result: result });
-                    }
-                });
-            } catch (e) {
-                console.error("[Offscreen] Play error:", e);
-                sendResponse({ success: false, error: e && e.message ? e.message : String(e) });
-                return true;
-            }
-            return true;
-        } else if (method === "playFile") {
-            const playRequestId = requestId || createRequestId();
-            console.log("[Offscreen] playFile request", {
-                requestId: playRequestId,
-                windowId: win_id,
-                offscreenInstanceId: OFFSCREEN_INSTANCE_ID
-            });
-            if (typeof afio === 'undefined') {
-                console.error("[Offscreen] AFIO is not available for playFile");
-                if (sendResponse) {
-                    sendResponse({ success: false, error: 'AFIO not available', state: 'idle' });
-                }
-                return false;
-            }
-            // ★追加: パスからファイルを読んで再生する
-            let filePath = args[0];
-            const loops = Math.max(1, parseInt(args[1], 10) || 1);
-            console.log("[Offscreen] Reading and playing file (original path):", filePath, { requestId: playRequestId });
-            if (Storage.getBool("debug"))
-                console.log("[Offscreen] Loop count:", loops, "(should be 1 for normal play, >1 for Play Loop)");
-
-            if (playInFlight.has(win_id)) {
-                console.warn(`[Offscreen] Ignoring playFile - a play request is already pending for window ${win_id}`);
-                if (sendResponse) {
-                    sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
-                }
-                return false;
-            }
-
-            const existingContext = context[win_id];
-            if (existingContext && existingContext.mplayer && existingContext.mplayer.playing) {
-                console.warn(`[Offscreen] Ignoring playFile - macro already playing for window ${win_id}`);
-                if (sendResponse) {
-                    sendResponse({ success: false, error: 'Macro already playing', state: 'playing' });
-                }
-                return true; // Keep channel open for async response
-            }
-
-            // Use isDuplicatePlayStart for comprehensive duplicate detection
-            if (isDuplicatePlayStart(win_id, filePath, "playFile")) {
-                console.warn(`[Offscreen] Ignoring playFile - duplicate start detected for window ${win_id}`);
-                if (sendResponse) {
-                    sendResponse({ success: false, error: 'Duplicate play request', state: 'starting' });
-                }
-                return true; // Keep channel open for async response
-            }
-
-            recordPlayStart(win_id, filePath);
-            playInFlight.add(win_id);
-            console.log(`[Offscreen] playFile - Added ${win_id} to playInFlight guard`, { requestId: playRequestId });
-
-            const resolveAbsolutePath = async (path) => {
-                let cleanedPath = path.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
-                if (!cleanedPath.startsWith('/') && !cleanedPath.match(/^[a-zA-Z]:/)) {
-                    if (typeof FileSystemAccessService !== 'undefined' && FileSystemAccessService.getRootPath) {
-                        try {
-                            const rootPath = await FileSystemAccessService.getRootPath();
-                            cleanedPath = `${rootPath}/${cleanedPath}`;
-                        } catch (err) {
-                            console.warn("[Offscreen] Falling back to cleaned relative path");
-                        }
-                    } else {
-                        console.warn("[Offscreen] FileSystemAccessService not available, using path as-is");
-                    }
-                }
-                return cleanedPath;
-            };
-
-            const readAndPlayFile = async (absolutePath, loops, win_id) => {
-                const node = afio.openNode(absolutePath);
-                const source = await afio.readTextFile(node);
-                const macro = {
-                    source: source,
-                    name: node.leafName,
-                    file_id: absolutePath,
-                    times: loops
-                };
-
-                if (!playInFlight.has(win_id)) {
-                    console.warn(`[Offscreen] playFile aborted before start for window ${win_id} (stop requested)`);
-                    return null;
-                }
-
-                const ctx = context[win_id] && context[win_id]._initialized
-                    ? context[win_id]
-                    : await context.init(win_id);
-
-                const limits = await getLimits();
-                return new Promise((resolve, reject) => {
-                    try {
-                        ctx.mplayer.play(macro, limits, (result) => {
-                            if (result && result.error) {
-                                reject(new Error(result.error));
-                            } else {
-                                resolve(result);
-                            }
-                        });
-                    } catch (e) {
-                        reject(e);
-                    }
-                });
-            };
-
-            // Send acknowledgment that play has started
-            if (sendResponse) {
-                sendResponse({
-                    ack: true,
-                    started: true,
-                    requestId: playRequestId,
-                    status: 'started'
-                });
-            }
-
-            (async () => {
-                try {
-                    const absolutePath = await resolveAbsolutePath(filePath);
-                    await readAndPlayFile(absolutePath, loops, win_id);
-                    console.log("[Offscreen] Macro play completed successfully", { requestId: playRequestId });
-                    // 注: sendResponseは既に呼び出し済みのため、ここでは呼び出さない
-                    // マクロ完了の通知は状態変更メッセージを通じてUIに伝達される
-                } catch (err) {
-                    console.error("[Offscreen] File read/play error:", err, { requestId: playRequestId });
-                    // ★重要: ファイル読み込みエラー時にUIへ通知
-                    // mplayer.play()が呼び出される前にエラーが発生した場合、
-                    // 状態変更コールバックが発火しないため、明示的にUIへ通知する
-                    const errorMsg = err && err.message ? err.message : String(err);
-                    notifyAsyncError(win_id, `Error: ${errorMsg}`);
-                } finally {
-                    // ★重要: パネルの状態更新とガード解除を共通化
-                    if (chrome && chrome.runtime && typeof chrome.runtime.sendMessage === 'function') {
-                        chrome.runtime.sendMessage({
-                            type: "macroStopped",
-                            win_id: win_id,
-                            target: "panel"
-                        });
-                        chrome.runtime.sendMessage({
-                            type: 'UPDATE_BADGE',
-                            method: 'setText',
-                            winId: win_id,
-                            arg: ''
-                        });
-                    }
-                    // パネルの状態をリセットしてアイドル状態に戻す
-                    if (typeof notifyPanel === 'function') {
-                        notifyPanel(win_id, "UPDATE_PANEL_VIEWS", {});
-                    }
-                    playInFlight.delete(win_id);
-                    console.log(`[Offscreen] playFile - Removed ${win_id} from playInFlight guard`, { requestId: playRequestId });
-                }
-            })();
-            return false;
-
-        } else if (method === "openEditor") {
-            let filePath = args[0];
-            filePath = filePath.replace(/^[^\/\\]+[\/\\]Macros[\/\\]/, 'Macros/');
-            console.log("[Offscreen] Cleaned path for editor:", filePath);
-
-            if (sendResponse) {
-                const openRequestId = requestId || createRequestId();
-                sendResponse({
-                    ack: true,
-                    requestId: openRequestId,
-                    status: 'opening'
-                });
-            }
-            // NOTE: Completion/errors are reported asynchronously; caller should rely on UI/state updates.
-
-            (async () => {
-                try {
-                    const node = afio.openNode(filePath);
-                    const source = await afio.readTextFile(node);
-                    console.log("[Offscreen] File read for editor success");
-
-                    const macro = {
-                        source: source,
-                        name: node.leafName,
-                        file_id: filePath
-                    };
-
-                    // エディタを開く（edit関数を使用）
-                    console.log("[Offscreen] Calling edit() to open editor");
-                    edit(macro, false, 0);
-                } catch (err) {
-                    console.error("[Offscreen] File read for editor error:", err);
-                    const errorMsg = err && err.message ? err.message : String(err);
-                    notifyAsyncError(win_id, `Error opening editor: ${errorMsg}`);
-                }
-            })();
-            return false;
-        } else {
-            sendResponse({ success: false, error: `Unknown method: ${method}` });
-        }
-    }
-
-    if (request.type === 'QUERY_STATE') {
-        const winId = (typeof request.win_id === 'string') ? parseInt(request.win_id, 10) : request.win_id;
-        const ctx = (typeof context !== 'undefined' && context) ? context[winId] : null;
+    if (type === 'QUERY_STATE') {
+        const ctx = context[win_id];
         let state = 'idle';
         const response = { state, success: true };
-
         if (ctx) {
             if (ctx.recorder && ctx.recorder.recording) {
-                state = 'recording';
+                response.state = 'recording';
                 const recordMode = Storage.getChar("record-mode") || 'conventional';
-                response.state = state;
                 response.args = {
                     favorId: Storage.getBool("recording-prefer-id"),
                     cssSelectors: Storage.getBool("recording-prefer-css-selectors"),
@@ -610,523 +236,218 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
                 };
                 response.frameNumber = ctx.recorder.currentFrameNumber;
             } else if (ctx.mplayer && ctx.mplayer.playing) {
-                state = 'playing';
-                response.state = state;
-                response.currentMacro = ctx.mplayer.currentMacro || null;
-            } else {
-                response.state = 'idle';
+                response.state = 'playing';
             }
         }
-        if (sendResponse) {
-            sendResponse(response);
-        }
+        sendResponse(response);
         return true;
     }
 
-    if (request.type === 'TAB_UPDATED') {
-        const winId = request.win_id;
-        const tabId = request.tab_id;
-        const ctx = context[winId];
-
+    if (type === 'TAB_UPDATED') {
+        const ctx = context[win_id];
         if (ctx && ctx.recorder && ctx.recorder.recording) {
-            console.log(`[Offscreen] Tab updated in recording window ${winId}. Triggering recorder reinjection for tab ${tabId}`);
             if (typeof ctx.recorder.onTabUpdated === 'function') {
-                ctx.recorder.onTabUpdated(tabId);
+                ctx.recorder.onTabUpdated(request.tab_id);
             }
         }
-        return;
-    }
-
-    if (request.command === 'panelCreated') {
-        const win_id = request.win_id;
-        if (context[win_id]) {
-            context[win_id].panelId = request.panelId;
-        }
-        if (sendResponse) sendResponse({ success: true });
-        return true;
-    }
-
-    if (request.command === 'panelClosed') {
-        const panelId = request.panelId;
-        for (let win_id in context) {
-            if (context[win_id] && context[win_id].panelId === panelId) {
-                delete context[win_id].panelId;
-                delete context[win_id].panelWindow;
-            }
-        }
-        if (sendResponse) sendResponse({ success: true });
-        return true;
-    }
-
-    // Download events
-    if (['DOWNLOAD_CREATED', 'DOWNLOAD_CHANGED'].includes(request.type)) {
-        const targetWinIds = request.win_id ? [request.win_id] : Object.keys(context);
-        for (let win_id of targetWinIds) {
-            win_id = parseInt(win_id);
-            if (context[win_id]) {
-                const mplayer = context[win_id].mplayer;
-                try {
-                    if (request.type === 'DOWNLOAD_CREATED') {
-                        if (mplayer && mplayer.onDownloadCreated) {
-                            mplayer.onDownloadCreated(request.downloadItem);
-                        }
-                    } else if (request.type === 'DOWNLOAD_CHANGED') {
-                        if (mplayer && mplayer.onDownloadChanged) {
-                            mplayer.onDownloadChanged(request.downloadDelta);
-                        }
-                    }
-                } catch (e) {
-                    console.error(`[iMacros Offscreen] Error handling ${request.type} for win_id ${win_id}:`, e);
-                }
-            }
-        }
-        if (sendResponse) sendResponse({ success: true });
-        return true;
-    }
-
-    // Tab events
-    if (['TAB_UPDATED', 'TAB_ACTIVATED', 'TAB_CREATED', 'TAB_REMOVED', 'TAB_MOVED', 'TAB_ATTACHED', 'TAB_DETACHED', 'WEB_NAVIGATION_ERROR', 'WEB_NAVIGATION_COMMITTED'].includes(request.type)) {
-        for (let win_id in context) {
-            if (context[win_id]) {
-                const mplayer = context[win_id].mplayer;
-                const recorder = context[win_id].recorder;
-                const req = request;
-                try {
-                    if (req.type === 'TAB_UPDATED') {
-                        if (mplayer && mplayer.onTabUpdated) mplayer.onTabUpdated(req.tabId, req.changeInfo, req.tab);
-                        if (recorder && recorder.onUpdated) recorder.onUpdated(req.tabId, req.changeInfo, req.tab);
-                    } else if (req.type === 'TAB_ACTIVATED') {
-                        if (mplayer && mplayer.onTabActivated) mplayer.onTabActivated(req.activeInfo);
-                        if (recorder && recorder.onActivated) recorder.onActivated(req.activeInfo);
-                    } else if (req.type === 'TAB_CREATED') {
-                        if (recorder && recorder.onCreated) recorder.onCreated(req.tab);
-                    } else if (req.type === 'TAB_REMOVED') {
-                        if (recorder && recorder.onRemoved) recorder.onRemoved(req.tabId);
-                    } else if (req.type === 'TAB_MOVED') {
-                        if (recorder && recorder.onMoved) recorder.onMoved(req.tabId, req.moveInfo);
-                    } else if (req.type === 'TAB_ATTACHED') {
-                        if (recorder && recorder.onAttached) recorder.onAttached(req.tabId, req.attachInfo);
-                    } else if (req.type === 'TAB_DETACHED') {
-                        if (recorder && recorder.onDetached) recorder.onDetached(req.tabId, req.detachInfo);
-                    } else if (req.type === 'WEB_NAVIGATION_ERROR') {
-                        if (mplayer && mplayer.onNavigationErrorOccurred) mplayer.onNavigationErrorOccurred(req.details);
-                    } else if (req.type === 'WEB_NAVIGATION_COMMITTED') {
-                        if (recorder && recorder.onCommitted) recorder.onCommitted(req.details);
-                    }
-                } catch (e) {
-                    console.error(`[iMacros Offscreen] Error handling ${req.type} for win_id ${win_id}:`, e);
-                }
-            }
-        }
-        if (sendResponse) sendResponse({ success: true });
-        return true;
-    }
-
-    if (request.command === 'FORWARD_MESSAGE') {
-        const { topic, data, tab_id, win_id } = request;
-        if (typeof communicator !== 'undefined') {
-            const msg = { topic: topic, data: data };
-            if (communicator.handlers && communicator.handlers[topic]) {
-                communicator._execHandlers(msg, tab_id, win_id, sendResponse);
-            } else {
-                if (sendResponse) sendResponse({
-                    success: true,
-                    state: 'idle',
-                    error: 'No handler found',
-                    notHandled: true
-                });
-            }
-        } else {
-            if (sendResponse) sendResponse({
-                success: false,
-                state: 'idle',
-                error: 'Communicator not available'
-            });
-        }
-        return true;
-    }
-
-    if (request.command === 'runMacroByUrl') {
-        const macroPath = request.macroPath;
-        const windowId = (typeof request.windowId === 'string') ? parseInt(request.windowId, 10) : request.windowId;
-        const requestId = request.requestId || createRequestId();
-
-        console.log('[iMacros Offscreen] runMacroByUrl:', macroPath, {
-            requestId,
-            windowId,
-            offscreenInstanceId: OFFSCREEN_INSTANCE_ID
-        });
-
-        if (playInFlight.has(windowId)) {
-            if (sendResponse) sendResponse({ success: false, error: 'Macro play already in progress', state: 'starting' });
-            return false;
-        }
-
-        if (isDuplicatePlayStart(windowId, macroPath, "runMacroByUrl")) {
-            console.warn(`[iMacros Offscreen] Ignoring runMacroByUrl - duplicate start detected for window ${windowId}`);
-            if (sendResponse) sendResponse({ success: false, error: 'Duplicate runMacroByUrl request', state: 'starting' });
-            return false;
-        }
-
-        if (typeof afio === 'undefined') {
-            console.error('[iMacros Offscreen] AFIO is not available for runMacroByUrl');
-            if (sendResponse) sendResponse({ success: false, error: 'AFIO not available' });
-            return false;
-        }
-
-        if (!context[windowId]) {
-            context[windowId] = {};
-        }
-
-        if (context[windowId].mplayer && context[windowId].mplayer.playing) {
-            const mplayer = context[windowId].mplayer;
-            const runCmd = [null, '"' + macroPath + '"'];
-            let queued = false;
-            try {
-                mplayer._ActionTable["run"](runCmd);
-                queued = true;
-                if (sendResponse) {
-                    sendResponse({
-                        ack: true,
-                        success: true,
-                        queued: true,
-                        requestId: requestId,
-                        status: 'queued',
-                        message: 'Macro queued via RUN command'
-                    });
-                }
-            } catch (e) {
-                playInFlight.delete(windowId);
-                console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (queue error)`, { requestId });
-                if (sendResponse) {
-                    sendResponse({
-                        ack: false,
-                        success: false,
-                        error: e.message,
-                        requestId: requestId
-                    });
-                }
-                return false;
-            }
-            if (queued) {
-                playInFlight.delete(windowId);
-                console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (queued)`, { requestId });
-            }
-            return false;
-        }
-
-        recordPlayStart(windowId, macroPath);
-        playInFlight.add(windowId);
-        console.log(`[iMacros Offscreen] runMacroByUrl - Added ${windowId} to playInFlight guard`, { requestId });
-
-        if (sendResponse) {
-            sendResponse({
-                ack: true,
-                started: true,
-                requestId: requestId,
-                status: 'started'
-            });
-        }
-        // NOTE: Completion/errors are logged asynchronously; caller should rely on macro state updates.
-
-        afio.getDefaultDir("savepath").then(function (dir) {
-            let fullPath = macroPath;
-            if (!__is_full_path(macroPath)) {
-                dir.append(macroPath);
-                fullPath = dir.path;
-            }
-            const node = afio.openNode(fullPath);
-            return node.exists().then(function (exists) {
-                if (!exists) throw new Error('Macro file not found: ' + fullPath);
-                return afio.readTextFile(node).then(function (source) {
-                    const macro = {
-                        name: node.leafName || macroPath,
-                        source: source,
-                        file_id: fullPath,
-                        times: 1,
-                        startLoop: 1
-                    };
-                    if (!context[windowId].mplayer) {
-                        context[windowId].mplayer = new MacroPlayer(windowId);
-                    }
-                    if (!playInFlight.has(windowId)) {
-                        console.warn(`[iMacros Offscreen] runMacroByUrl aborted before start for window ${windowId} (stop requested)`, { requestId });
-                        return;
-                    }
-                    const mplayer = context[windowId].mplayer;
-                    const limits = { maxVariables: 'unlimited', loops: 'unlimited' };
-                    mplayer.play(macro, limits, function () {
-                        console.log('[iMacros Offscreen] Macro execution completed:', macroPath, { requestId });
-                        // ★重要: 実行完了後にガードをクリア
-                        playInFlight.delete(windowId);
-                        console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (completed)`, { requestId });
-                    });
-                });
-            });
-        }).catch(function (e) {
-            console.error('[iMacros Offscreen] Error loading macro:', e, { requestId });
-            // ★重要: エラー時もガードをクリア
-            playInFlight.delete(windowId);
-            const errorMsg = e && e.message ? e.message : String(e);
-            notifyAsyncError(windowId, `Error loading macro: ${errorMsg}`);
-            console.log(`[iMacros Offscreen] runMacroByUrl - Removed ${windowId} from playInFlight guard (error)`, { requestId });
-        });
-
         return false;
     }
 
-    if (request.command === 'reinitFileSystem') {
-        if (typeof afio !== 'undefined' && afio.reinitFileSystem) {
-            afio.reinitFileSystem().then(() => {
-                sendResponse({ success: true });
-            }).catch(err => {
-                sendResponse({ success: false, error: err.message });
-            });
+    if (type === 'GET_DIALOG_ARGS' || type === 'getDialogArgs') {
+        const tryGetArgs = (attemptsLeft) => {
+            if (typeof dialogUtils === 'undefined') {
+                sendResponse({ success: false, error: "dialogUtils undefined" });
+                return;
+            }
+            try {
+                const args = dialogUtils.getDialogArgs(win_id);
+                sendResponse({ success: true, args: args });
+            } catch (e) {
+                if (attemptsLeft > 0) setTimeout(() => tryGetArgs(attemptsLeft - 1), 200);
+                else sendResponse({ success: false, error: e.message });
+            }
+        };
+        tryGetArgs(30);
+        return true;
+    }
+
+    if (type === 'SET_DIALOG_RESULT' || type === 'setDialogArgs') {
+        if (typeof dialogUtils !== 'undefined') {
+            if (type === 'SET_DIALOG_RESULT') dialogUtils.setDialogResult(win_id, request.result || request.response);
+            else {
+                var mockWin = { id: win_id };
+                dialogUtils.setArgs(mockWin, request.args);
+            }
+            sendResponse({ success: true });
         } else {
-            sendResponse({ success: false, error: 'afio or reinitFileSystem not available' });
+            sendResponse({ success: false, error: "dialogUtils undefined" });
         }
         return true;
     }
 
-    // Skip commands handled by Service Worker
-    if (['playMacro', 'startRecording', 'stop', 'pause', 'unpause', 'editMacro'].includes(request.command)) {
-        return;
+    if (type === 'panelCreated') {
+        if (context[win_id]) context[win_id].panelId = request.panelId;
+        sendResponse({ success: true });
+        return true;
     }
 
-    if (request.command === 'EVAL_REQUEST') {
+    if (type === 'panelClosed' || request.command === 'panelClosed') {
+        const panelId = request.panelId;
+        for (let id in context) {
+            if (context[id] && context[id].panelId === panelId) {
+                delete context[id].panelId;
+                delete context[id].panelWindow;
+            }
+        }
+        sendResponse({ success: true });
+        return true;
+    }
+
+    if (['DOWNLOAD_CREATED', 'DOWNLOAD_CHANGED'].includes(type)) {
+        const targetWinIds = win_id ? [win_id] : Object.keys(context);
+        for (let target_id of targetWinIds) {
+            const ctx = context[target_id];
+            if (ctx && ctx.mplayer) {
+                if (type === 'DOWNLOAD_CREATED' && ctx.mplayer.onDownloadCreated) ctx.mplayer.onDownloadCreated(request.downloadItem);
+                if (type === 'DOWNLOAD_CHANGED' && ctx.mplayer.onDownloadChanged) ctx.mplayer.onDownloadChanged(request.downloadDelta);
+            }
+        }
+        sendResponse({ success: true });
+        return true;
+    }
+
+    const tabEvents = ['TAB_ACTIVATED', 'TAB_CREATED', 'TAB_REMOVED', 'TAB_MOVED', 'TAB_ATTACHED', 'TAB_DETACHED', 'WEB_NAVIGATION_ERROR', 'WEB_NAVIGATION_COMMITTED'];
+    if (tabEvents.includes(type)) {
+        for (let id in context) {
+            const ctx = context[id];
+            if (ctx) {
+                const m = ctx.mplayer, r = ctx.recorder;
+                if (type === 'TAB_ACTIVATED') { if (m?.onTabActivated) m.onTabActivated(request.activeInfo); if (r?.onActivated) r.onActivated(request.activeInfo); }
+                else if (type === 'TAB_CREATED' && r?.onCreated) r.onCreated(request.tab);
+                else if (type === 'TAB_REMOVED' && r?.onRemoved) r.onRemoved(request.tabId);
+                else if (type === 'TAB_MOVED' && r?.onMoved) r.onMoved(request.tabId, request.moveInfo);
+                else if (type === 'TAB_ATTACHED' && r?.onAttached) r.onAttached(request.tabId, request.attachInfo);
+                else if (type === 'TAB_DETACHED' && r?.onDetached) r.onDetached(request.tabId, request.detachInfo);
+                else if (type === 'WEB_NAVIGATION_ERROR' && m?.onNavigationErrorOccurred) m.onNavigationErrorOccurred(request.details);
+                else if (type === 'WEB_NAVIGATION_COMMITTED' && r?.onCommitted) r.onCommitted(request.details);
+            }
+        }
+        sendResponse({ success: true });
+        return true;
+    }
+
+    if (type === 'FORWARD_MESSAGE' || request.command === 'FORWARD_MESSAGE') {
+        if (typeof communicator !== 'undefined') communicator._execHandlers({ topic: request.topic, data: request.data }, request.tab_id, request.win_id, sendResponse);
+        else sendResponse({ success: false, error: 'Communicator not available' });
+        return true;
+    }
+
+    if (type === 'runMacroByUrl' || request.command === 'runMacroByUrl') {
+        executeContextMethod(win_id, 'playFile', sendResponse, [request.macroPath]);
+        return true;
+    }
+
+    if (type === 'reinitFileSystem' || request.command === 'reinitFileSystem') {
+        if (typeof afio !== 'undefined' && afio.reinitFileSystem) {
+            afio.reinitFileSystem().then(() => sendResponse({ success: true })).catch(err => sendResponse({ success: false, error: err.message }));
+        } else sendResponse({ success: false, error: 'afio or reinitFileSystem not available' });
+        return true;
+    }
+
+    if (type === 'EVAL_REQUEST' || request.command === 'EVAL_REQUEST') {
         pendingEvalRequests.set(request.requestId, sendResponse);
         const frame = document.getElementById('eval_sandbox');
-        if (frame && frame.contentWindow) {
-            frame.contentWindow.postMessage(request, '*');
-        } else {
-            pendingEvalRequests.delete(request.requestId);
-            sendResponse({ success: false, error: "Sandbox frame not found" });
+        if (frame?.contentWindow) frame.contentWindow.postMessage(request, '*');
+        else { pendingEvalRequests.delete(request.requestId); sendResponse({ success: false, error: "Sandbox frame not found" }); }
+        return true;
+    }
+
+    if (type === 'CALL_BG_FUNCTION') {
+        if (typeof window[request.functionName] === 'function') {
+            try {
+                const res = window[request.functionName](...(request.args || []));
+                if (res && typeof res.then === 'function') res.then(v => sendResponse({ success: true, result: v })).catch(e => sendResponse({ success: false, error: e.message || String(e) }));
+                else sendResponse({ success: true, result: res });
+            } catch (e) { sendResponse({ success: false, error: e.message || String(e) }); }
+        } else sendResponse({ success: false, error: `Function ${request.functionName} not found` });
+        return true;
+    }
+
+    if (type === 'SAVE_MACRO' || type === 'save') {
+        try {
+            save(request.macro || request.data, request.overwrite, function (result) {
+                if (result && result.error) sendResponse({ success: false, error: result.error });
+                else sendResponse({ success: true, result: result });
+            });
+        } catch (err) { sendResponse({ success: false, error: err.message || String(err) }); }
+        return true;
+    }
+
+    if (type === 'CHECK_MPLAYER_PAUSED') {
+        if (!context[win_id]) {
+            context.init(win_id).then(() => {
+                sendResponse({ success: true, isPaused: context[win_id]?.mplayer?.paused || false });
+            }).catch(e => sendResponse({ success: false, error: e.message }));
+            return true;
+        }
+        sendResponse({ success: true, isPaused: context[win_id]?.mplayer?.paused || false });
+        return false;
+    }
+
+    if (type === 'PANEL_LOADED') {
+        let found = null;
+        for (let id in context) if (context[id].panelId === request.panelWindowId) { found = id; break; }
+        if (found) sendResponse({ success: true, win_id: parseInt(found) });
+        else sendResponse({ success: false, error: 'Context not found' });
+        return true;
+    }
+
+    if (type === 'PANEL_CLOSING') {
+        if (context[win_id]) {
+            if (request.panelBox) Storage.setObject("panel-box", request.panelBox);
+            context[win_id].panelClosing = true;
+        }
+        sendResponse({ success: true });
+        return true;
+    }
+
+    if (type === 'PLAY_MACRO' || type === 'PLAY_MACRO_NOMINAL') {
+        getLimits().then(limits => {
+            context[win_id].mplayer.play(request.macro, limits);
+            sendResponse({ success: true });
+        }).catch(e => sendResponse({ success: false, error: e.message }));
+        return true;
+    }
+
+    if (type === 'GET_PREFERENCE' || type === 'SET_PREFERENCE') {
+        try {
+            if (type === 'GET_PREFERENCE') {
+                let v;
+                if (request.valueType === 'string') v = Storage.getChar(request.key);
+                else if (request.valueType === 'number') v = Storage.getNumber(request.key);
+                else v = Storage.getBool(request.key);
+                sendResponse({ success: true, value: v });
+            } else {
+                if (request.valueType === 'string') Storage.setChar(request.key, request.value);
+                else if (request.valueType === 'number') Storage.setNumber(request.key, request.value);
+                else Storage.setBool(request.key, request.value);
+                sendResponse({ success: true });
+            }
+        } catch (e) { sendResponse({ success: false, error: e.message }); }
+        return true;
+    }
+
+    if (type === 'restart-server') {
+        sendResponse({ status: "OK" });
+        if (nm_connector.currentPipe != request.pipe) {
+            nm_connector.stopServer();
+            nm_connector.startServer(request.pipe);
+            nm_connector.currentPipe = request.pipe;
         }
         return true;
     }
 
-    try {
-        if (request.type === 'CALL_BG_FUNCTION') {
-            const functionName = request.functionName;
-            const args = request.args || [];
-            try {
-                if (typeof window[functionName] === 'function') {
-                    const result = window[functionName](...args);
-                    if (result && typeof result.then === 'function') {
-                        result.then(value => {
-                            sendResponse({ success: true, result: value });
-                        }).catch(err => {
-                            sendResponse({ success: false, error: err.message || String(err) });
-                        });
-                    } else {
-                        sendResponse({ success: true, result: result });
-                    }
-                } else {
-                    sendResponse({ success: false, error: `Function ${functionName} not found` });
-                }
-            } catch (err) {
-                sendResponse({ success: false, error: err.message || String(err) });
-            }
-            return true;
-        }
-
-        if (request.type === 'CALL_CONTEXT_METHOD') {
-            const win_id = (typeof request.win_id === 'string') ? parseInt(request.win_id, 10) : request.win_id;
-            const objectPath = request.objectPath;
-            const methodName = request.methodName;
-            const args = request.args || [];
-            try {
-                if (!context[win_id]) {
-                    sendResponse({ success: false, error: `Context not found for window ${win_id}` });
-                    return true;
-                }
-                const obj = context[win_id][objectPath];
-                if (!obj) {
-                    sendResponse({ success: false, error: `Object ${objectPath} not found in context` });
-                    return true;
-                }
-                if (typeof obj[methodName] !== 'function') {
-                    sendResponse({ success: false, error: `Method ${methodName} not found on ${objectPath}` });
-                    return true;
-                }
-                const result = obj[methodName](...args);
-                if (result && typeof result.then === 'function') {
-                    result.then(value => {
-                        sendResponse({ success: true, result: value });
-                    }).catch(err => {
-                        sendResponse({ success: false, error: err.message || String(err) });
-                    });
-                } else {
-                    sendResponse({ success: true, result: result });
-                }
-            } catch (err) {
-                sendResponse({ success: false, error: err.message || String(err) });
-            }
-            return true;
-        }
-
-        if (request.command === 'CALL_CONTEXT_METHOD') {
-            const win_id = (typeof request.win_id === 'string') ? parseInt(request.win_id, 10) : request.win_id;
-            const method = request.method;
-            try {
-                if (!context[win_id]) {
-                    context.init(win_id).then(() => {
-                        executeContextMethod(win_id, method, sendResponse, request.args, request.requestId);
-                    }).catch(err => {
-                        sendResponse({ success: false, error: `Failed to initialize context: ${err.message || String(err)}` });
-                    });
-                    return true;
-                }
-                return executeContextMethod(win_id, method, sendResponse, request.args, request.requestId);
-            } catch (err) {
-                sendResponse({ success: false, error: err.message || String(err) });
-            }
-            return true;
-        }
-
-        if (request.type === 'SAVE_MACRO') {
-            const saveWinId = request.win_id || request.winId;
-            let responded = false;
-            const respondOnce = (payload) => {
-                if (responded || !sendResponse) return;
-                responded = true;
-                sendResponse(Object.assign({ ack: true }, payload));
-            };
-            try {
-                save(request.macro, request.overwrite, function (result) {
-                    if (result && result.error) {
-                        console.error("[Offscreen] Save completed with error:", result.error);
-                        if (saveWinId) {
-                            notifyAsyncError(saveWinId, `Error saving macro: ${result.error}`);
-                        }
-                        respondOnce({ success: false, error: result.error });
-                    } else {
-                        console.log("[Offscreen] Save completed:", result);
-                        respondOnce({ success: true, result: result });
-                    }
-                });
-            } catch (err) {
-                console.error("Error saving macro:", err);
-                const errorMsg = err && err.message ? err.message : String(err);
-                if (saveWinId) {
-                    notifyAsyncError(saveWinId, `Error saving macro: ${errorMsg}`);
-                }
-                respondOnce({ success: false, error: errorMsg });
-            }
-            // Keep channel open for async save callback response
-            return true;
-        }
-
-        if (request.type === 'GET_DIALOG_ARGS') {
-            const winId = parseInt(request.windowId, 10);
-            if (!Number.isInteger(winId) || winId <= 0) {
-                sendResponse({ success: false, error: "Invalid windowId" });
-                return true;
-            }
-            const tryGetArgs = (attemptsLeft) => {
-                if (typeof dialogUtils === 'undefined') {
-                    sendResponse({ success: false, error: "dialogUtils undefined" });
-                    return true;
-                }
-                try {
-                    const args = dialogUtils.getDialogArgs(winId);
-                    sendResponse({ success: true, args: args });
-                } catch (e) {
-                    if (attemptsLeft > 0) {
-                        setTimeout(() => tryGetArgs(attemptsLeft - 1), 200);
-                    } else {
-                        sendResponse({ success: false, error: e.message });
-                    }
-                }
-            };
-            tryGetArgs(30);
-            return true;
-        }
-
-        if (request.type === 'SET_DIALOG_RESULT') {
-            try {
-                if (typeof dialogUtils === 'undefined') {
-                    sendResponse({ success: false, error: "dialogUtils undefined" });
-                    return true;
-                }
-                const winId = parseInt(request.windowId, 10);
-                if (!Number.isInteger(winId) || winId <= 0) {
-                    sendResponse({ success: false, error: "Invalid windowId" });
-                    return true;
-                }
-                dialogUtils.setDialogResult(winId, request.response);
-                sendResponse({ success: true });
-            } catch (e) {
-                sendResponse({ success: false, error: e.message });
-            }
-            return true;
-        }
-
-        if (request.type === 'GET_RECORDER_STATE') {
-            const win_id = request.win_id;
-            try {
-                if (!context[win_id] || !context[win_id].recorder) {
-                    sendResponse({ success: false, error: `Recorder not found for window ${win_id}` });
-                    return true;
-                }
-                const recorder = context[win_id].recorder;
-                sendResponse({
-                    success: true,
-                    recording: recorder.recording || false,
-                    actions: recorder.actions || []
-                });
-            } catch (err) {
-                sendResponse({ success: false, error: err.message || String(err) });
-            }
-            return true;
-        }
-
-        if (request.command === 'EXTRACT_DIALOG_CLOSED') {
-            const win_id = parseInt(request.win_id, 10);
-            if (isNaN(win_id) || win_id <= 0) {
-                sendResponse({ success: false, error: 'Invalid win_id' });
-                return true;
-            }
-            try {
-                if (context[win_id] && context[win_id].mplayer) {
-                    const mplayer = context[win_id].mplayer;
-                    if (typeof mplayer.next !== 'function') {
-                        sendResponse({ success: false, error: 'mplayer.next not available' });
-                        return true;
-                    }
-                    if (mplayer.waitingForExtract) {
-                        mplayer.waitingForExtract = false;
-                        mplayer.next("extractDialog");
-                    }
-                    sendResponse({ success: true });
-                } else {
-                    sendResponse({ success: false, error: 'mplayer not found' });
-                }
-            } catch (err) {
-                sendResponse({ success: false, error: err.message || String(err) });
-            }
-            return true;
-        }
-
-        switch (request.command) {
-            case 'actionClicked': {
-                handleActionClicked(request.tab);
-                break;
-            }
-            case 'notificationClicked': {
-                var n_id = request.notificationId;
-                var w_id = parseInt(n_id);
-                if (isNaN(w_id) || !context[w_id] || !context[w_id].info_args) break;
-                var info = context[w_id].info_args;
-                if (info.errorCode == 1) break;
-                edit(info.macro, true);
-                break;
-            }
-        }
-    } catch (e) {
-        console.error('[iMacros Offscreen] Error handling message:', e);
-    }
-    if (sendResponse) sendResponse({ success: true });
+    return false;
 });
 
 // Refactored action handler
@@ -1658,93 +979,7 @@ communicator.registerHandler("run-macro", function (data, tab_id) {
     });
 });
 
-// Listen for PLAY_MACRO message from beforePlay.js
-chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
-    if (message.type === 'PLAY_MACRO') {
-        const { macro, win_id } = message;
 
-        // Ensure context is initialized (handles service worker restart)
-        const ctxPromise = context[win_id] && context[win_id]._initialized
-            ? Promise.resolve(context[win_id])
-            : context.init(win_id);
-
-        ctxPromise.then(ctx => {
-            // ★修正: マクロ再生中の二重実行を防止
-            if (ctx.mplayer && ctx.mplayer.playing) {
-                console.warn('[iMacros Offscreen] PLAY_MACRO ignored: macro already playing', { win_id });
-                sendResponse({ success: false, ignored: true, reason: 'already_playing' });
-                return true;
-            }
-            // Note: We only use mplayer.playing check here, not playInFlight,
-            // because PLAY_MACRO doesn't have a completion callback to clear playInFlight.
-
-            return getLimits().then(
-                limits => asyncRun(function () {
-                    try {
-                        ctx.mplayer.play(macro, limits);
-                        sendResponse({ success: true });
-                    } catch (err) {
-                        logError("Failed to play macro: " + err.message, {
-                            win_id: win_id,
-                            macro_name: macro.name
-                        });
-                        sendResponse({ success: false, error: err.message });
-                    }
-                })
-            );
-        }).catch(err => {
-            logError("Failed to initialize context or play macro: " + err.message, {
-                win_id: win_id,
-                macro_name: macro.name
-            });
-            sendResponse({ success: false, error: err.message });
-        });
-
-        return true; // Keep message channel open for async response
-    }
-});
-
-// Listen for preference messages
-chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
-    if (message.type === 'GET_PREFERENCE') {
-        try {
-            let value;
-            switch (message.valueType) {
-                case 'string':
-                    value = Storage.getChar(message.key);
-                    break;
-                case 'number':
-                    value = Storage.getNumber(message.key);
-                    break;
-                default:
-                    value = Storage.getBool(message.key);
-            }
-            sendResponse({ success: true, value: value });
-        } catch (err) {
-            logError("Failed to get preference: " + err.message, { key: message.key });
-            sendResponse({ success: false, error: err.message });
-        }
-    } else if (message.type === 'SET_PREFERENCE') {
-        try {
-            switch (message.valueType) {
-                case 'string':
-                    Storage.setChar(message.key, message.value);
-                    break;
-                case 'number':
-                    Storage.setNumber(message.key, message.value);
-                    break;
-                default:
-                    Storage.setBool(message.key, message.value);
-            }
-            sendResponse({ success: true });
-        } catch (err) {
-            logError("Failed to set preference: " + err.message, { key: message.key });
-            sendResponse({ success: false, error: err.message });
-        }
-        return true; // Keep message channel open for async response
-    }
-    return false; // Not our message
-});
 
 
 // Override edit function to use message passing for MV3
@@ -1932,90 +1167,6 @@ globalScope.edit = function (macro, overwrite, line) {
         Storage.setBool("afio-installed", false);
     });
 
-    // listen to restart-server command from content script
-    // (fires after t.html?pipe=<pipe> page is loaded)
-    chrome.runtime.onMessage.addListener(
-        function (req, sender, sendResponse) {
-            // clean up request
-            if (req.command == "restart-server") {
-                // Note: Double-restart is avoided by checking if currentPipe differs from req.pipe.
-                // Only restart the server if the pipe name has changed.
-                sendResponse({ status: "OK" });
-                if (nm_connector.currentPipe != req.pipe) {
-                    nm_connector.stopServer();
-                    if (Storage.getBool("debug"))
-                        console.info("Restarting server, pipe=" + req.pipe);
-                    nm_connector.startServer(req.pipe);
-                    nm_connector.currentPipe = req.pipe;
-                }
-                return true; // Required for async response
-            }
-            // MV3: Handle getDialogArgs request from editor window
-            else if (req.command == "getDialogArgs") {
-                var win_id = req.win_id;
-                if (win_id != null &&
-                    typeof dialogUtils !== "undefined" &&
-                    dialogUtils &&
-                    typeof dialogUtils.getDialogArgs === "function") {
-                    try {
-                        var args = dialogUtils.getDialogArgs(win_id);
-                        sendResponse({ success: true, args: args });
-                    } catch (e) {
-                        console.error("[iMacros] Failed to get dialog args for window " + win_id + ":", e);
-                        sendResponse({ success: false, error: e.message });
-                    }
-                } else {
-                    sendResponse({ success: false, error: "Invalid window ID or dialogUtils not available" });
-                }
-                return true; // Required for async response
-            }
-            // MV3: Handle setDialogArgs request from editor window
-            else if (req.command == "setDialogArgs") {
-                var targetWinId = req.win_id;
-                var dialogArgs = req.args;
-                if (targetWinId != null &&
-                    dialogArgs &&
-                    typeof dialogUtils !== "undefined" &&
-                    dialogUtils &&
-                    typeof dialogUtils.setArgs === "function") {
-                    try {
-                        // Create a mock window object with the ID
-                        var mockWin = { id: targetWinId };
-                        dialogUtils.setArgs(mockWin, dialogArgs);
-                        sendResponse({ success: true });
-                    } catch (e) {
-                        console.error("[iMacros] Failed to set dialog args for window " + targetWinId + ":", e);
-                        sendResponse({ success: false, error: e.message });
-                    }
-                } else {
-                    sendResponse({ success: false, error: "Invalid window ID, args, or dialogUtils not available" });
-                }
-                return true; // Required for async response
-            }
-            // MV3: Handle save request from editor window
-            else if (req.command == "save") {
-                var save_data = req.data;
-                var overwrite = req.overwrite;
-                if (save_data && typeof save === "function") {
-                    try {
-                        save(save_data, overwrite, function (result) {
-                            if (result && result.error) {
-                                sendResponse({ success: false, error: result.error });
-                            } else {
-                                sendResponse({ success: true, result: result });
-                            }
-                        });
-                    } catch (e) {
-                        console.error("[iMacros] Failed to save:", e);
-                        sendResponse({ success: false, error: e.message });
-                    }
-                } else {
-                    sendResponse({ success: false, error: "Invalid save data or save function not available" });
-                }
-                return true; // Required for async response
-            }
-        }
-    );
 })();
 
 
@@ -2155,83 +1306,6 @@ if (typeof XMLDocument !== 'undefined' && !XMLDocument.prototype.createAttribute
 }
 
 // Add message listener for panel requests
-chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
-    if (request.type === 'CHECK_MPLAYER_PAUSED') {
-        var win_id = request.win_id;
-        if (!context[win_id]) {
-            // Try to initialize context if not found
-            context.init(win_id).then(() => {
-                if (context[win_id] && context[win_id].mplayer) {
-                    sendResponse({ success: true, isPaused: context[win_id].mplayer.paused });
-                } else {
-                    sendResponse({ success: false, error: "Context initialized but mplayer missing for win_id: " + win_id });
-                }
-            }).catch(err => {
-                sendResponse({ success: false, error: "Context not found and initialization failed: " + err.message });
-            });
-            return true; // async response
-        }
-        var mplayer = context[win_id].mplayer;
-        sendResponse({ success: true, isPaused: mplayer && mplayer.paused });
-        return false; // Response sent synchronously
-    }
-
-
-
-    // Handle panel initialization
-    if (request.type === 'PANEL_LOADED') {
-        try {
-            const panelWindowId = request.panelWindowId;
-
-            // Find which browser window this panel belongs to
-            // by checking which context has this panelId
-            let found_win_id = null;
-            for (let win_id in context) {
-                win_id = parseInt(win_id);
-                if (!isNaN(win_id) && context[win_id].panelId === panelWindowId) {
-                    found_win_id = win_id;
-                    break;
-                }
-            }
-
-            if (found_win_id !== null) {
-                console.log(`[iMacros MV3] Panel loaded for window ${found_win_id}, panel window ID: ${panelWindowId}`);
-                sendResponse({ success: true, win_id: found_win_id });
-            } else {
-                console.error(`[iMacros MV3] Could not find context for panel window ID: ${panelWindowId}`);
-                sendResponse({ success: false, error: 'Context not found for panel window' });
-            }
-        } catch (e) {
-            console.error('[iMacros MV3] Error handling PANEL_LOADED:', e);
-            sendResponse({ success: false, error: e.toString() });
-        }
-        return true;
-    }
-
-    if (request.type === 'PANEL_CLOSING') {
-        try {
-            const win_id = request.win_id;
-            const panelBox = request.panelBox;
-
-            if (context[win_id]) {
-                // Save panel position
-                if (panelBox) {
-                    Storage.setObject("panel-box", panelBox);
-                }
-
-                // Mark panel as closing to avoid auto-reopen loops
-                context[win_id].panelClosing = true;
-
-                console.log(`[iMacros MV3] Panel closing for window ${win_id}`);
-            }
-            sendResponse({ success: true });
-        } catch (e) {
-            console.error('[iMacros MV3] Error handling PANEL_CLOSING:', e);
-            sendResponse({ success: false, error: e.toString() });
-        }
-        return true;
-    }
-});
 // Service Worker Startup: Restore context for all open windows
 // This is crucial because Service Worker memory is cleared on idle.
 // Note: This only runs in Service Worker context, not in Offscreen Document
@@ -2292,74 +1366,103 @@ if (!chrome.notifications.clear) {
  * Used by background.js to proxy commands to Offscreen Document.
  */
 function executeContextMethod(win_id, method, sendResponse, args = [], requestId = null) {
-    if (!context[win_id]) {
+    if (!context[win_id] && method !== 'stop') {
         if (sendResponse) sendResponse({ success: false, error: `Context not found for window ${win_id}` });
         return true;
     }
 
+    // Special handlers for specific MV3 operations
+    if (method === "recorder.start") {
+        try {
+            if (context[win_id].mplayer && context[win_id].mplayer.playing) {
+                context[win_id].mplayer.stop();
+            }
+        } catch (e) { }
+        const rec = context[win_id].recorder;
+        if (!rec) {
+            sendResponse({ success: false, error: `Recorder not initialized for window ${win_id}` });
+            return true;
+        }
+        try { rec.start(); sendResponse({ success: true }); }
+        catch (e) { sendResponse({ success: false, error: e.message || String(e) }); }
+        return true;
+    }
+
+    if (method === "stop") {
+        if (win_id) playInFlight.delete(win_id);
+        const stopOne = (ctx) => {
+            if (ctx.mplayer) try { ctx.mplayer.stop(); } catch (e) { }
+            if (ctx.recorder) try { ctx.recorder.stop(); } catch (e) { }
+        };
+        if (context[win_id]) {
+            stopOne(context[win_id]);
+            sendResponse({ success: true });
+        } else {
+            for (let id in context) stopOne(context[id]);
+            sendResponse({ success: true, message: "Stopped all" });
+        }
+        return true;
+    }
+
+    if (method === "playFile") {
+        if (typeof afio === 'undefined') {
+            sendResponse({ success: false, error: 'AFIO not available' });
+            return true;
+        }
+        let filePath = args[0];
+        if (playInFlight.has(win_id) || (context[win_id] && context[win_id].mplayer && context[win_id].mplayer.playing) || isDuplicatePlayStart(win_id, filePath, "playFile")) {
+            sendResponse({ success: false, error: 'Already playing or duplicate' });
+            return true;
+        }
+        recordPlayStart(win_id, filePath);
+        playInFlight.add(win_id);
+        afio.openFile(filePath).then(file => {
+            context[win_id].mplayer.play(file, args[1], result => {
+                playInFlight.delete(win_id);
+                sendResponse({ success: true, result });
+            });
+        }).catch(err => {
+            playInFlight.delete(win_id);
+            sendResponse({ success: false, error: err.message });
+        });
+        return true;
+    }
+
+    // Generic fallback for other methods
     const parts = method.split('.');
     let obj = context[win_id];
     let funcName = parts.pop();
 
-    // Navigate to the object
     for (const part of parts) {
-        if (obj[part]) {
-            obj = obj[part];
-        } else {
-            // Check if it's a top-level command that belongs to mplayer or recorder
+        if (obj[part]) obj = obj[part];
+        else {
             if (obj === context[win_id] && parts.length === 1) {
-                if (obj.mplayer && typeof obj.mplayer[funcName] === 'function') {
-                    obj = obj.mplayer;
-                    break;
-                } else if (obj.recorder && typeof obj.recorder[funcName] === 'function') {
-                    obj = obj.recorder;
-                    break;
-                }
+                if (obj.mplayer && typeof obj.mplayer[funcName] === 'function') { obj = obj.mplayer; break; }
+                else if (obj.recorder && typeof obj.recorder[funcName] === 'function') { obj = obj.recorder; break; }
             }
-
-            if (sendResponse) sendResponse({ success: false, error: `Object ${part} not found in context` });
+            if (sendResponse) sendResponse({ success: false, error: `Object ${part} not found` });
             return true;
         }
     }
 
-    // Special logic for top-level commands like 'stop', 'pause' which might be on mplayer
-    if (obj === context[win_id]) {
-        if (funcName === 'stop') {
-            // Dispatch 'stop' based on what is currently active
-            if (obj.recorder && obj.recorder.recording) {
-                obj = obj.recorder;
-            } else if (obj.mplayer) {
-                // Default to mplayer (it handles idle/playing states)
-                obj = obj.mplayer;
-            }
-        } else if (typeof obj[funcName] !== 'function') {
-            // Fallback: Check mplayer
-            if (obj.mplayer && typeof obj.mplayer[funcName] === 'function') {
-                obj = obj.mplayer;
-            } else if (obj.recorder && typeof obj.recorder[funcName] === 'function') {
-                obj = obj.recorder;
-            }
-        }
+    if (obj === context[win_id] && typeof obj[funcName] !== 'function') {
+        if (obj.mplayer && typeof obj.mplayer[funcName] === 'function') obj = obj.mplayer;
+        else if (obj.recorder && typeof obj.recorder[funcName] === 'function') obj = obj.recorder;
     }
 
     if (typeof obj[funcName] === 'function') {
         try {
             const result = obj[funcName].apply(obj, args);
             if (result && typeof result.then === 'function') {
-                result.then(val => {
-                    if (sendResponse) sendResponse({ success: true, result: val });
-                }).catch(err => {
-                    if (sendResponse) sendResponse({ success: false, error: err.message || String(err) });
-                });
+                result.then(val => sendResponse({ success: true, result: val }))
+                    .catch(err => sendResponse({ success: false, error: err.message || String(err) }));
             } else {
-                if (sendResponse) sendResponse({ success: true, result: result });
+                sendResponse({ success: true, result });
             }
         } catch (err) {
-            console.error(`[Offscreen] Error executing ${method}:`, err);
-            if (sendResponse) sendResponse({ success: false, error: err.message || String(err) });
+            sendResponse({ success: false, error: err.message || String(err) });
         }
     } else {
-        console.error(`[Offscreen] Method ${method} not found on target object`);
-        if (sendResponse) sendResponse({ success: false, error: `Method ${method} not found` });
+        sendResponse({ success: false, error: `Method ${method} not found` });
     }
 }
