@@ -819,9 +819,10 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 	    // Create/reuse singleton instance (idempotent across MV3 re-injection).
 	    const existingLogger = window && window.ErrorLogger;
-	    const errorLogger = existingLogger && typeof existingLogger.logError === 'function'
-	        ? existingLogger
-	        : new ErrorLogger();
+	    const isNewInstance = !(existingLogger && typeof existingLogger.logError === 'function');
+	    const errorLogger = isNewInstance
+	        ? new ErrorLogger()
+	        : existingLogger;
 	    try {
 	        errorLogger.__imacrosErrorLoggerSingleton = true;
 	    } catch (e) {
@@ -1038,17 +1039,24 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
         };
     }
 
-    console.info("[iMacros] Error Logger initialized successfully");
-    console.info("[iMacros] Use ErrorLogger to access error logs");
-    console.info("[iMacros] Use logError(), logWarning(), logInfo(), logCritical() for logging");
-    console.info("[iMacros] Use checkChromeError(), wrapChromeCallback(), wrapPromise() for Chrome API error handling");
+    // Only log initialization messages when a new instance is actually created
+    // This prevents duplicate messages across MV3 contexts (service worker, panel, content scripts, etc.)
+    if (isNewInstance) {
+        console.info("[iMacros] Error Logger initialized successfully");
+        console.info("[iMacros] Use ErrorLogger to access error logs");
+        console.info("[iMacros] Use logError(), logWarning(), logInfo(), logCritical() for logging");
+        console.info("[iMacros] Use checkChromeError(), wrapChromeCallback(), wrapPromise() for Chrome API error handling");
+    }
 
     // ========================================================================
     // Legacy Compatibility Layer - Delegates to GlobalErrorLogger
     // ========================================================================
     // If GlobalErrorLogger is available (loaded before this file), override the legacy
     // functions to use it as the backend for better stack trace parsing
-    if (typeof GlobalErrorLogger !== 'undefined') {
+    // Track whether legacy compatibility has been set up to avoid duplicate messages
+    const legacyCompatKey = '__imacros_legacy_compat_logged';
+    if (typeof GlobalErrorLogger !== 'undefined' && !window[legacyCompatKey]) {
+        window[legacyCompatKey] = true;
         console.info("[iMacros] GlobalErrorLogger detected - delegating legacy functions to it");
 
         // Override the legacy functions that were just defined above
