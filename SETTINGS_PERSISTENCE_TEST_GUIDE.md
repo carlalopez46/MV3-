@@ -64,7 +64,7 @@ This guide helps you test the fixes for settings persistence issues in iMacros M
 2. **Verify in Console**
    ```javascript
    chrome.storage.local.get(null, (items) => {
-       console.log('record-mode:', items.localStorage_record-mode);
+       console.log('record-mode:', items['localStorage_record-mode']);
        console.log('recording-prefer-id:', items['localStorage_recording-prefer-id']);
        console.log('recording-prefer-css-selectors:', items['localStorage_recording-prefer-css-selectors']);
    });

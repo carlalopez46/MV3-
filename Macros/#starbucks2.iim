@@ -28,8 +28,6 @@ TAB T=9
 URL GOTO=https://sbcard.starbucks.co.jp/card/inquire
 TAB T=10
 URL GOTO=https://sbcard.starbucks.co.jp/card/inquire
-TAB T=11
-URL GOTO=https://sbcard.starbucks.co.jp/card/inquire
 TAB T=1
 PROMPT 入力できます
 

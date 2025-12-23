@@ -796,7 +796,6 @@
         // HEAD 側の意図を取り込んで、グローバルハンドラを無効化しておく
         exportedInstance = new GlobalErrorLogger({ setupGlobalHandlers: false });
         console.log('[GlobalErrorLogger] Singleton instance created (no global handlers)');
-        console.debug('[GlobalErrorLogger] Singleton instance created (no global handlers)');
     }
 
     // クラスとインスタンスの両方に定数を付与

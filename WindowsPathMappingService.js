@@ -402,8 +402,8 @@ class WindowsPathMappingService {
     async removeMapping(windowsPath) {
         const normalizedPath = normalizeWindowsPath(windowsPath);
 
-        this.mappings.delete(normalizedPath);
         await this._removeMappingFromDB(normalizedPath);
+        this.mappings.delete(normalizedPath);
 
         console.info(`[WindowsPathMapping] Mapping removed: ${windowsPath}`);
     }
@@ -412,9 +412,10 @@ class WindowsPathMappingService {
      * すべてのマッピングを削除
      */
     async clearAllMappings() {
-        this.mappings.clear();
-
-        if (!this.db) return;
+        if (!this.db) {
+            this.mappings.clear();
+            return;
+        }
 
         return new Promise((resolve, reject) => {
             const transaction = this.db.transaction([PATH_MAPPING_STORE_NAME], 'readwrite');
@@ -422,6 +423,7 @@ class WindowsPathMappingService {
             const request = store.clear();
 
             request.onsuccess = () => {
+                this.mappings.clear();
                 console.info('[WindowsPathMapping] All mappings cleared');
                 resolve();
             };

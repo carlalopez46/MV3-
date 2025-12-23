@@ -3608,14 +3608,14 @@ MacroPlayer.prototype.parseContentStr = function (cs) {
                         replace(/\*/g, '(?:[\r\n]|.)*') + "\\s*$";
                     opts[i] = { typ: typ, re_str: re_str, str: val };
                 } else if (typ == "#") {
-                    var idx = parseInt(val);
+                    var idx = parseInt(val, 10);
                     if (isNaN(idx))
                         throw new RuntimeError(
                             "Wrong CONTENT specifier " + cs, 711);
                     opts[i] = { typ: "#", idx: idx };
                 }
             } else if (/^(\d+)$/i.test(opts[i])) { // indexes 1:2:...
-                var idx = parseInt(RegExp.$1);
+                var idx = parseInt(RegExp.$1, 10);
                 if (isNaN(idx))
                     throw new RuntimeError("Wrong CONTENT specifier " + cs,
                         711);

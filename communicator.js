@@ -180,8 +180,10 @@ Communicator.prototype.postMessage = function (topic, data, tab_id, callback, fr
             (response) => {
                 if (chrome.runtime.lastError) {
                     console.warn('[Communicator] Direct sendMessage error:', chrome.runtime.lastError.message);
+                    if (callback) callback({ error: chrome.runtime.lastError.message, found: false });
+                } else if (callback) {
+                    callback(response);
                 }
-                if (callback) callback(response);
             }
         );
     } else {

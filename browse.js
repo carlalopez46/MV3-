@@ -12,21 +12,25 @@ function choose() {
     var path = doc.getElementById("path").value;
     if (!path)
         return;
-    opener.savePath(args.which, path);
+
+    var args = window.args || {};
+    if (opener && typeof opener.savePath === "function") {
+        opener.savePath(args.which, path);
+    }
     window.close();
 }
 
-window.addEventListener("load", function() {
+window.addEventListener("load", function () {
     document.getElementById("button-ok").addEventListener("click", choose);
     document.getElementById("button-cancel").addEventListener("click", cancel);
     // prevent right-click
-    document.body.oncontextmenu = function(e) {
+    document.body.oncontextmenu = function (e) {
         e.preventDefault();
         return false;
     };
-    asyncRun(function() {
+    asyncRun(function () {
         // resizeToContent(window, document.getElementById("container"));
-        window.resizeTo(260, window.outerHeight+60);
+        window.resizeTo(260, window.outerHeight + 60);
         window.moveTo(200, 200);
     });
 });

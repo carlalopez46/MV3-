@@ -382,7 +382,7 @@ var afio = (function () {
                 GlobalErrorLogger.logFileError('AsyncFileIO.callNative', error, {
                     errorCode: GlobalErrorLogger.FILE_ERROR_CODES ? GlobalErrorLogger.FILE_ERROR_CODES.FILE_BACKEND_ERROR : undefined,
                     method: payload ? payload.method : 'unknown',
-                    backend: 'native'
+                    backend: BACKEND_NATIVE
                 });
             }
             return Promise.reject(error);
@@ -398,7 +398,7 @@ var afio = (function () {
                             errorCode: GlobalErrorLogger.FILE_ERROR_CODES ? GlobalErrorLogger.FILE_ERROR_CODES.FILE_TIMEOUT_ERROR : undefined,
                             method: payload.method,
                             timeout: NATIVE_CALL_TIMEOUT,
-                            backend: 'native'
+                            backend: BACKEND_NATIVE
                         });
                     }
                     reject(error);
@@ -416,7 +416,7 @@ var afio = (function () {
                             GlobalErrorLogger.logFileError('AsyncFileIO.callNative.runtimeError', chrome.runtime.lastError, {
                                 errorCode: GlobalErrorLogger.FILE_ERROR_CODES ? GlobalErrorLogger.FILE_ERROR_CODES.FILE_BACKEND_ERROR : undefined,
                                 method: payload.method,
-                                backend: 'native'
+                                backend: BACKEND_NATIVE
                             });
                         }
                         reject(chrome.runtime.lastError);
@@ -426,7 +426,7 @@ var afio = (function () {
                             GlobalErrorLogger.logFileError('AsyncFileIO.callNative.emptyResponse', error, {
                                 errorCode: GlobalErrorLogger.FILE_ERROR_CODES ? GlobalErrorLogger.FILE_ERROR_CODES.FILE_BACKEND_ERROR : undefined,
                                 method: payload.method,
-                                backend: 'native'
+                                backend: BACKEND_NATIVE
                             });
                         }
                         reject(error);
@@ -440,7 +440,7 @@ var afio = (function () {
                             GlobalErrorLogger.logFileError('AsyncFileIO.callNative.nativeError', error, {
                                 errorCode: GlobalErrorLogger.FILE_ERROR_CODES ? GlobalErrorLogger.FILE_ERROR_CODES.FILE_BACKEND_ERROR : undefined,
                                 method: payload.method,
-                                backend: 'native'
+                                backend: BACKEND_NATIVE
                             });
                         }
                         reject(error);
@@ -456,7 +456,7 @@ var afio = (function () {
                         GlobalErrorLogger.logFileError('AsyncFileIO.callNative.exception', err, {
                             errorCode: GlobalErrorLogger.FILE_ERROR_CODES ? GlobalErrorLogger.FILE_ERROR_CODES.FILE_BACKEND_ERROR : undefined,
                             method: payload.method,
-                            backend: 'native'
+                            backend: BACKEND_NATIVE
                         });
                     }
                     reject(err);
@@ -1042,7 +1042,7 @@ var afio = (function () {
 
         try {
             // Use File System Access API if available
-            if (backend === 'filesystem-access' && fsAccess && fsAccess.ready) {
+            if (backend === BACKEND_FILESYSTEM_ACCESS && fsAccess && fsAccess.ready) {
                 const fileContent = await fsAccess.readBinaryFile(node._path);
                 return fileContent; // Returns base64 data URL
             }

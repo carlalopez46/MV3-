@@ -20,7 +20,7 @@ const badge = {
                     return;
                 }
                 for (const win of ws) {
-                    if (win.id == win_id && Array.isArray(win.tabs)) {
+                    if (win.id === win_id && Array.isArray(win.tabs)) {
                         for (const tab of win.tabs) {
                             callback(tab);
                         }
