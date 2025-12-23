@@ -23,7 +23,7 @@ EditArea.prototype.comment_or_quote = function () {
         return "µ__" + new_class + "__µ" + arg.replace(/(\r?\n)?$/m, "µ_END_µ$1");
     } else {
         // the closing tag must be set only if the comment or quotes is closed 
-        reg = new RegExp(parent.editAreaLoader.get_escaped_regexp(close_tag) + "$", "m");
+        var reg = new RegExp(parent.editAreaLoader.get_escaped_regexp(close_tag) + "$", "m");
         if (arg.search(reg) != -1)
             return "µ__" + new_class + "__µ" + arg + "µ_END_µ";
         else
