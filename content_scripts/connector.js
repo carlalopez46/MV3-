@@ -37,16 +37,27 @@ function Connector() {
 }
 
 Connector.prototype.findFrameNumber = function (win, f, obj) {
-    if (win.top == f)         // it is a topmost window
-        return 0;
-    for (var i = 0; i < win.frames.length; i++) {
-        obj.num++;
-        if (win.frames[i] == f) {
-            return obj.num;
+    if (win === f) {
+        return obj.num;
+    }
+
+    try {
+        if (win.top === f)         // it is a topmost window
+            return 0;
+
+        var frames = win.frames;
+        for (var i = 0; i < frames.length; i++) {
+            obj.num++;
+            if (frames[i] === f) {
+                return obj.num;
+            }
+            var n = this.findFrameNumber(frames[i], f, obj);
+            if (n !== -1)
+                return n;
         }
-        var n = this.findFrameNumber(win.frames[i], f, obj);
-        if (n != -1)
-            return n;
+    } catch (e) {
+        // SecurityError or other error during traversal (e.g. cross-origin)
+        // console.debug("Connector.findFrameNumber: Traversal error", e);
     }
     return -1;
 };

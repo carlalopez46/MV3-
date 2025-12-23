@@ -235,21 +235,25 @@ var TagHandler = {
     // find element (relatively) starting from root/lastNode
     // with tagName and atts
     find: function (doc, root, pos, relative, tagName, atts, form_atts) {
-        var xpath = "descendant-or-self", ctx = root, nodes = new Array();
-        // construct xpath expression to get a set of nodes
+        var nodes = new Array();
+        var ctx;
+
         if (relative) {         // is positioning relative?
-            xpath = pos > 0 ? "following" : "preceding";
+            var xpath = pos > 0 ? "following" : "preceding";
             if (!(ctx = this.lastNode) || ctx.ownerDocument != doc)
                 return (this.lastNode = null);
-        }
-        xpath += "::" + tagName;
-        // evaluate XPath
-        var result = doc.evaluate(xpath, ctx, null,
-            XPathResult.ORDERED_NODE_ITERATOR_TYPE,
-            null);
-        var node = null;
-        while (node = result.iterateNext()) {
-            nodes.push(node);
+            xpath += "::" + tagName;
+            // evaluate XPath (standard XPath for relative positioning)
+            var result = doc.evaluate(xpath, ctx, null,
+                XPathResult.ORDERED_NODE_ITERATOR_TYPE,
+                null);
+            var node = null;
+            while (node = result.iterateNext()) {
+                nodes.push(node);
+            }
+        } else {
+            // Use deep collection for absolute POS search to support Shadow DOM
+            nodes = this.collectElementsDeep(doc, tagName);
         }
 
         // Set parameters for the search loop
@@ -285,25 +289,48 @@ var TagHandler = {
         return (this.lastNode = null);
     },
 
+    // Helper to collect all elements of a certain tag name across all Shadow DOMs
+    collectElementsDeep: function (root, tagName) {
+        var elements = [];
+        var tagNameUpper = tagName.toUpperCase();
+
+        // Check the current root (could be Document or ShadowRoot)
+        var roots = [root];
+        var seen = new Set();
+
+        while (roots.length > 0) {
+            var currentRoot = roots.shift();
+            if (seen.has(currentRoot)) continue;
+            seen.add(currentRoot);
+
+            // Get all elements in one pass to find both matches and shadow hosts
+            var allInScope = currentRoot.querySelectorAll('*');
+            for (var i = 0; i < allInScope.length; i++) {
+                var el = allInScope[i];
+                // Check if it matches the tagName
+                if (tagName === "*" || tagName === "" || el.tagName.toUpperCase() === tagNameUpper) {
+                    elements.push(el);
+                }
+                // If it has a shadow root, queue it for exploration
+                if (el.shadowRoot) {
+                    roots.push(el.shadowRoot);
+                }
+            }
+        }
+
+        // Note: For iMacros' absolute POS, we need a consistent order.
+        // Deep collection order might slightly differ from traditional XPath's document order,
+        // but for most cases it will be equivalent.
+        return elements;
+    },
+
 
 
     // find element by XPath starting from root
     // Supports Shadow DOM with ">>" delimiter: host-xpath >> shadow-content-xpath
     findByXPath: function (doc, root, xpath) {
         // Check if this is a Shadow DOM XPath (contains >> outside string literals)
-        var hasShadowDelimiter = false;
-        for (var i = 0, inSingle = false, inDouble = false; i < xpath.length; i++) {
-            var ch = xpath[i];
-            if (ch === "'" && !inDouble) {
-                inSingle = !inSingle;
-            } else if (ch === '"' && !inSingle) {
-                inDouble = !inDouble;
-            } else if (!inSingle && !inDouble && xpath.substr(i, 4) === ' >> ') {
-                hasShadowDelimiter = true;
-                break;
-            }
-        }
-        if (hasShadowDelimiter) {
+        if (this.hasShadowDelimiter(xpath)) {
             return this.findByXPathInShadowDOM(doc, xpath);
         }
 
@@ -328,20 +355,33 @@ var TagHandler = {
         return null;
     },
 
-    // find element by XPath within Shadow DOM
-    // Format: host-xpath >> shadow-content-xpath [ >> nested-shadow-xpath ]
-    findByXPathInShadowDOM: function (doc, shadowXPath) {
-        // Parse >> delimiter while respecting quoted strings
+    // Helper to detect shadow DOM delimiter " >> " while respecting quoted strings
+    hasShadowDelimiter: function (str) {
+        for (var i = 0, inSingle = false, inDouble = false; i < str.length; i++) {
+            var ch = str[i];
+            if (ch === "'" && !inDouble) {
+                inSingle = !inSingle;
+            } else if (ch === '"' && !inSingle) {
+                inDouble = !inDouble;
+            } else if (!inSingle && !inDouble && str.substr(i, 4) === ' >> ') {
+                return true;
+            }
+        }
+        return false;
+    },
+
+    // Helper to split by shadow DOM delimiter " >> " while respecting quoted strings
+    splitByShadowDelimiter: function (str) {
         var parts = [];
         var buffer = "";
-        for (var i = 0, inSingle = false, inDouble = false; i < shadowXPath.length; i++) {
-            var ch = shadowXPath[i];
+        for (var i = 0, inSingle = false, inDouble = false; i < str.length; i++) {
+            var ch = str[i];
             if (ch === "'" && !inDouble) {
                 inSingle = !inSingle;
             } else if (ch === '"' && !inSingle) {
                 inDouble = !inDouble;
             }
-            if (!inSingle && !inDouble && shadowXPath.substr(i, 4) === ' >> ') {
+            if (!inSingle && !inDouble && str.substr(i, 4) === ' >> ') {
                 parts.push(buffer.trim());
                 buffer = "";
                 i += 3; // Skip the ' >> ' delimiter
@@ -350,12 +390,21 @@ var TagHandler = {
             buffer += ch;
         }
         parts.push(buffer.trim());
+        return parts;
+    },
 
+    // find element by XPath within Shadow DOM
+    // Format: host-xpath >> shadow-content-xpath [ >> nested-shadow-xpath ]
+    findByXPathInShadowDOM: function (doc, shadowXPath) {
+        var parts = this.splitByShadowDelimiter(shadowXPath);
         var currentContext = doc;
         var currentElement = null;
 
         for (var i = 0; i < parts.length; i++) {
             var xpathPart = parts[i].trim();
+            if (!xpathPart) {
+                throw new RuntimeError("Empty XPath part in Shadow DOM delimiter: " + shadowXPath, 781);
+            }
 
             try {
                 // Use document.evaluate for ShadowRoot/DocumentFragment compatibility
@@ -393,10 +442,7 @@ var TagHandler = {
                 // If not the last part, navigate into shadow root
                 if (i < parts.length - 1) {
                     if (!currentElement.shadowRoot) {
-                        throw new RuntimeError(
-                            "Element has no shadow root: " + xpathPart,
-                            781
-                        );
+                        return null;
                     }
                     currentContext = currentElement.shadowRoot;
                 }
@@ -415,18 +461,71 @@ var TagHandler = {
     },
 
     // find element by CSS selector
+    // Supports Shadow DOM with " >> " delimiter (MV3 improvement)
     findByCSS: function (doc, selector) {
+        if (this.hasShadowDelimiter(selector)) {
+            return this.findByCSSInShadowDOM(doc, selector);
+        }
+
         try {
             var el = doc.querySelector(selector);
-
-            if (el) {
-                return el;
+            if (!el) {
+                // Fallback for Shadow DOM if not found in light DOM
+                el = this.querySelectorDeep(doc, selector);
             }
+            return el || null;
         } catch (e) {
             throw new RuntimeError("incorrect CSS selector: " + selector, 783);
         }
+    },
 
+    // Helper for deep-searching an element by CSS selector across Shadow DOM boundaries
+    querySelectorDeep: function (root, selector) {
+        var el = root.querySelector(selector);
+        if (el) return el;
+
+        var all = root.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+            if (all[i].shadowRoot) {
+                el = this.querySelectorDeep(all[i].shadowRoot, selector);
+                if (el) return el;
+            }
+        }
         return null;
+    },
+
+    // find element by CSS selector within Shadow DOM
+    // Format: host-selector >> shadow-content-selector [ >> nested-shadow-selector ]
+    findByCSSInShadowDOM: function (doc, shadowSelector) {
+        var parts = this.splitByShadowDelimiter(shadowSelector);
+        var currentContext = doc;
+        var currentElement = null;
+
+        for (var i = 0; i < parts.length; i++) {
+            var selectorPart = parts[i].trim();
+            if (!selectorPart) {
+                throw new RuntimeError("Empty CSS selector part in Shadow DOM delimiter: " + shadowSelector, 783);
+            }
+            // If not the first part, we are inside a shadow root
+            if (i > 0) {
+                currentElement = currentContext.querySelector(selectorPart);
+            } else {
+                currentElement = doc.querySelector(selectorPart);
+            }
+
+            if (!currentElement) {
+                return null;
+            }
+
+            // If not the last part, navigate into shadow root
+            if (i < parts.length - 1) {
+                if (!currentElement.shadowRoot) {
+                    return null;
+                }
+                currentContext = currentElement.shadowRoot;
+            }
+        }
+        return currentElement;
     },
 
 
@@ -1497,6 +1596,17 @@ CSPlayer.prototype.handleTagCommand = function (args, callback) {
                     descriptor = args.xpath;
                 else
                     descriptor = args.selector;
+
+                // Try to infer tagName from selector/xpath if empty
+                if (!args.tagName && descriptor) {
+                    // For CSS selectors, extract the tag before class/id/attribute
+                    var cssMatch = descriptor.match(/^([a-zA-Z][a-zA-Z0-9\-]*)/);
+                    // For XPath, try to find last element name or specific node test
+                    var xpathMatch = descriptor.match(/::([a-zA-Z][a-zA-Z0-9\-]*)(?:\[|$)/);
+                    if (cssMatch) args.tagName = cssMatch[1];
+                    else if (xpathMatch) args.tagName = xpathMatch[1];
+                    else args.tagName = 'element';
+                }
 
                 var msg = "element " + args.tagName.toUpperCase() +
                     " specified by " + descriptor +

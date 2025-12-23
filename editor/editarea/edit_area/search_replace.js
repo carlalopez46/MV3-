@@ -76,6 +76,7 @@ EditArea.prototype.area_search = function (mode) {
 	}
 
 	// interpret result
+	var begin = 0;
 	if (pos == -1 && pos_begin == -1) {
 		_$("area_search_msg").innerHTML = "<strong>" + search + "</strong> " + this.get_translation("not_found");
 		return;
@@ -135,7 +136,8 @@ EditArea.prototype.area_replace_all = function () {
 		if (!_$("area_search_match_case").checked)
 			opt += "i";
 		var reg = new RegExp(search, opt);
-		nb_change = base_text.match(reg).length;
+		var matches = base_text.match(reg);
+		nb_change = matches ? matches.length : 0;
 		new_text = base_text.replace(reg, replace);
 
 	} else {
@@ -153,11 +155,11 @@ EditArea.prototype.area_replace_all = function () {
 			var pos = lower_value.indexOf(lower_search);
 			while (pos != -1) {
 				nb_change++;
-				new_text += this.textarea.value.substring(start, pos) + replace;
+				new_text += base_text.substring(start, pos) + replace;
 				start = pos + search.length;
 				pos = lower_value.indexOf(lower_search, pos + 1);
 			}
-			new_text += this.textarea.value.substring(start);
+			new_text += base_text.substring(start);
 		}
 	}
 	if (new_text == base_text) {

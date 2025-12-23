@@ -1431,8 +1431,10 @@ function setupBrowserEnvironment() {
     sharedSandbox.localStorage = new sharedSandbox.Storage();
     sharedSandbox.sessionStorage = new sharedSandbox.Storage();
 
-    // Provide require() to allowing regression tests to inspect source files
+    // Provide require() to allow regression tests to inspect source files
     sharedSandbox.require = require;
+    // Provide __dirname so test suites can resolve project-relative paths.
+    sharedSandbox.__dirname = __dirname;
 
     logSuccess('Browser environment simulated');
 }

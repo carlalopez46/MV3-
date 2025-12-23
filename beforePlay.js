@@ -9,9 +9,8 @@ function disableDialogButtons() {
     ["play-button", "cancel-button"].forEach((id) => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.style.pointerEvents = "none";
+        el.disabled = true;
         el.style.opacity = "0.6";
-        el.setAttribute("disabled", "true");
     });
 }
 

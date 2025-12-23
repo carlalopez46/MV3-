@@ -43,9 +43,9 @@ function setAttribute(elm, attr, val) {
 */
 function getChildren(elem, elem_type, elem_attribute, elem_attribute_match, option, depth) {
 	if (!option)
-		var option = "single";
+		option = "single";
 	if (!depth)
-		var depth = -1;
+		depth = -1;
 	if (elem) {
 		var children = elem.childNodes;
 		var result = null;
@@ -134,7 +134,7 @@ function get_css_property(elem, prop) {
 		return document.defaultView.getComputedStyle(elem, null).getPropertyValue(prop);
 	}
 	else if (elem.currentStyle) {
-		var prop = prop.replace(/-\D/gi, function (sMatch) {
+		prop = prop.replace(/-\D/gi, function (sMatch) {
 			return sMatch.charAt(sMatch.length - 1).toUpperCase();
 		});
 		return elem.currentStyle[prop];
@@ -306,7 +306,7 @@ function IE_textarea_blur() {
 
 // select the text for IE (take into account the \r difference)
 function set_IE_selection(t) {
-	var nbLineStart, nbLineStart, nbLineEnd, range;
+	var nbLineStart, nbLineEnd, range;
 	if (!window.closed) {
 		nbLineStart = t.value.substr(0, t.selectionStart).split("\n").length - 1;
 		nbLineEnd = t.value.substr(0, t.selectionEnd).split("\n").length - 1;

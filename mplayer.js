@@ -666,7 +666,7 @@ MacroPlayer.prototype.removeListeners = function () {
 };
 
 // Hoisted regexes to avoid recreating them on every isInternalURL invocation.
-var INTERNAL_URL_PATTERN = /^(?:(?:chrome|edge|brave|opera|vivaldi)(?:-(?:extension|untrusted))?|devtools|chrome-search):\/\//i;
+var INTERNAL_URL_PATTERN = /^(?:(?:chrome|edge|brave|opera|vivaldi)(?:-(?:extension|untrusted))?|devtools|chrome-search|imacros):\/\//i;
 var ABOUT_URL_PATTERN = /^about:/i;
 
 /**
@@ -675,8 +675,8 @@ var ABOUT_URL_PATTERN = /^about:/i;
  *
  * @param {string} url - URL to evaluate.
  * @returns {boolean} True when the URL uses a browser-internal or extension
- *   scheme (chrome, edge, brave, opera, vivaldi variants), Chrome devtools or
- *   chrome-search helpers, or an about: URL.
+ *   scheme (chrome, edge, brave, opera, vivaldi variants), Chrome devtools,
+ *   chrome-search helpers, the imacros: scheme, or an about: URL.
  */
 MacroPlayer.prototype.isInternalURL = function (url) {
     if (!url || typeof url !== "string") return false;

@@ -4,8 +4,6 @@ Copyright © 1992-2021 Progress Software Corporation and/or one of its subsidiar
 
 // Context to store browser window-specific information
 
-// Context to store browser window-specific information
-
 // Define global listeners to ensure stable references
 const _globalContextListeners = {
     onCreated: function (w) {
@@ -201,6 +199,7 @@ const context = {
                 clearInterval(context[id].dockInterval);
                 context[id].dockInterval = null;
             }
+            this.unregisterDfHandler(id);
             delete context[id];
         }
     },
@@ -296,8 +295,10 @@ const context = {
 
     on_df: function (dl, suggest) {
         for (let i = 0; i < this.df_handlers.length; i++) {
-            const mplayer = context[this.df_handlers[i]].mplayer;
-            if (mplayer && mplayer.onDeterminingFilename(dl, suggest))
+            const ctx = context[this.df_handlers[i]];
+            // Guard against removed window contexts
+            if (!ctx || !ctx.mplayer) continue;
+            if (ctx.mplayer.onDeterminingFilename(dl, suggest))
                 return;
         }
     }

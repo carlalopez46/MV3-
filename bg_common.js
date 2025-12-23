@@ -157,7 +157,7 @@ function sharedSave(save_data, overwrite, callback) {
     // to choose file location instead of falling back to bookmark storage
     if (Storage.getChar("tree-type") === "files" && !save_data.file_id) {
         globalScope.afioCache.isInstalled().then(function (installed) {
-            if (installed && typeof window !== 'undefined' && window && typeof window.open === 'function') {
+            if (installed) {
                 // Open saveAs dialog to let user choose file location
                 // Use storage + URL key strategy for robust MV3/Offscreen support
                 var dialogKey = 'saveAs_' + Date.now() + '_' + Math.random().toString(36).substring(2, 11);
@@ -171,7 +171,7 @@ function sharedSave(save_data, overwrite, callback) {
                         console.error("[iMacros] Failed to store saveAs args:", chrome.runtime.lastError);
                     }
 
-                    // Use chrome.windows.create if reachable (MV3/SW friendly), fallback to window.open
+                    // Prefer chrome.windows.create when available (SW/offscreen friendly), fallback to window.open
                     if (typeof chrome.windows !== 'undefined' && chrome.windows.create) {
                         const features = {
                             url: "saveAsDialog.html?key=" + dialogKey,
@@ -187,12 +187,9 @@ function sharedSave(save_data, overwrite, callback) {
                         window.open("saveAsDialog.html?key=" + dialogKey, "saveAsDialog", features);
                     } else {
                         console.error("[iMacros] Cannot open save dialog: neither chrome.windows.create nor window.open is available");
-                        // DO NOT fallback to bookmarks here silently; better to fail than save to wrong place
                         if (callback) callback({ error: "Cannot open save dialog" });
                     }
                 });
-
-                // The saveAsDialog will call save() again with file_id set
                 return;
             }
             // If afio is not installed, fall back to bookmark storage
