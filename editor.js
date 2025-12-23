@@ -1,7 +1,7 @@
 /**
  * editor.js (Final Version)
  */
-var Editor = (function() {
+var Editor = (function () {
     'use strict';
     let currPath = null;
     const area = $('#macro-editor-area');
@@ -21,7 +21,7 @@ var Editor = (function() {
             area.val(content);
             $('#editor-filename').text(Utils.getFileName(path));
             status.text('');
-        } catch(e) { alert(e.message); $('#editor-container').hide(); }
+        } catch (e) { alert(e.message); $('#editor-container').hide(); }
     }
 
     async function save() {
@@ -30,17 +30,28 @@ var Editor = (function() {
         try {
             await AsyncFileIO.writeTextFile(currPath, area.val());
             status.text('Saved');
-            setTimeout(()=>status.text(''), 2000);
-        } catch(e) { status.text('Error'); alert(e.message); }
+            setTimeout(() => status.text(''), 2000);
+            return true;
+        } catch (e) {
+            status.text('Error');
+            alert(e.message);
+            return false;
+        }
     }
 
     async function saveAs() {
         const name = prompt("Filename (.iim):", "New.iim");
         if (name) {
+            const oldPath = currPath;
             currPath = "Macros/" + name;
-            await save();
-            $('#editor-filename').text(name);
-            MacroView.refresh();
+            if (await save()) {
+                $('#editor-filename').text(name);
+                if (typeof MacroView !== 'undefined' && MacroView.refresh) {
+                    MacroView.refresh();
+                }
+            } else {
+                currPath = oldPath;
+            }
         }
     }
 

@@ -135,7 +135,8 @@ EditArea.prototype.area_replace_all = function () {
 		if (!_$("area_search_match_case").checked)
 			opt += "i";
 		var reg = new RegExp(search, opt);
-		nb_change = base_text.match(reg).length;
+		var matches = base_text.match(reg);
+		nb_change = matches ? matches.length : 0;
 		new_text = base_text.replace(reg, replace);
 
 	} else {
