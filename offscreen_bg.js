@@ -2173,7 +2173,7 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         }
         var mplayer = context[win_id].mplayer;
         sendResponse({ success: true, isPaused: mplayer && mplayer.paused });
-        return true; // async response
+        return false; // Response sent synchronously
     }
 
 
