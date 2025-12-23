@@ -40,6 +40,15 @@ function createRequestId() {
 
 console.log('[iMacros Offscreen] Instance ID:', OFFSCREEN_INSTANCE_ID);
 
+// Initialize SecurityManager
+if (typeof SecurityManager !== 'undefined' && typeof SecurityManager.init === 'function') {
+    SecurityManager.init().then(key => {
+        console.info("[offscreen_bg.js] SecurityManager initialized.");
+    }).catch(err => {
+        console.error("[offscreen_bg.js] Failed to initialize SecurityManager:", err);
+    });
+}
+
 function notifyAsyncError(win_id, message) {
     if (typeof notifyPanelStatLine === 'function') {
         notifyPanelStatLine(win_id, message, "error");

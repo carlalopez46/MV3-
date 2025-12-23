@@ -121,7 +121,7 @@ EditAreaLoader.prototype = {
 
 	// add browser informations to the object passed in parameter
 	set_browser_infos: function (o) {
-		ua = navigator.userAgent;
+		var ua = navigator.userAgent;
 
 		// general detection
 		o.isWebKit = /WebKit/.test(ua);
@@ -802,7 +802,7 @@ EditAreaLoader.prototype = {
 			}
 		}
 		if (typeof (formObj.edit_area_replaced_submit) == "function") {
-			res = formObj.edit_area_replaced_submit();
+			var res = formObj.edit_area_replaced_submit();
 			if (res == false) {
 				if (editAreaLoader.isIE)
 					return false;
@@ -915,7 +915,7 @@ EditAreaLoader.prototype = {
 		var old_sel, new_sel;
 
 		old_sel = this.getSelectionRange(id);
-		text = open_tag + this.getSelectedText(id) + close_tag;
+		var text = open_tag + this.getSelectedText(id) + close_tag;
 
 		editAreaLoader.setSelectedText(id, text);
 

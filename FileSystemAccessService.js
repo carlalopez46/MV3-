@@ -1124,7 +1124,7 @@ class FileSystemAccessService {
                 try {
                     handler(data);
                 } catch (err) {
-                    console.error(`Error in ${event} handler:`, err);
+                    fsAccessLogError(`FileSystemAccessService.${event} handler`, err);
                 }
             });
         }

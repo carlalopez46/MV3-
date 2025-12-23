@@ -38,6 +38,15 @@ if (typeof registerSharedBackgroundHandlers === 'function') {
     console.error("registerSharedBackgroundHandlers is not available; shared background handlers not registered");
 }
 
+// Initialize SecurityManager
+if (typeof SecurityManager !== 'undefined' && typeof SecurityManager.init === 'function') {
+    SecurityManager.init().then(key => {
+        console.info("[bg.js] SecurityManager initialized.");
+    }).catch(err => {
+        console.error("[bg.js] Failed to initialize SecurityManager:", err);
+    });
+}
+
 // called from panel
 // we use it to find and set win_id for that panel
 // NOTE: unfortnunately, it seems there is no more straightforward way
