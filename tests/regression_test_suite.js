@@ -274,7 +274,7 @@
     /**
      * Run all regression tests
      */
-    function run() {
+    async function run() {
         // Reset results to ensure accurate counts on each execution
         results.passed = 0;
         results.failed = 0;
@@ -296,10 +296,17 @@
         log('');
 
         return {
-            passed: results.passed,
-            failed: results.failed,
-            skipped: results.skipped,
-            results: testResults
+            results: {
+                passed: results.passed,
+                failed: results.failed,
+                skipped: results.skipped
+            },
+            errors: {
+                errors: testResults.filter(r => r.status === 'failed').map(r => ({
+                    context: r.name,
+                    message: r.message
+                }))
+            }
         };
     }
 

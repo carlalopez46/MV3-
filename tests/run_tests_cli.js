@@ -1431,6 +1431,9 @@ function setupBrowserEnvironment() {
     sharedSandbox.localStorage = new sharedSandbox.Storage();
     sharedSandbox.sessionStorage = new sharedSandbox.Storage();
 
+    // Provide require() to allowing regression tests to inspect source files
+    sharedSandbox.require = require;
+
     logSuccess('Browser environment simulated');
 }
 
@@ -1441,6 +1444,7 @@ function loadSourceFiles() {
     const baseDir = path.join(__dirname, '..');
     const sourceFiles = [
         'utils.js',
+        'communicator.js',
         'macro_execution_guard.js',
         'security_utils.js',
         'download_correlation.js',
@@ -1495,7 +1499,8 @@ function loadSourceFiles() {
         'VirtualFileService',
         'AsyncFileIO',
         'GlobalErrorLogger',
-        'afio'
+        'afio',
+        'communicator'
     ];
 
     const promoteScript = new vm.Script(`
